@@ -1,0 +1,107 @@
+# ============================================================
+# TeleCRM Backend — .gitignore
+# ============================================================
+
+# ---- Python ------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- Virtual Environment -----------------------------------
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ---- Django ------------------------------------------------
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Media files (uploaded by users — stored in S3, not git)
+media/
+
+# Static files collected
+staticfiles/
+
+# ---- Environment -------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---- Testing -----------------------------------------------
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+pytest.ini.local
+coverage.xml
+*.cover
+*.coveralls
+
+# ---- IDEs & Editors ----------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---- Docker ------------------------------------------------
+.docker/
+
+# ---- Node (for any frontend tooling) ----------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---- AWS ---------------------------------------------------
+.aws/
+*.pem
+
+# ---- Celery ------------------------------------------------
+celerybeat-schedule
+celerybeat.pid
+
+# ---- Jupyter (if used for data analysis) ------------------
+.ipynb_checkpoints
+*.ipynb
+
+# ---- Type checking -----------------------------------------
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+
+# ---- Misc --------------------------------------------------
+*.bak
+*.tmp
+*.temp
+*.orig

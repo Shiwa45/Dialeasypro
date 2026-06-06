@@ -1,0 +1,114 @@
+version: '3.9'
+
+services:
+  # ---- Redis for cache, broker, and channels -------------------
+  redis:
+    image: redis:7-alpine
+    container_name: telecrm_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - telecrm_network
+
+  # ---- Django Web Application (Gunicorn ASGI) ------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: telecrm_web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.production
+      - REDIS_HOST=redis
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    networks:
+      - telecrm_network
+
+  # ---- Celery Worker -------------------------------------------
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: telecrm_celery_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.production
+      - REDIS_HOST=redis
+    command: >
+      celery -A config.celery worker
+      --loglevel=info
+      --concurrency=4
+      -Q default,bulk_ops,notifications,integrations,call_uploads
+      --hostname=worker@%h
+    depends_on:
+      - redis
+    networks:
+      - telecrm_network
+
+  # ---- Celery Beat ---------------------------------------------
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: telecrm_celery_beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.production
+      - REDIS_HOST=redis
+    command: >
+      celery -A config.celery beat
+      --loglevel=info
+      --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    depends_on:
+      - redis
+    networks:
+      - telecrm_network
+
+  # ---- Nginx reverse proxy ------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: telecrm_nginx
+    restart: unless-stopped
+    volumes:
+      - ./docker/nginx/prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_files:/app/staticfiles:ro
+      - media_files:/app/mediafiles:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - web
+    networks:
+      - telecrm_network
+
+volumes:
+  redis_data:
+    driver: local
+  static_files:
+    driver: local
+  media_files:
+    driver: local
+
+networks:
+  telecrm_network:
+    driver: bridge

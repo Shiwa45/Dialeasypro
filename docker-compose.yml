@@ -1,0 +1,213 @@
+version: '3.9'
+
+# ============================================================
+# TeleCRM Backend — docker-compose.yml
+# Development environment
+# Usage: docker compose up --build
+# ============================================================
+
+services:
+
+  # ---- PostgreSQL 16 Database ----------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: telecrm_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: telecrm_db
+      POSTGRES_USER: telecrm_user
+      POSTGRES_PASSWORD: telecrm_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telecrm_user -d telecrm_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - telecrm_network
+
+  # ---- Redis 7 (Celery Broker + Cache) -------------------
+  redis:
+    image: redis:7-alpine
+    container_name: telecrm_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --requirepass telecrm_redis_password
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "telecrm_redis_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - telecrm_network
+
+  # ---- Django Web Application (ASGI via Daphne) ----------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: telecrm_web
+    restart: unless-stopped
+    command: >
+      sh -c "
+        python manage.py migrate_schemas --shared &&
+        python manage.py collectstatic --no-input &&
+        daphne -b 0.0.0.0 -p 8000 config.asgi:application
+      "
+    volumes:
+      - .:/app
+      - static_files:/app/staticfiles
+      - media_files:/app/mediafiles
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+      - DB_HOST=db
+      - REDIS_URL=redis://:telecrm_redis_password@redis:6379/0
+      - CELERY_BROKER_URL=redis://:telecrm_redis_password@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:telecrm_redis_password@redis:6379/2
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - telecrm_network
+
+  # ---- Celery Worker (Async Task Processing) -------------
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: telecrm_celery_worker
+    restart: unless-stopped
+    command: >
+      celery -A config.celery worker
+      --loglevel=info
+      --concurrency=4
+      -Q default,bulk_ops,notifications,integrations,call_uploads
+      --hostname=worker@%h
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+      - DB_HOST=db
+      - REDIS_URL=redis://:telecrm_redis_password@redis:6379/0
+      - CELERY_BROKER_URL=redis://:telecrm_redis_password@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:telecrm_redis_password@redis:6379/2
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - telecrm_network
+
+  # ---- Celery Beat (Scheduled Tasks) ----------------------
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: telecrm_celery_beat
+    restart: unless-stopped
+    command: >
+      celery -A config.celery beat
+      --loglevel=info
+      --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+      - DB_HOST=db
+      - REDIS_URL=redis://:telecrm_redis_password@redis:6379/0
+      - CELERY_BROKER_URL=redis://:telecrm_redis_password@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:telecrm_redis_password@redis:6379/2
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
+    networks:
+      - telecrm_network
+
+  # ---- Flower (Celery Monitoring UI) ----------------------
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: telecrm_flower
+    restart: unless-stopped
+    command: >
+      celery -A config.celery flower
+      --port=5555
+      --basic_auth=admin:flowerpassword
+    volumes:
+      - .:/app
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+      - CELERY_BROKER_URL=redis://:telecrm_redis_password@redis:6379/1
+    depends_on:
+      - celery_worker
+    networks:
+      - telecrm_network
+
+  # ---- Nginx (Reverse Proxy) ------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: telecrm_nginx
+    restart: unless-stopped
+    volumes:
+      - ./docker/nginx/dev.conf:/etc/nginx/conf.d/default.conf
+      - static_files:/staticfiles:ro
+      - media_files:/mediafiles:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - web
+    networks:
+      - telecrm_network
+
+# ---- Named Volumes ----------------------------------------
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  static_files:
+    driver: local
+  media_files:
+    driver: local
+
+# ---- Networks ---------------------------------------------
+networks:
+  telecrm_network:
+    driver: bridge

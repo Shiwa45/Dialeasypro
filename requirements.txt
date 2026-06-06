@@ -1,0 +1,98 @@
+# ============================================================
+# TeleCRM Backend — requirements.txt
+# Python 3.12+ required
+# ============================================================
+
+# --------------- Core Django --------------------------------
+Django==5.1.4
+django-tenants==3.7.0
+psycopg2-binary==2.9.10
+
+# --------------- Django REST Framework ----------------------
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.6.0
+django-filter==24.3
+
+# --------------- Task Queue (Celery + Redis) ----------------
+celery==5.4.0
+redis==5.2.1
+django-celery-beat==2.7.0
+django-celery-results==2.5.1
+kombu==5.4.2
+
+# --------------- Async / WebSocket (Channels) ---------------
+channels==4.1.0
+channels-redis==4.2.1
+daphne==4.1.2
+
+# --------------- Authentication & Security ------------------
+cryptography==44.0.0
+argon2-cffi==23.1.0
+PyJWT==2.10.1
+
+# --------------- Storage (AWS S3) ---------------------------
+boto3==1.35.97
+django-storages==1.14.4
+Pillow==11.0.0
+
+# --------------- Cloudinary (call recordings) ---------------
+cloudinary==1.41.0
+
+# --------------- Environment & Config -----------------------
+python-decouple==3.8
+python-dotenv==1.0.1
+
+# --------------- Excel / CSV Processing ---------------------
+openpyxl==3.1.5
+pandas==2.2.3
+
+# --------------- Admin UI Theme (Unfold) --------------------
+django-unfold==0.44.0
+
+# --------------- Payments (Razorpay India) ------------------
+razorpay==1.4.2
+
+# --------------- HTTP Clients -------------------------------
+requests==2.32.3
+httpx==0.28.1
+
+# --------------- Phone Number Validation --------------------
+phonenumbers==8.13.52
+django-phonenumber-field==8.0.0
+
+# --------------- Email HTML Generation ----------------------
+premailer==3.10.0
+
+# --------------- Monitoring & Logging -----------------------
+sentry-sdk==2.19.2
+django-extensions==3.2.3
+
+# --------------- Utilities ----------------------------------
+Faker==33.1.0
+
+# --------------- WhiteNoise (Static Files) ------------------
+whitenoise==6.8.2
+
+# ============================================================
+# Development & Testing (also install these in dev)
+# ============================================================
+# pip install -r requirements-dev.txt
+
+# --------------- Dev Tools (requirements-dev.txt) -----------
+# django-debug-toolbar==4.4.6
+# pytest==8.3.4
+# pytest-django==4.9.0
+# pytest-cov==6.0.0
+# pytest-asyncio==0.25.0
+# factory-boy==3.3.1
+# black==24.10.0
+# isort==5.13.2
+# flake8==7.1.1
+# pre-commit==4.0.1
+# flower==2.0.1
+# ipython==8.30.0
+
+# Production server
+gunicorn==22.0.0
+uvicorn[standard]==0.30.1

@@ -1,0 +1,87 @@
+name: dialeasypro
+description: DialEasypro — Auto-Dialer CRM for Sales Agents
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+  flutter: ">=3.16.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ---- Networking ----
+  dio: ^5.4.0
+  pretty_dio_logger: ^1.3.1
+
+  # ---- State Management ----
+  flutter_riverpod: ^2.5.1
+
+  # ---- Navigation ----
+  go_router: ^13.2.0
+
+  # ---- Storage ----
+  flutter_secure_storage: ^9.0.0
+  shared_preferences: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # ---- UI ----
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.0
+  shimmer: ^3.0.0
+  flutter_svg: ^2.0.10+1
+  lottie: ^3.1.2
+  fl_chart: ^0.68.0
+
+  # ---- DIRECT DIALING (no system dialer screen) ----
+  flutter_phone_direct_caller: ^2.1.1
+
+  # ---- PERMISSIONS ----
+  permission_handler: ^11.3.1
+
+  # ---- CALL STATE ----
+  phone_state: ^3.0.1
+
+  # ---- AUDIO (voice notes) ----
+  record: ^6.2.1
+  audioplayers: ^6.0.0
+  path_provider: ^2.1.4
+
+  # ---- OFFICIAL WHATSAPP LAUNCH ----
+  url_launcher: ^6.3.0
+
+  # ---- CLOUDINARY UPLOAD ----
+  cloudinary_public: ^0.23.1
+
+  # ---- DEVICE ----
+  wakelock_plus: ^1.2.5         # Keep screen on during calls
+  vibration: ^2.0.0             # Haptic feedback
+  device_info_plus: ^10.1.0
+  package_info_plus: ^8.0.0
+  connectivity_plus: ^6.0.3
+
+  # ---- NOTIFICATIONS ----
+  flutter_local_notifications: ^17.2.1+2
+  timezone: ^0.9.4
+
+  # ---- UTILS ----
+  intl: ^0.19.0
+  timeago: ^3.6.1
+  uuid: ^4.4.0
+
+  # ---- ICONS ----
+  cupertino_icons: ^1.0.8
+  iconsax: ^0.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/lottie/

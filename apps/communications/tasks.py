@@ -1,0 +1,617 @@
+"""
+TeleCRM Backend — apps/communications/tasks.py
+
+Celery tasks for bulk and single-message communication.
+
+send_bulk_whatsapp_campaign  : Fan out WhatsApp messages for a campaign
+send_bulk_email_campaign     : Fan out emails for a campaign
+send_bulk_sms_campaign       : Fan out SMS for a campaign
+send_single_whatsapp         : Send one WhatsApp message
+send_single_sms              : Send one SMS
+update_whatsapp_delivery     : Process provider delivery webhook
+"""
+import logging
+from datetime import timedelta
+
+from celery import shared_task
+from django.utils import timezone
+
+from apps.core.tasks import TenantAwareTask
+
+logger = logging.getLogger(__name__)
+
+# ---- Daily per-channel rate limits (enforced per tenant by plan) ----
+CHUNK_SIZE = 50          # messages per Celery sub-task
+INTER_CHUNK_DELAY = 2    # seconds between chunks (avoid provider throttle)
+
+
+# ============================================================
+# WhatsApp Campaigns
+# ============================================================
+
+@shared_task(base=TenantAwareTask, bind=True, time_limit=7200)
+def send_bulk_whatsapp_campaign(self, schema_name: str, campaign_id: str):
+    """
+    Main coordinator for a WhatsApp bulk campaign.
+    Resolves audience → chunks leads → spawns send_whatsapp_chunk sub-tasks.
+    """
+    from apps.communications.models import BulkCampaign, CampaignRecipient
+    from apps.leads.models import Lead
+
+    try:
+        campaign = BulkCampaign.objects.get(pk=campaign_id)
+    except BulkCampaign.DoesNotExist:
+        logger.error(f"[WA Campaign] {campaign_id} not found in {schema_name}")
+        return
+
+    # Mark as running
+    campaign.status = "running"
+    campaign.started_at = timezone.now()
+    campaign.save(update_fields=["status", "started_at"])
+
+    try:
+        # Resolve audience
+        leads = _resolve_campaign_audience(campaign)
+
+        # Check plan limit
+        _check_daily_whatsapp_limit(schema_name, len(leads))
+
+        # Create recipient rows (bulk)
+        recipients = [
+            CampaignRecipient(
+                campaign=campaign,
+                lead=lead,
+                phone=lead.phone,
+                status="pending",
+            )
+            for lead in leads
+            if not lead.is_dnd  # Skip DND numbers
+        ]
+        CampaignRecipient.objects.bulk_create(recipients, ignore_conflicts=True)
+
+        campaign.total_recipients = len(recipients)
+        campaign.save(update_fields=["total_recipients"])
+
+        # Dispatch chunks
+        recipient_ids = list(
+            CampaignRecipient.objects.filter(
+                campaign=campaign, status="pending"
+            ).values_list("id", flat=True)
+        )
+
+        for i, chunk_start in enumerate(range(0, len(recipient_ids), CHUNK_SIZE)):
+            chunk = recipient_ids[chunk_start:chunk_start + CHUNK_SIZE]
+            send_whatsapp_chunk.apply_async(
+                args=[schema_name, campaign_id, chunk],
+                countdown=i * INTER_CHUNK_DELAY,
+                queue="bulk_ops",
+            )
+
+        logger.info(
+            f"[WA Campaign] {campaign.name} dispatched "
+            f"{len(recipient_ids)} messages in {len(recipient_ids)//CHUNK_SIZE + 1} chunks"
+        )
+
+    except Exception as exc:
+        logger.error(f"[WA Campaign] Failed: {exc}", exc_info=True)
+        campaign.status = "failed"
+        campaign.save(update_fields=["status"])
+        raise
+
+
+@shared_task(base=TenantAwareTask, bind=True, max_retries=2)
+def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids: list):
+    """
+    Send WhatsApp messages to a chunk of recipients.
+    Updates CampaignRecipient rows with delivery status.
+    """
+    from apps.communications.models import BulkCampaign, CampaignRecipient, WhatsAppMessage
+    from apps.leads.models import LeadActivity
+
+    try:
+        campaign = BulkCampaign.objects.select_related("template").get(pk=campaign_id)
+        recipients = CampaignRecipient.objects.filter(
+            id__in=recipient_ids
+        ).select_related("lead")
+    except Exception as exc:
+        logger.error(f"[WA Chunk] Setup failed: {exc}")
+        return
+
+    provider_service = _get_whatsapp_provider(campaign.template.provider if campaign.template else "interakt")
+
+    sent, failed = 0, 0
+    for recipient in recipients:
+        try:
+            # Render template with lead variables
+            rendered_body = (
+                campaign.template.render(recipient.lead)
+                if campaign.template else ""
+            )
+
+            # Call provider API
+            message_id = provider_service.send_template(
+                phone=recipient.phone,
+                template_id=campaign.template.provider_template_id if campaign.template else "",
+                variables=_extract_variables(campaign.template, recipient.lead),
+            )
+
+            # Save WhatsApp message record
+            msg = WhatsAppMessage.objects.create(
+                lead=recipient.lead,
+                direction="outbound",
+                message_type="template",
+                content=rendered_body,
+                template=campaign.template,
+                provider=campaign.template.provider if campaign.template else "interakt",
+                provider_message_id=message_id,
+                status="sent",
+                sent_at=timezone.now(),
+                campaign=campaign,
+            )
+
+            recipient.status = "sent"
+            recipient.provider_message_id = message_id
+            recipient.sent_at = timezone.now()
+            recipient.save(update_fields=["status", "provider_message_id", "sent_at"])
+
+            # Activity log on lead
+            LeadActivity.objects.create(
+                lead=recipient.lead,
+                activity_type="whatsapp",
+                description=f"WhatsApp sent via campaign: {campaign.name}",
+                meta={"campaign_id": str(campaign_id), "message_id": str(msg.id)},
+            )
+            sent += 1
+
+        except Exception as exc:
+            logger.warning(f"[WA Chunk] Failed for {recipient.phone}: {exc}")
+            recipient.status = "failed"
+            recipient.error_message = str(exc)[:500]
+            recipient.save(update_fields=["status", "error_message"])
+            failed += 1
+
+    # Update campaign counters atomically
+    from django.db.models import F
+    BulkCampaign.objects.filter(pk=campaign_id).update(
+        sent_count=F("sent_count") + sent,
+        failed_count=F("failed_count") + failed,
+    )
+
+    # Check if campaign is complete
+    _check_campaign_completion(campaign_id)
+
+
+# ============================================================
+# Email Campaigns
+# ============================================================
+
+@shared_task(base=TenantAwareTask, bind=True, time_limit=7200)
+def send_bulk_email_campaign(self, schema_name: str, campaign_id: str):
+    """Coordinator for bulk email campaign."""
+    from apps.communications.models import BulkCampaign, CampaignRecipient
+
+    try:
+        campaign = BulkCampaign.objects.get(pk=campaign_id)
+    except BulkCampaign.DoesNotExist:
+        return
+
+    campaign.status = "running"
+    campaign.started_at = timezone.now()
+    campaign.save(update_fields=["status", "started_at"])
+
+    try:
+        leads = _resolve_campaign_audience(campaign)
+        recipients = [
+            CampaignRecipient(campaign=campaign, lead=lead, phone=lead.phone, status="pending")
+            for lead in leads if lead.email
+        ]
+        CampaignRecipient.objects.bulk_create(recipients, ignore_conflicts=True)
+        campaign.total_recipients = len(recipients)
+        campaign.save(update_fields=["total_recipients"])
+
+        recipient_ids = list(
+            CampaignRecipient.objects.filter(campaign=campaign, status="pending")
+            .values_list("id", flat=True)
+        )
+        for i, chunk_start in enumerate(range(0, len(recipient_ids), CHUNK_SIZE)):
+            chunk = recipient_ids[chunk_start:chunk_start + CHUNK_SIZE]
+            send_email_chunk.apply_async(
+                args=[schema_name, campaign_id, chunk],
+                countdown=i * INTER_CHUNK_DELAY,
+                queue="bulk_ops",
+            )
+    except Exception as exc:
+        campaign.status = "failed"
+        campaign.save(update_fields=["status"])
+        raise
+
+
+@shared_task(base=TenantAwareTask, bind=True, max_retries=2)
+def send_email_chunk(self, schema_name: str, campaign_id: str, recipient_ids: list):
+    """Send emails to a chunk of recipients."""
+    from apps.communications.models import BulkCampaign, CampaignRecipient, EmailLog
+    from django.core.mail import send_mail
+    from django.db.models import F
+
+    try:
+        campaign = BulkCampaign.objects.get(pk=campaign_id)
+        recipients = CampaignRecipient.objects.filter(
+            id__in=recipient_ids
+        ).select_related("lead")
+    except Exception as exc:
+        logger.error(f"[Email Chunk] Setup failed: {exc}")
+        return
+
+    sent, failed = 0, 0
+    for recipient in recipients:
+        lead = recipient.lead
+        if not lead.email:
+            recipient.status = "skipped"
+            recipient.error_message = "No email address"
+            recipient.save(update_fields=["status", "error_message"])
+            continue
+        try:
+            from apps.core.utils import render_template_with_variables
+            subject = render_template_with_variables(
+                campaign.email_subject, {"name": lead.name, "city": lead.city}
+            )
+            body = render_template_with_variables(
+                campaign.email_body, {"name": lead.name, "city": lead.city, "phone": lead.phone}
+            )
+            send_mail(
+                subject=subject,
+                message=body,
+                from_email=None,  # Uses DEFAULT_FROM_EMAIL
+                recipient_list=[lead.email],
+                fail_silently=False,
+            )
+            EmailLog.objects.create(
+                lead=lead, campaign=campaign, to_email=lead.email,
+                subject=subject, body=body, status="sent", sent_at=timezone.now(),
+            )
+            recipient.status = "sent"
+            recipient.sent_at = timezone.now()
+            recipient.save(update_fields=["status", "sent_at"])
+            sent += 1
+        except Exception as exc:
+            logger.warning(f"[Email Chunk] Failed for {lead.email}: {exc}")
+            recipient.status = "failed"
+            recipient.error_message = str(exc)[:500]
+            recipient.save(update_fields=["status", "error_message"])
+            failed += 1
+
+    BulkCampaign.objects.filter(pk=campaign_id).update(
+        sent_count=F("sent_count") + sent,
+        failed_count=F("failed_count") + failed,
+    )
+    _check_campaign_completion(campaign_id)
+
+
+# ============================================================
+# SMS Campaigns
+# ============================================================
+
+@shared_task(base=TenantAwareTask, bind=True, time_limit=7200)
+def send_bulk_sms_campaign(self, schema_name: str, campaign_id: str):
+    """Coordinator for bulk SMS campaign. Enforces TRAI DND."""
+    from apps.communications.models import BulkCampaign, CampaignRecipient
+
+    try:
+        campaign = BulkCampaign.objects.get(pk=campaign_id)
+    except BulkCampaign.DoesNotExist:
+        return
+
+    campaign.status = "running"
+    campaign.started_at = timezone.now()
+    campaign.save(update_fields=["status", "started_at"])
+
+    try:
+        leads = _resolve_campaign_audience(campaign)
+        # Filter: skip DND-registered numbers for SMS (TRAI regulation)
+        eligible = [l for l in leads if not l.is_dnd]
+        skipped_dnd = len(leads) - len(eligible)
+        if skipped_dnd:
+            logger.info(f"[SMS Campaign] Skipped {skipped_dnd} DND-registered leads")
+
+        recipients = [
+            CampaignRecipient(campaign=campaign, lead=lead, phone=lead.phone, status="pending")
+            for lead in eligible
+        ]
+        CampaignRecipient.objects.bulk_create(recipients, ignore_conflicts=True)
+        campaign.total_recipients = len(recipients)
+        campaign.save(update_fields=["total_recipients"])
+
+        recipient_ids = list(
+            CampaignRecipient.objects.filter(campaign=campaign, status="pending")
+            .values_list("id", flat=True)
+        )
+        for i, chunk_start in enumerate(range(0, len(recipient_ids), CHUNK_SIZE)):
+            chunk = recipient_ids[chunk_start:chunk_start + CHUNK_SIZE]
+            send_sms_chunk.apply_async(
+                args=[schema_name, campaign_id, chunk],
+                countdown=i * INTER_CHUNK_DELAY,
+                queue="bulk_ops",
+            )
+    except Exception as exc:
+        campaign.status = "failed"
+        campaign.save(update_fields=["status"])
+        raise
+
+
+@shared_task(base=TenantAwareTask, bind=True, max_retries=2)
+def send_sms_chunk(self, schema_name: str, campaign_id: str, recipient_ids: list):
+    """Send SMS to a chunk of recipients via configured provider."""
+    from apps.communications.models import BulkCampaign, CampaignRecipient, SMSLog
+    from django.db.models import F
+
+    try:
+        campaign = BulkCampaign.objects.get(pk=campaign_id)
+        recipients = CampaignRecipient.objects.filter(
+            id__in=recipient_ids
+        ).select_related("lead")
+    except Exception as exc:
+        logger.error(f"[SMS Chunk] Setup failed: {exc}")
+        return
+
+    sms_service = _get_sms_provider()
+    sent, failed = 0, 0
+
+    for recipient in recipients:
+        lead = recipient.lead
+        try:
+            from apps.core.utils import render_template_with_variables
+            message = render_template_with_variables(
+                campaign.sms_text, {"name": lead.name, "city": lead.city}
+            )
+            msg_id = sms_service.send(
+                phone=recipient.phone,
+                message=message,
+                sender_id=campaign.sms_sender_id,
+            )
+            SMSLog.objects.create(
+                lead=lead, campaign=campaign,
+                phone_number=recipient.phone, message=message,
+                sender_id=campaign.sms_sender_id,
+                status="sent", sent_at=timezone.now(),
+                provider_message_id=msg_id,
+            )
+            recipient.status = "sent"
+            recipient.sent_at = timezone.now()
+            recipient.provider_message_id = msg_id
+            recipient.save(update_fields=["status", "sent_at", "provider_message_id"])
+            sent += 1
+        except Exception as exc:
+            logger.warning(f"[SMS Chunk] Failed for {recipient.phone}: {exc}")
+            recipient.status = "failed"
+            recipient.error_message = str(exc)[:500]
+            recipient.save(update_fields=["status", "error_message"])
+            failed += 1
+
+    BulkCampaign.objects.filter(pk=campaign_id).update(
+        sent_count=F("sent_count") + sent,
+        failed_count=F("failed_count") + failed,
+    )
+    _check_campaign_completion(campaign_id)
+
+
+# ============================================================
+# Single message tasks
+# ============================================================
+
+@shared_task(base=TenantAwareTask, bind=True, max_retries=3)
+def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
+                          template_id: int = None, sent_by_id: int = None):
+    """Send a single WhatsApp message to one lead (click-to-send from lead detail)."""
+    from apps.communications.models import WhatsAppMessage, WhatsAppTemplate
+    from apps.leads.models import Lead, LeadActivity
+
+    try:
+        lead = Lead.objects.get(pk=lead_id, is_deleted=False)
+        template = WhatsAppTemplate.objects.get(pk=template_id) if template_id else None
+        sent_by = None
+        if sent_by_id:
+            from apps.authentication.models import Agent
+            sent_by = Agent.objects.filter(pk=sent_by_id).first()
+
+        provider_service = _get_whatsapp_provider(template.provider if template else "interakt")
+
+        if template:
+            msg_id = provider_service.send_template(
+                phone=lead.phone,
+                template_id=template.provider_template_id,
+                variables=_extract_variables(template, lead),
+            )
+        else:
+            msg_id = provider_service.send_text(phone=lead.phone, message=message)
+
+        WhatsAppMessage.objects.create(
+            lead=lead, sent_by=sent_by, direction="outbound",
+            message_type="template" if template else "text",
+            content=message, template=template,
+            provider=template.provider if template else "interakt",
+            provider_message_id=msg_id, status="sent", sent_at=timezone.now(),
+        )
+        LeadActivity.objects.create(
+            lead=lead, activity_type="whatsapp",
+            description=f"WhatsApp sent: {message[:80]}",
+            performed_by=sent_by,
+        )
+        lead.log_contact(contact_type="whatsapp")
+        logger.info(f"[WA] Sent to {lead.phone} ({schema_name})")
+
+    except Exception as exc:
+        logger.error(f"[WA Single] Failed: {exc}")
+        raise self.retry(exc=exc, countdown=30 * (self.request.retries + 1))
+
+
+@shared_task(base=TenantAwareTask, bind=True, max_retries=3)
+def send_single_sms(self, schema_name: str, lead_id: int, message: str,
+                    sender_id: str = "", sent_by_id: int = None):
+    """Send a single SMS to one lead."""
+    from apps.communications.models import SMSLog
+    from apps.leads.models import Lead, LeadActivity
+
+    try:
+        lead = Lead.objects.get(pk=lead_id, is_deleted=False)
+        if lead.is_dnd:
+            logger.warning(f"[SMS] Skipped DND lead {lead_id}")
+            return
+
+        sms_service = _get_sms_provider()
+        msg_id = sms_service.send(phone=lead.phone, message=message, sender_id=sender_id)
+
+        sent_by = None
+        if sent_by_id:
+            from apps.authentication.models import Agent
+            sent_by = Agent.objects.filter(pk=sent_by_id).first()
+
+        SMSLog.objects.create(
+            lead=lead, phone_number=lead.phone, message=message,
+            sender_id=sender_id, status="sent", sent_at=timezone.now(),
+            provider_message_id=msg_id,
+        )
+        LeadActivity.objects.create(
+            lead=lead, activity_type="sms",
+            description=f"SMS sent: {message[:80]}",
+            performed_by=sent_by,
+        )
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=30 * (self.request.retries + 1))
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def _resolve_campaign_audience(campaign):
+    """Resolve campaign audience_filters to a queryset of leads."""
+    from apps.leads.models import Lead
+    from django.db.models import Q
+
+    qs = Lead.objects.filter(is_deleted=False)
+    filters = campaign.audience_filters or {}
+
+    if status := filters.get("status"):
+        qs = qs.filter(status=status)
+    if city := filters.get("city"):
+        qs = qs.filter(city__icontains=city)
+    if source := filters.get("source"):
+        qs = qs.filter(source=source)
+    if assigned_to := filters.get("assigned_to"):
+        qs = qs.filter(assigned_to_id=assigned_to)
+    if tags := filters.get("tags"):
+        for tag in tags:
+            qs = qs.filter(tags__contains=tag)
+
+    return list(qs)
+
+
+def _check_daily_whatsapp_limit(schema_name: str, count: int):
+    """Verify tenant hasn't exceeded daily WhatsApp limit."""
+    from apps.plans.models import Subscription
+    from apps.core.constants import SubscriptionStatus
+    from apps.core.exceptions import PlanLimitExceededException
+
+    try:
+        sub = Subscription.objects.filter(
+            status__in=SubscriptionStatus.ACTIVE_STATUSES
+        ).select_related("plan").first()
+        if not sub:
+            return
+        today_sent = 0  # TODO: count from WhatsAppMessage sent today
+        limit = sub.plan.max_whatsapp_bulk_per_day
+        if today_sent + count > limit:
+            raise PlanLimitExceededException(
+                limit_type="whatsapp_bulk_per_day",
+                current=today_sent,
+                max_allowed=limit,
+            )
+    except PlanLimitExceededException:
+        raise
+    except Exception:
+        pass
+
+
+def _check_campaign_completion(campaign_id: str):
+    """Mark campaign complete when all recipients have been processed."""
+    from apps.communications.models import BulkCampaign, CampaignRecipient
+    pending = CampaignRecipient.objects.filter(
+        campaign_id=campaign_id, status="pending"
+    ).count()
+    if pending == 0:
+        BulkCampaign.objects.filter(pk=campaign_id).update(
+            status="completed", completed_at=timezone.now()
+        )
+
+
+def _get_whatsapp_provider(provider_slug: str):
+    """Return the configured WhatsApp provider service."""
+    # Pluggable provider pattern — add new providers here
+    from apps.communications.providers.whatsapp import (
+        InteraktProvider, MockWhatsAppProvider
+    )
+    providers = {
+        "interakt": InteraktProvider,
+        "aisensy": MockWhatsAppProvider,
+        "wati": MockWhatsAppProvider,
+        "gupshup": MockWhatsAppProvider,
+    }
+    cls = providers.get(provider_slug, MockWhatsAppProvider)
+    return cls()
+
+
+def _get_sms_provider():
+    """Return the configured SMS provider service."""
+    from apps.communications.providers.sms import MockSMSProvider
+    return MockSMSProvider()
+
+
+def _extract_variables(template, lead) -> list:
+    """Extract ordered variable values from a lead based on template mapping."""
+    if not template or not template.variable_mapping:
+        return []
+    result = []
+    for i in range(1, len(template.variable_mapping) + 1):
+        field = template.variable_mapping.get(str(i), "")
+        result.append(str(getattr(lead, field, "") or ""))
+    return result
+
+
+@shared_task(base=TenantAwareTask, bind=True)
+def launch_scheduled_campaigns(self, schema_name: str = None):
+    """
+    Beat-scheduled task: check for campaigns scheduled to start now.
+    Runs every 5 minutes. Dispatches per-tenant if schema_name given,
+    otherwise dispatches across all tenants.
+    """
+    from apps.communications.models import BulkCampaign
+    from django.db import connection
+
+    if not schema_name:
+        from apps.core.utils import get_all_tenant_schemas
+        for schema in get_all_tenant_schemas():
+            launch_scheduled_campaigns.apply_async(
+                args=[schema], queue="bulk_ops"
+            )
+        return
+
+    now = timezone.now()
+    due_campaigns = BulkCampaign.objects.filter(
+        status="scheduled",
+        scheduled_at__lte=now,
+    )
+
+    TASK_MAP = {
+        "whatsapp": send_bulk_whatsapp_campaign,
+        "email": send_bulk_email_campaign,
+        "sms": send_bulk_sms_campaign,
+    }
+
+    for campaign in due_campaigns:
+        task_fn = TASK_MAP.get(campaign.channel)
+        if task_fn:
+            task_fn.apply_async(
+                args=[schema_name, str(campaign.id)],
+                queue="bulk_ops",
+            )
+            logger.info(f"[Task] Launched scheduled campaign: {campaign.name}")

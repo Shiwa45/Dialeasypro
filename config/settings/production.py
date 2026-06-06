@@ -46,7 +46,7 @@ EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 DATABASES["default"]["CONN_MAX_AGE"] = 300  # noqa: F405
 DATABASES["default"]["OPTIONS"] = {  # noqa: F405
     "connect_timeout": 10,
-    "options": "-c default_transaction_isolation=read_committed",
+    "options": "-c default_transaction_isolation='read committed'",
     "sslmode": config("DB_SSLMODE", default="require"),
 }
 

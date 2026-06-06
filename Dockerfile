@@ -95,16 +95,18 @@ RUN python -m py_compile config/settings/production.py
 RUN mkdir -p /app/staticfiles /app/mediafiles /var/log/telecrm && \
     chown -R appuser:appgroup /app /var/log/telecrm
 
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && sed -i 's/\r$//' /entrypoint.sh
+
+# Switch to appuser BEFORE collectstatic so files are owned by appuser
+# (entrypoint runs collectstatic --clear as appuser and needs write access)
+USER appuser
+
 # Collect static files during build
 RUN DJANGO_SETTINGS_MODULE=config.settings.production \
     SECRET_KEY=dummy-build-key \
     DB_PASSWORD=dummy \
     python manage.py collectstatic --no-input 2>/dev/null || true
-
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh && sed -i 's/\r$//' /entrypoint.sh
-
-USER appuser
 
 EXPOSE 8000
 

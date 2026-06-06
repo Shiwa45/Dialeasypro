@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     gettext \
+    postgresql-client \
+    redis-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
@@ -28,7 +30,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=off \
-    PIP_DISABLE_PIP_VERSION_CHECK=on
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    DEBIAN_FRONTEND=noninteractive
 
 # Create app user (non-root for security)
 RUN groupadd --gid 1001 appgroup && \
@@ -86,6 +89,7 @@ COPY --from=production_builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY --chown=appuser:appgroup . .
+RUN python -m py_compile config/settings/production.py
 
 # Create necessary directories
 RUN mkdir -p /app/staticfiles /app/mediafiles /var/log/telecrm && \
@@ -97,15 +101,12 @@ RUN DJANGO_SETTINGS_MODULE=config.settings.production \
     DB_PASSWORD=dummy \
     python manage.py collectstatic --no-input 2>/dev/null || true
 
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && sed -i 's/\r$//' /entrypoint.sh
+
 USER appuser
 
 EXPOSE 8000
-
-# Production entry: Daphne ASGI server
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]
-
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["gunicorn", "config.asgi:application", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120"]

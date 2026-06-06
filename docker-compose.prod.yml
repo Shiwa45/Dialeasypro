@@ -6,13 +6,22 @@ services:
     image: redis:7-alpine
     container_name: telecrm_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    env_file:
+      - .env
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - "${REDIS_PASSWORD}"
     volumes:
       - redis_data:/data
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -32,6 +41,8 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=config.settings.production
       - REDIS_HOST=redis
+      - DB_SSLMODE=require
+      - PGSSLMODE=require
     ports:
       - "8000:8000"
     depends_on:
@@ -52,6 +63,8 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=config.settings.production
       - REDIS_HOST=redis
+      - DB_SSLMODE=require
+      - PGSSLMODE=require
     command: >
       celery -A config.celery worker
       --loglevel=info
@@ -76,6 +89,8 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=config.settings.production
       - REDIS_HOST=redis
+      - DB_SSLMODE=require
+      - PGSSLMODE=require
     command: >
       celery -A config.celery beat
       --loglevel=info

@@ -15,19 +15,20 @@ from .base import SENTRY_DSN, config  # noqa: F401
 DEBUG = False
 
 # ---- Production: Strict allowed hosts ----------------------
-ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=config.__class__._cast_csv, default="")
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv(), default="")
 # E.g.: ALLOWED_HOSTS=telecrm.in,.telecrm.in,admin.telecrm.in
 
 # ---- Production: S3 for all file storage -------------------
 USE_S3 = config("USE_S3", default=True, cast=bool)
 
 # ---- Production: Security headers --------------------------
-SECURE_SSL_REDIRECT = True
-SECURE_HSTS_SECONDS = 31536000  # 1 year
+# SECURE_SSL_REDIRECT defaults True; set to False if terminating SSL at load balancer/nginx
+SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=True, cast=bool)
+SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=31536000, cast=int)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = config("SESSION_COOKIE_SECURE", default=True, cast=bool)
+CSRF_COOKIE_SECURE = config("CSRF_COOKIE_SECURE", default=True, cast=bool)
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
@@ -46,12 +47,13 @@ DATABASES["default"]["CONN_MAX_AGE"] = 300  # noqa: F405
 DATABASES["default"]["OPTIONS"] = {  # noqa: F405
     "connect_timeout": 10,
     "options": "-c default_transaction_isolation=read_committed",
+    "sslmode": config("DB_SSLMODE", default="require"),
 }
 
 # ---- Production: Stricter CORS -----------------------------
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = config(
-    "CORS_ALLOWED_ORIGINS", default="", cast=config.__class__._cast_csv
+    "CORS_ALLOWED_ORIGINS", default="", cast=Csv()
 )
 
 # ---- Production: Caching with longer TTLs ------------------

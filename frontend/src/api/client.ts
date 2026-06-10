@@ -5,7 +5,7 @@
 // ============================================================
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
-const BASE_URL = (typeof import.meta !== "undefined" ? (import.meta as { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL : undefined) || 'http://localhost:8000';
+const BASE_URL = (typeof import.meta !== "undefined" ? (import.meta as { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL : undefined) || 'https://api.dialeasypro.easyian.com/';
 
 export const apiClient = axios.create({
   baseURL: `${BASE_URL}/api/v1`,

@@ -45,6 +45,9 @@ services:
       - PGSSLMODE=require
     ports:
       - "8000:8000"
+    volumes:
+      - ./staticfiles:/app/staticfiles
+      - ./mediafiles:/app/mediafiles
     depends_on:
       - redis
     networks:
@@ -102,10 +105,6 @@ services:
 
 volumes:
   redis_data:
-    driver: local
-  static_files:
-    driver: local
-  media_files:
     driver: local
 
 networks:

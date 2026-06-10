@@ -100,22 +100,6 @@ services:
     networks:
       - telecrm_network
 
-  # ---- Nginx reverse proxy ------------------------------------
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: telecrm_nginx
-    restart: unless-stopped
-    volumes:
-      - ./docker/nginx/prod.conf:/etc/nginx/conf.d/default.conf:ro
-      - static_files:/app/staticfiles:ro
-      - media_files:/app/mediafiles:ro
-    ports:
-      - "80:80"
-    depends_on:
-      - web
-    networks:
-      - telecrm_network
-
 volumes:
   redis_data:
     driver: local

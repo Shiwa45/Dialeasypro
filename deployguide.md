@@ -180,47 +180,35 @@ To enable HTTPS and serve only the Django API, update your Nginx config.
 sudo apt install -y certbot python3-certbot-nginx
 ```
 
-### **Configure Nginx**
-Edit `docker/nginx/prod.conf` to proxy all traffic to the Django container.
-
-**Recommended Nginx block for API only:**
+### **Configure Host Nginx**
+Create a new configuration file on your host:
+```bash
+sudo nano /etc/nginx/sites-available/telecrm
+```
+Paste this configuration (Proxying to the Docker container on port 8000):
 ```nginx
 server {
     listen 80;
     server_name api.dialeasypro.easyian.com;
 
-    # Django API, Admin, and CRM views
     location / {
-        proxy_pass http://web:8000;
+        proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_redirect off;
     }
 
-    # Static Files (Django Admin etc.)
     location /static/ {
-        alias /app/staticfiles/;
-        expires 1y;
-        add_header Cache-Control "public, immutable";
+        alias /home/ubuntu/Dialeasypro/staticfiles/;
     }
 
-    # Media Files
     location /media/ {
-        alias /app/mediafiles/;
-    }
-
-    # WebSockets (if used)
-    location /ws/ {
-        proxy_pass http://web:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
+        alias /home/ubuntu/Dialeasypro/mediafiles/;
     }
 }
 ```
+*Note: The `X-Forwarded-Proto $scheme` header is critical to prevent redirect loops.*
 
 ### **Enable SSL**
 Run Certbot to automatically fetch and configure the SSL certificate:

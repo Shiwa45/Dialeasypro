@@ -36,8 +36,8 @@ X_FRAME_OPTIONS = "DENY"
 
 # ---- Production: CSRF trusted origins ----------------------
 CSRF_TRUSTED_ORIGINS = [
-    f"https://{config('BASE_DOMAIN', default='telecrm.in')}",
-    f"https://*.{config('BASE_DOMAIN', default='telecrm.in')}",
+    f"https://{config('BASE_DOMAIN', default='api.dialeasypro.easyian.com')}",
+    f"https://*.{config('BASE_DOMAIN', default='api.dialeasypro.easyian.com')}",
 ]
 
 # ---- Production: Email (AWS SES) ---------------------------

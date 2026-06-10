@@ -28,18 +28,24 @@ Before starting, ensure you have:
 ## **3. Server Preparation**
 Once logged into your EC2 instance, run the following:
 
-### **Update System & Install Docker**
+### **Update System & Install Docker (Official Script)**
+If the previous installation failed, run this official script to install the latest Docker and Docker Compose:
 ```bash
-sudo apt update && sudo apt upgrade -y
-# Install Docker, Docker Compose Plugin, and PostgreSQL Client
-sudo apt install -y docker.io docker-compose-plugin git postgresql-client
-# If docker-compose-plugin is not available, install standalone docker-compose
-sudo apt install -y docker-compose 
-
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
 sudo usermod -aG docker $USER
-# Log out and log back in to apply docker group changes
-exit
+# Apply group changes
+newgrp docker 
 ```
+
+### **Verify Installation**
+Ensure both commands return a version:
+```bash
+docker --version
+docker compose version
+```
+*Note: If `docker compose version` fails, the script didn't install the plugin. You can install it manually: `sudo apt install docker-compose-plugin`.*
+
 
 ---
 
@@ -102,11 +108,11 @@ DB_PORT=5432
 DB_SSLMODE=require
 
 # --- Redis (Local Docker) ---
-REDIS_PASSWORD=a_secure_redis_password
+REDIS_PASSWORD=Shiwansh@123
 REDIS_HOST=redis
-REDIS_URL=redis://:a_secure_redis_password@redis:6379/0
-CELERY_BROKER_URL=redis://:a_secure_redis_password@redis:6379/1
-CELERY_RESULT_BACKEND=redis://:a_secure_redis_password@redis:6379/2
+REDIS_URL=redis://:Shiwansh@123@redis:6379/0
+CELERY_BROKER_URL=redis://:Shiwansh@123@redis:6379/1
+CELERY_RESULT_BACKEND=redis://:Shiwansh@123@redis:6379/2
 
 # --- Storage & Domain ---
 BASE_DOMAIN=api.dialeasypro.easyian.com

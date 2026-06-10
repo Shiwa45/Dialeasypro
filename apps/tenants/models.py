@@ -11,6 +11,8 @@ Domain  : Subdomain or custom domain mapping to a Tenant.
 These models live in the PUBLIC schema (shared across all tenants).
 """
 import logging
+import re
+import unicodedata
 
 from django.core.validators import RegexValidator
 from django.db import models
@@ -191,6 +193,35 @@ class Tenant(TenantMixin, TimeStampedModel):
         return f"https://{self.schema_name}.{settings.BASE_DOMAIN}"
 
     # ---- Methods -------------------------------------------
+
+    @staticmethod
+    def _slugify_schema(company_name: str) -> str:
+        """Convert a company name into a valid PostgreSQL schema name."""
+        normalized = unicodedata.normalize("NFKD", company_name)
+        ascii_name = normalized.encode("ascii", "ignore").decode("ascii")
+        lowered = ascii_name.lower()
+        slug = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+        if not slug:
+            slug = "tenant"
+        if slug[0].isdigit():
+            slug = "t_" + slug
+        return slug
+
+    def _unique_schema_name(self, base: str) -> str:
+        """Append a counter to make the schema name unique."""
+        name = base[:60]
+        if not Tenant.objects.filter(schema_name=name).exists():
+            return name
+        counter = 1
+        while Tenant.objects.filter(schema_name=f"{base[:57]}_{counter}").exists():
+            counter += 1
+        return f"{base[:57]}_{counter}"
+
+    def save(self, *args, **kwargs):
+        if not self.schema_name:
+            base = self._slugify_schema(self.company_name)
+            self.schema_name = self._unique_schema_name(base)
+        super().save(*args, **kwargs)
 
     def suspend(self, reason: str = ""):
         """Suspend the tenant account."""

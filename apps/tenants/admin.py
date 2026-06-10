@@ -58,13 +58,19 @@ class TenantAdmin(ModelAdmin):
         "gstin",
     ]
     readonly_fields = [
-        "schema_name",
         "created_at",
         "updated_at",
         "total_agents",
         "total_leads",
         "total_calls_today",
     ]
+
+    def get_readonly_fields(self, request, obj=None):
+        base = list(super().get_readonly_fields(request, obj))
+        if obj is not None:
+            # schema_name must not change after creation (would break PG schema)
+            base.append("schema_name")
+        return base
     ordering = ["-created_at"]
     inlines = [DomainInline]
     actions = ["suspend_tenants", "activate_tenants", "reset_trial"]

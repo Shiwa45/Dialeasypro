@@ -24,6 +24,7 @@ USE_S3 = config("USE_S3", default=True, cast=bool)
 # ---- Production: Security headers --------------------------
 # SECURE_SSL_REDIRECT defaults True; set to False if terminating SSL at load balancer/nginx
 SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=True, cast=bool)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=31536000, cast=int)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True

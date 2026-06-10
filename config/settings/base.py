@@ -88,8 +88,8 @@ TENANT_DOMAIN_MODEL = "tenants.Domain"
 # URL conf for the public schema (super admin, landing page)
 PUBLIC_SCHEMA_URLCONF = "config.urls_public"
 
-# If no tenant found for domain, show 404 instead of public site
-SHOW_PUBLIC_IF_NO_TENANT_FOUND = False
+# If no tenant found for domain, show public site instead of 404
+SHOW_PUBLIC_IF_NO_TENANT_FOUND = True
 
 # Tenant subdomain auto-creation
 TENANT_SUBFOLDER_PREFIX = None  # We use subdomain routing, not subfolders

@@ -35,6 +35,21 @@ class AgentJWTAuthentication(BaseAuthentication):
     def authenticate(self, request):
         auth_header = request.META.get(self.AUTH_HEADER, "")
 
+        # ---- DIAGNOSTIC LOGGING (temporary) --------------------
+        logger.warning(
+            "[AuthDiag] path=%s host=%s schema=%s auth_prefix=%r "
+            "x_tenant_schema=%r x_workspace_id=%r x_tenant_domain=%r ua=%r",
+            request.path,
+            request.META.get("HTTP_HOST", ""),
+            connection.schema_name,
+            auth_header[:20],
+            request.META.get("HTTP_X_TENANT_SCHEMA", ""),
+            request.META.get("HTTP_X_WORKSPACE_ID", ""),
+            request.META.get("HTTP_X_TENANT_DOMAIN", ""),
+            request.META.get("HTTP_USER_AGENT", "")[:60],
+        )
+        # --------------------------------------------------------
+
         if not auth_header.startswith(f"{self.AUTH_HEADER_PREFIX} "):
             return None  # No token — let other auth classes try (or deny)
 

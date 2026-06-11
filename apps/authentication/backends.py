@@ -50,34 +50,39 @@ class AgentJWTAuthentication(BaseAuthentication):
                 "message": "Invalid or expired token. Please log in again.",
             })
 
-        # Security: token must be scoped to the active tenant schema.
-        # TenantSchemaFromTokenMiddleware already corrects the schema from the
-        # token before this point, so a mismatch here means something went wrong
-        # at the middleware layer (e.g. an expired token that the middleware
-        # couldn't decode) — or a genuine cross-tenant replay attack.
         token_schema = payload.get("tenant_schema")
         current_schema = connection.schema_name
 
         if token_schema != current_schema:
             logger.warning(
-                f"[Auth] Schema mismatch — token: {token_schema}, "
-                f"connection: {current_schema}. Attempting schema correction."
+                f"[Auth] Schema mismatch — token: {token_schema!r}, "
+                f"connection: {current_schema!r}. Attempting correction."
             )
-            # Try to self-heal: switch to the token's schema if it is valid.
-            # This handles the edge case where middleware didn't run
-            # (e.g. during tests or direct API calls without the middleware stack).
             if token_schema and token_schema != "public":
+                # Token has a valid tenant schema — trust it and switch.
                 try:
                     connection.set_schema(token_schema)
-                except Exception:
+                    from apps.core.middleware import TenantSchemaFromTokenMiddleware
+                    TenantSchemaFromTokenMiddleware._ensure_tenant_urlconf(request)
+                except Exception as exc:
+                    logger.error(f"[Auth] Failed to switch to schema {token_schema!r}: {exc}")
                     raise AuthenticationFailed({
                         "error": "schema_mismatch",
                         "message": "Invalid token for this tenant.",
                     })
+            elif current_schema and current_schema != "public":
+                # Middleware already set a valid tenant schema but token_schema
+                # is missing or "public" (e.g. old token issued before this claim
+                # was added, or issued on wrong schema). Trust the middleware.
+                logger.warning(
+                    f"[Auth] token_schema missing/public but connection is {current_schema!r}. "
+                    "Trusting middleware schema."
+                )
+                token_schema = current_schema
             else:
                 raise AuthenticationFailed({
                     "error": "schema_mismatch",
-                    "message": "Invalid token for this tenant.",
+                    "message": "Could not determine tenant. Please log in again.",
                 })
 
         # Fetch agent from current tenant schema

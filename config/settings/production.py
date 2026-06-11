@@ -43,8 +43,17 @@ CSRF_TRUSTED_ORIGINS = [
 # ---- Production: Email (AWS SES) ---------------------------
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 
-# ---- Production: Database connection pooling ---------------
-DATABASES["default"]["CONN_MAX_AGE"] = 300  # noqa: F405
+# ---- Production: Database connections ----------------------
+# IMPORTANT: We run async UvicornWorker processes. With persistent
+# connections (CONN_MAX_AGE > 0) each worker thread holds its own DB
+# connection open, which quickly exhausts the RDS connection slots
+# ("remaining connection slots are reserved for rds_reserved").
+# Default to 0 (close after each request) and make it tunable. Use a
+# connection pooler (PgBouncer / RDS Proxy) before raising this.
+DATABASES["default"]["CONN_MAX_AGE"] = config(  # noqa: F405
+    "DB_CONN_MAX_AGE", default=0, cast=int
+)
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True  # noqa: F405
 DATABASES["default"]["OPTIONS"] = {  # noqa: F405
     "connect_timeout": 10,
     "sslmode": config("DB_SSLMODE", default="require"),

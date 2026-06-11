@@ -74,6 +74,40 @@ logger = logging.getLogger(__name__)
 # A) DRF API VIEWS — for Flutter mobile app
 # ============================================================
 
+class TenantInfoAPIView(APIView):
+    """
+    GET /api/v1/auth/tenant-info/
+    Returns basic public info about the current tenant.
+    Used by the Flutter app to verify a workspace name resolves correctly.
+    No authentication required.
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from django.db import connection
+        from apps.tenants.models import Tenant
+
+        schema = connection.schema_name
+        if not schema or schema == 'public':
+            return Response(
+                {"error": "workspace_not_found", "message": "Workspace not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            tenant = Tenant.objects.get(schema_name=schema)
+            return Response({
+                "schema": tenant.schema_name,
+                "company_name": tenant.company_name,
+                "is_active": tenant.is_active,
+            })
+        except Tenant.DoesNotExist:
+            return Response(
+                {"error": "workspace_not_found", "message": "Workspace not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+
 class AgentLoginAPIView(APIView):
     """
     POST /api/v1/auth/login/

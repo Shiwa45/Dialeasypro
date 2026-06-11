@@ -16,9 +16,13 @@ from apps.authentication.views import (
     AgentRefreshTokenAPIView,
     AgentSetPasswordAPIView,
     TeamListAPIView,
+    TenantInfoAPIView,
 )
 
 urlpatterns = [
+    # Workspace probe — used by Flutter app to verify workspace name
+    path("tenant-info/", TenantInfoAPIView.as_view(), name="api_tenant_info"),
+
     # Auth lifecycle
     path("login/", AgentLoginAPIView.as_view(), name="api_agent_login"),
     path("refresh/", AgentRefreshTokenAPIView.as_view(), name="api_agent_refresh"),

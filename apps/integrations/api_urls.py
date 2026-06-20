@@ -4,13 +4,14 @@ from apps.integrations.views import (
     IndiaMArtWebhookView, MetaLeadAdsWebhookView,
     GoogleAdsWebhookView, GenericWebhookView,
     IntegrationConfigListView, IntegrationConfigDetailView,
-    WebhookLogListView, MetaFormFieldsView,
+    WebhookLogListView, MetaFormFieldsView, MetaSyncLeadsView,
 )
 
 urlpatterns = [
     # Lead source webhooks (per-tenant, no auth — validated by signature/token)
     path("indiamart/", IndiaMArtWebhookView.as_view(), name="api_indiamart_webhook"),
     path("meta/forms/", MetaFormFieldsView.as_view(), name="api_meta_forms"),
+    path("meta/sync/", MetaSyncLeadsView.as_view(), name="api_meta_sync"),
     path("meta/", MetaLeadAdsWebhookView.as_view(), name="api_meta_webhook"),
     path("google/", GoogleAdsWebhookView.as_view(), name="api_google_webhook"),
     path("webhook/<str:token>/", GenericWebhookView.as_view(), name="api_generic_webhook"),

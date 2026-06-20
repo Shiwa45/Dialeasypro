@@ -562,6 +562,47 @@ class MetaFormFieldsView(APIView):
             )
 
 
+class MetaSyncLeadsView(APIView):
+    """
+    POST /api/v1/integrations/meta/sync/
+    Manually pull the newest Meta Lead Ads leads into the CRM — a fallback for
+    when the realtime webhook hasn't delivered (or missed) leads.
+    """
+
+    permission_classes = [IsTenantAdmin]
+
+    def post(self, request):
+        config = LeadSourceConfig.objects.filter(
+            source__in=[LeadSource.META_FACEBOOK, LeadSource.META_INSTAGRAM]
+        ).first()
+        if not config:
+            return Response(
+                {"error": "no_config", "message": "Add the Meta integration first."},
+                status=404,
+            )
+
+        from apps.integrations.meta_sync import sync_meta_leads
+
+        result = sync_meta_leads(config)
+        if result.get("error") == "missing_credentials":
+            return Response(
+                {"error": "missing_credentials",
+                 "message": "Save your Page Access Token and Page ID first."},
+                status=400,
+            )
+        if result.get("error"):
+            return Response(
+                {"error": "fetch_failed",
+                 "message": "Could not fetch leads from Meta. Check the token/Page ID."},
+                status=502,
+            )
+
+        msg = f"{result['created']} new lead(s) imported"
+        if result["skipped"]:
+            msg += f", {result['skipped']} already in CRM"
+        return Response({**result, "message": msg})
+
+
 class WebhookLogListView(generics.ListAPIView):
     """GET /api/v1/integrations/logs/ — Integration webhook log for debugging."""
 

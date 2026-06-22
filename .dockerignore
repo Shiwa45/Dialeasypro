@@ -1,0 +1,51 @@
+# ============================================================
+# Docker build context excludes — keep the backend image lean.
+# Without this, the whole repo (Flutter app + gradle caches, the
+# React frontend, .git, etc.) is copied into the image, bloating it
+# and filling the disk ("no space left on device").
+# ============================================================
+
+# ---- Other apps not part of the backend image -------------
+dialeasypro_flutter/
+frontend/
+
+# ---- Version control & CI ---------------------------------
+.git/
+.github/
+.gitignore
+
+# ---- Python caches & venvs --------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---- Node (if ever present) -------------------------------
+node_modules/
+
+# ---- Local env & secrets ----------------------------------
+.env
+.env.*
+!.env.example
+
+# ---- Editor / OS ------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- Build output mounted as volumes ----------------------
+staticfiles/
+mediafiles/
+
+# ---- Docs & misc ------------------------------------------
+*.md
+*.log

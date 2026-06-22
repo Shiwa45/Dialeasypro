@@ -8,6 +8,7 @@ from django.urls import path
 
 from apps.authentication.views import (
     AgentDetailAPIView,
+    AgentHeartbeatAPIView,
     AgentListAPIView,
     AgentLoginAPIView,
     AgentLogoutAPIView,
@@ -15,6 +16,8 @@ from apps.authentication.views import (
     AgentProfileAPIView,
     AgentRefreshTokenAPIView,
     AgentSetPasswordAPIView,
+    AgentStatusUpdateAPIView,
+    LiveAgentsAPIView,
     TeamListAPIView,
     TenantInfoAPIView,
 )
@@ -31,6 +34,11 @@ urlpatterns = [
     # Current agent profile
     path("me/", AgentProfileAPIView.as_view(), name="api_agent_me"),
     path("change-password/", AgentPasswordChangeAPIView.as_view(), name="api_agent_change_password"),
+
+    # Live agent monitoring
+    path("status/", AgentStatusUpdateAPIView.as_view(), name="api_agent_status"),
+    path("status/heartbeat/", AgentHeartbeatAPIView.as_view(), name="api_agent_heartbeat"),
+    path("live-agents/", LiveAgentsAPIView.as_view(), name="api_live_agents"),
 
     # Agent management (admin/manager use)
     path("agents/", AgentListAPIView.as_view(), name="api_agent_list"),

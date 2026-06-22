@@ -18,7 +18,7 @@ from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
 
-from apps.core.constants import AgentRole
+from apps.core.constants import AgentRole, AgentWorkStatus
 from apps.core.models import TimeStampedModel
 from apps.core.storage import get_profile_photo_upload_path
 
@@ -318,3 +318,92 @@ class AgentTeam(models.Model):
     def __str__(self):
         role = "Lead" if self.is_team_lead else "Member"
         return f"{self.agent.name} → {self.team.name} [{role}]"
+
+
+# ============================================================
+# Live Agent Monitoring — Status & Time Tracking
+# ============================================================
+
+class AgentStatus(TimeStampedModel):
+    """
+    Current live work status for an agent (one row per agent).
+
+    Presence is tied to an auto-dial session. The mobile app reports
+    transitions (available → on_call → wrap_up, plus manual break) and a
+    periodic heartbeat. `since` marks when the current status began so the UI
+    can show a live-ticking timer; `last_seen` drives stale → offline detection.
+    """
+
+    agent = models.OneToOneField(
+        Agent, on_delete=models.CASCADE, related_name="work_status"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=AgentWorkStatus.CHOICES,
+        default=AgentWorkStatus.OFFLINE,
+        db_index=True,
+    )
+    since = models.DateTimeField(
+        default=timezone.now,
+        help_text="When the current status began (for live duration display).",
+    )
+    last_seen = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        help_text="Last heartbeat — used to flip stale sessions to offline.",
+    )
+    session_started_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When the current auto-dial session began (null when offline).",
+    )
+    current_call_id = models.PositiveIntegerField(null=True, blank=True)
+    current_lead_id = models.PositiveIntegerField(null=True, blank=True)
+    break_reason = models.CharField(max_length=100, blank=True, default="")
+
+    class Meta:
+        verbose_name = "Agent Status"
+        verbose_name_plural = "Agent Statuses"
+
+    def __str__(self):
+        return f"{self.agent.name}: {self.status}"
+
+    @property
+    def is_online(self) -> bool:
+        return self.status in AgentWorkStatus.ONLINE_STATUSES
+
+
+class AgentStatusLog(models.Model):
+    """
+    Append-only log of every status interval, for time accounting and history.
+
+    Each transition closes the open row (sets ended_at + duration_seconds) and
+    opens a new one. Daily totals (talk/wrap/break/available) are summed from
+    these rows plus the currently-open interval.
+    """
+
+    agent = models.ForeignKey(
+        Agent, on_delete=models.CASCADE, related_name="status_logs"
+    )
+    status = models.CharField(max_length=20, choices=AgentWorkStatus.CHOICES, db_index=True)
+    started_at = models.DateTimeField(default=timezone.now, db_index=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField(default=0)
+    break_reason = models.CharField(max_length=100, blank=True, default="")
+
+    class Meta:
+        verbose_name = "Agent Status Log"
+        verbose_name_plural = "Agent Status Logs"
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(fields=["agent", "started_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.agent_id} {self.status} @ {self.started_at:%Y-%m-%d %H:%M}"
+
+    def close(self, at=None):
+        """Close this interval, computing its duration."""
+        at = at or timezone.now()
+        self.ended_at = at
+        self.duration_seconds = max(0, int((at - self.started_at).total_seconds()))
+        self.save(update_fields=["ended_at", "duration_seconds"])

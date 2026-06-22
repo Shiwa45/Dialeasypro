@@ -12,6 +12,7 @@ Queues:
   call_uploads  → Call recording upload & transcription
 """
 import os
+from datetime import timedelta
 
 from celery import Celery
 from celery.schedules import crontab
@@ -39,6 +40,14 @@ app.autodiscover_tasks()
 # ============================================================
 
 app.conf.beat_schedule = {
+    # ---- Live Agent Monitoring -----------------------------
+    # Flip stale (crashed/disconnected) agent sessions to offline every 30s.
+    "sweep-stale-agent-status": {
+        "task": "apps.authentication.tasks.sweep_stale_agent_status",
+        "schedule": timedelta(seconds=30),
+        "options": {"queue": "default"},
+    },
+
     # ---- Trial Management ----------------------------------
     # Check trial expirations daily at 9 AM IST (3:30 AM UTC)
     "check-trial-expirations": {

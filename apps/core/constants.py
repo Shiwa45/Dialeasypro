@@ -271,6 +271,37 @@ class AgentRole:
     }
 
 
+class AgentWorkStatus:
+    """
+    Live work/presence status for agent monitoring.
+
+    Presence is tied to an auto-dial session: starting auto-dial puts the agent
+    ONLINE (available); exiting the dialer (or a stale heartbeat) makes them
+    OFFLINE. During a session the status cycles available → on_call → wrap_up,
+    with break as a manual toggle (only between calls).
+    """
+
+    OFFLINE = "offline"      # Not in an auto-dial session
+    AVAILABLE = "available"  # Session active, waiting/between calls
+    ON_CALL = "on_call"      # Call connected
+    WRAP_UP = "wrap_up"      # Call ended, disposing (after-call work)
+    BREAK = "break"          # Manual break
+
+    CHOICES = [
+        (OFFLINE, "Offline"),
+        (AVAILABLE, "Available"),
+        (ON_CALL, "On Call"),
+        (WRAP_UP, "Wrap-up"),
+        (BREAK, "Break"),
+    ]
+
+    # Statuses that count as "online" (in an active session)
+    ONLINE_STATUSES = [AVAILABLE, ON_CALL, WRAP_UP, BREAK]
+
+    # Valid statuses an agent client may report
+    REPORTABLE = [OFFLINE, AVAILABLE, ON_CALL, WRAP_UP, BREAK]
+
+
 # ============================================================
 # Lead Source Choices
 # ============================================================

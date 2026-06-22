@@ -36,39 +36,33 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
     """
 
     async def connect(self):
-        """Authenticate and join the tenant monitoring group."""
-        # Get schema from scope (set by django-tenants)
-        schema_name = self.scope.get("url_route", {}).get("kwargs", {}).get(
-            "schema_name"
-        )
-        if not schema_name:
-            # Try to get from tenant on scope
-            tenant = getattr(self.scope.get("user"), "tenant", None)
-            schema_name = getattr(tenant, "schema_name", None)
+        """Authenticate via JWT (?token=...) and join the tenant monitoring group."""
+        from urllib.parse import parse_qs
 
-        # Fallback: try session
-        session = self.scope.get("session", {})
-        agent_id = session.get("agent_id")
-        agent_role = session.get("agent_role")
-
-        if not agent_id:
-            logger.warning("[WS] AgentMonitor: rejected — no session")
+        query = parse_qs(self.scope.get("query_string", b"").decode())
+        token = (query.get("token") or [None])[0]
+        if not token:
+            logger.warning("[WS] AgentMonitor: rejected — no token")
             await self.close(code=4001)
             return
 
-        # Only admins and managers can monitor
-        if agent_role not in ["admin", "manager"]:
-            logger.warning(
-                f"[WS] AgentMonitor: rejected agent {agent_id} — insufficient role {agent_role}"
-            )
+        data = await self._verify_token(token)
+        if not data:
+            logger.warning("[WS] AgentMonitor: rejected — invalid token")
+            await self.close(code=4001)
+            return
+
+        agent_id = data.get("agent_id")
+        role = data.get("role")
+        schema_name = data.get("tenant_schema")
+
+        # Only admins and managers can monitor.
+        if role not in ("admin", "manager"):
+            logger.warning(f"[WS] AgentMonitor: rejected agent {agent_id} — role {role}")
             await self.close(code=4003)
             return
 
-        # Determine tenant schema from session or scope
-        if not schema_name:
-            schema_name = session.get("tenant_schema", "public")
-
-        if schema_name == "public":
+        if not schema_name or schema_name == "public":
             await self.close(code=4004)
             return
 
@@ -76,15 +70,11 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
         self.group_name = f"monitor_{schema_name}"
         self.agent_id = agent_id
 
-        # Join the monitoring group
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
-        logger.info(
-            f"[WS] AgentMonitor: agent {agent_id} connected to {self.group_name}"
-        )
+        logger.info(f"[WS] AgentMonitor: agent {agent_id} connected to {self.group_name}")
 
-        # Send initial connection acknowledgment
         await self.send_json(
             {
                 "type": "connection_established",
@@ -92,6 +82,27 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
                 "timestamp": timezone.now().isoformat(),
             }
         )
+
+    @staticmethod
+    async def _verify_token(token: str) -> dict | None:
+        """Verify the JWT and return agent_id, role, tenant_schema (or None)."""
+        from asgiref.sync import sync_to_async
+
+        @sync_to_async
+        def verify():
+            try:
+                from rest_framework_simplejwt.tokens import AccessToken
+                payload = AccessToken(token)
+                return {
+                    "agent_id": payload.get("agent_id"),
+                    "role": payload.get("role"),
+                    "tenant_schema": payload.get("tenant_schema"),
+                }
+            except Exception as exc:
+                logger.debug(f"[WS] AgentMonitor token verify failed: {exc}")
+                return None
+
+        return await verify()
 
     async def disconnect(self, close_code):
         """Leave the monitoring group on disconnect."""

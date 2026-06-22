@@ -258,6 +258,14 @@ class AgentLogoutAPIView(APIView):
         if refresh_token:
             blacklist_refresh_token(refresh_token)
 
+        # Mark agent offline immediately so the monitoring dashboard updates.
+        try:
+            from apps.authentication.presence import set_agent_status
+            from apps.core.constants import AgentWorkStatus
+            set_agent_status(request.user, AgentWorkStatus.OFFLINE)
+        except Exception:
+            pass
+
         # Mark session as inactive
         agent = request.user
         AgentLoginSession.objects.filter(
@@ -501,6 +509,99 @@ class TeamListAPIView(generics.ListCreateAPIView):
                 memberships__agent__is_active=True
             ))
         )
+
+
+# ============================================================
+# Live Agent Monitoring API
+# ============================================================
+
+class AgentStatusUpdateAPIView(APIView):
+    """
+    POST /api/v1/auth/status/
+    Agent reports a live work-status transition (available / on_call /
+    wrap_up / break / offline). Returns the updated live payload.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def post(self, request):
+        from apps.authentication.presence import agent_live_payload, set_agent_status
+        from apps.core.constants import AgentWorkStatus
+
+        status_val = (request.data.get("status") or "").strip()
+        if status_val not in AgentWorkStatus.REPORTABLE:
+            return Response(
+                {"error": "invalid_status",
+                 "message": f"status must be one of {AgentWorkStatus.REPORTABLE}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        st = set_agent_status(
+            request.user,
+            status_val,
+            break_reason=(request.data.get("break_reason") or "")[:100],
+            call_id=request.data.get("call_id"),
+            lead_id=request.data.get("lead_id"),
+        )
+        return Response(agent_live_payload(st))
+
+
+class AgentHeartbeatAPIView(APIView):
+    """
+    POST /api/v1/auth/status/heartbeat/
+    Keepalive from the agent app — refreshes last_seen so the active session
+    isn't swept to offline. Cheap; no broadcast.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def post(self, request):
+        from apps.authentication.presence import touch_heartbeat
+        touch_heartbeat(request.user)
+        return Response({"ok": True})
+
+
+class LiveAgentsAPIView(APIView):
+    """
+    GET /api/v1/auth/live-agents/
+    Manager/admin snapshot of every agent's current status + today's time
+    totals. Used for the initial load of the Live Agents dashboard; ongoing
+    updates arrive over the /ws/agent-monitor/ WebSocket.
+    """
+
+    permission_classes = [IsManagerOrAdmin]
+
+    def get(self, request):
+        from apps.authentication.models import AgentStatus
+        from apps.authentication.presence import agent_live_payload, sweep_stale
+        from apps.core.constants import AgentWorkStatus
+
+        # Flip any stale sessions to offline so the snapshot is accurate.
+        sweep_stale()
+
+        now = timezone.now()
+        statuses = {
+            s.agent_id: s
+            for s in AgentStatus.objects.select_related("agent").filter(agent__is_active=True)
+        }
+        agents = Agent.objects.filter(is_active=True).order_by("name")
+
+        out = []
+        for agent in agents:
+            st = statuses.get(agent.id)
+            if st is None:
+                out.append({
+                    "agent_id": agent.id, "name": agent.name, "email": agent.email,
+                    "role": agent.role, "status": AgentWorkStatus.OFFLINE,
+                    "status_display": "Offline", "since": None, "break_reason": "",
+                    "last_seen": None, "is_online": False, "current_lead_id": None,
+                    "session_started_at": None,
+                    "totals": {"available": 0, "on_call": 0, "wrap_up": 0, "break": 0, "online": 0},
+                })
+            else:
+                out.append(agent_live_payload(st, now))
+
+        return Response({"agents": out, "server_time": now.isoformat()})
 
 
 # ============================================================

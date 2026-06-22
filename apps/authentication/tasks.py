@@ -19,6 +19,34 @@ from apps.core.tasks import PublicSchemaTask, TenantAwareTask
 logger = logging.getLogger(__name__)
 
 
+@shared_task(base=PublicSchemaTask, bind=True)
+def sweep_stale_agent_status(self):
+    """
+    Flip stale agent sessions to offline across all tenants. Runs frequently
+    (every ~30s) so a crashed/disconnected app stops showing as On Call on the
+    admin Live Agents dashboard without anyone refreshing.
+    """
+    from apps.core.utils import run_for_all_tenants
+
+    results = run_for_all_tenants(_sweep_one_tenant)
+    total = sum(v for v in results.values() if isinstance(v, int))
+    if total:
+        logger.info(f"[Task] sweep_stale_agent_status: flipped {total} agent(s) offline")
+    return {"swept": total}
+
+
+def _sweep_one_tenant(schema_name: str) -> int:
+    from django.db import connection
+    from apps.authentication.presence import sweep_stale
+
+    prev = connection.schema_name
+    try:
+        connection.set_schema(schema_name)
+        return sweep_stale()
+    finally:
+        connection.set_schema(prev)
+
+
 @shared_task(base=TenantAwareTask, bind=True, max_retries=3)
 def send_agent_welcome_email(self, schema_name: str, agent_id: int):
     """

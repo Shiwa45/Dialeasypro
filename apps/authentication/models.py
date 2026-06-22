@@ -395,7 +395,7 @@ class AgentStatusLog(models.Model):
         verbose_name_plural = "Agent Status Logs"
         ordering = ["-started_at"]
         indexes = [
-            models.Index(fields=["agent", "started_at"], name="auth_agentstatuslog_agent_started_idx"),
+            models.Index(fields=["agent", "started_at"], name="aslog_agent_started_idx"),
         ]
 
     def __str__(self):

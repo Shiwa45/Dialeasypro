@@ -49,6 +49,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="agentstatuslog",
-            index=models.Index(fields=["agent", "started_at"], name="auth_agentstatuslog_agent_started_idx"),
+            index=models.Index(fields=["agent", "started_at"], name="aslog_agent_started_idx"),
         ),
     ]

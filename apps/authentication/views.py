@@ -171,7 +171,10 @@ class AgentLoginAPIView(APIView):
             agent=agent,
             ip_address=ip or None,
             user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],
-            device_type="mobile" if "flutter" in request.META.get("HTTP_USER_AGENT", "").lower() else "api",
+            device_type="mobile" if any(
+                m in request.META.get("HTTP_USER_AGENT", "").lower()
+                for m in ("flutter", "dart", "okhttp")
+            ) else "api",
             jwt_jti=tokens.get("jti", ""),
         )
 

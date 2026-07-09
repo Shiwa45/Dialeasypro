@@ -110,10 +110,13 @@ class BaseWebhookView(View):
         raise NotImplementedError
 
     def _get_config(self):
-        try:
-            return LeadSourceConfig.objects.get(source=self.source, is_active=True)
-        except LeadSourceConfig.DoesNotExist:
-            return None
+        # .first() (not .get()) — a duplicate active config for the same source
+        # would raise MultipleObjectsReturned and 500 every webhook delivery.
+        return (
+            LeadSourceConfig.objects.filter(source=self.source, is_active=True)
+            .order_by("id")
+            .first()
+        )
 
     def _create_or_update_lead(self, lead_data: dict, config, duplicate_action: str = "skip"):
         """

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/phone_service.dart';
@@ -41,6 +42,9 @@ class DialerCallRecord {
   String? dispositionName;
   String notes = '';
   bool savedToBackend = false;
+  // In-app mic recording captured during this call (universal fallback when
+  // the device has no OEM call recorder). Set when the call ends.
+  File? micRecording;
 
   DialerCallRecord({
     required this.leadId,
@@ -226,6 +230,9 @@ class DialerNotifier extends StateNotifier<DialerState> {
         state = state.copyWith(phase: DialerPhase.inCall);
         state.currentCall!.wasConnected = true;
         _presence(AgentStatus.onCall);
+        // Universal fallback recording: capture the mic for the duration of
+        // the call (used only if no OEM recording is found afterwards).
+        CallRecordingService.instance.startMicCapture();
         break;
       case CallStatus.ringing:
       case CallStatus.dialing:
@@ -238,10 +245,18 @@ class DialerNotifier extends StateNotifier<DialerState> {
         state.currentCall!.durationSec = event.durationSec ?? 0;
         state = state.copyWith(phase: DialerPhase.postCall);
         _presence(AgentStatus.wrapUp);
+        _stopMicIntoRecord(state.currentCall!);
         break;
       case CallStatus.idle:
         break;
     }
+  }
+
+  /// Stop the in-call mic recording (if any) and stash the file on the record.
+  void _stopMicIntoRecord(DialerCallRecord record) {
+    CallRecordingService.instance.stopMicCapture().then((file) {
+      if (file != null) record.micRecording = file;
+    }).catchError((_) {});
   }
 
   /// Manually mark current call as ended (when system doesn't notify reliably)
@@ -252,6 +267,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
     if (wasConnected != null) state.currentCall!.wasConnected = wasConnected;
     state = state.copyWith(phase: DialerPhase.postCall);
     _presence(AgentStatus.wrapUp);
+    _stopMicIntoRecord(state.currentCall!);
   }
 
   /// Save the disposition and move to next call (in queue mode) or finish
@@ -286,15 +302,20 @@ class DialerNotifier extends StateNotifier<DialerState> {
       });
       call.savedToBackend = true;
 
-      // SIM-based call recording: if the phone's OEM recorder captured this
-      // call, find that audio file and upload it (fire-and-forget). No-op when
-      // the feature is off / no permission / no recorder on the device.
-      if (call.wasConnected && call.durationSec > 0) {
+      // Call recording: try the phone's OEM recorder file first (two-way
+      // audio); fall back to the in-app mic recording captured during the
+      // call, which exists on every device. Fire-and-forget; no-op when the
+      // feature is off. Attempt whenever the call plausibly happened — the
+      // phone-state listener can miss connect events on some OEMs, so don't
+      // gate on wasConnected alone.
+      final mic = call.micRecording;
+      if (mic != null || (call.wasConnected && call.durationSec > 0)) {
         CallRecordingService.instance.captureForCall(
           callId: created.id,
           phoneNumber: call.phoneNumber,
           startedAt: call.startedAt,
           durationSec: call.durationSec,
+          fallbackFile: mic,
         ).catchError((_) {});
       }
     } catch (_) {
@@ -411,6 +432,10 @@ class DialerNotifier extends StateNotifier<DialerState> {
       QueueService.instance.release(current.id, markDialed: false).catchError((_) {});
     }
     _serverQueueId = null;
+    // Stop any in-call mic recording still running (user exited mid-call).
+    CallRecordingService.instance.stopMicCapture().then((f) {
+      try { f?.deleteSync(); } catch (_) {}
+    }).catchError((_) {});
     // End the session → agent goes offline on the monitoring dashboard.
     if (_sessionActive) {
       PresenceService.instance.endSession();

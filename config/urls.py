@@ -12,8 +12,9 @@ Routes:
 """
 from django.conf import settings
 from django.conf.urls.static import static
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.generic import RedirectView
+from django.views.static import serve as media_serve
 
 from apps.core.views import HealthCheckView
 
@@ -40,10 +41,21 @@ urlpatterns = [
     path("api/v1/health/", HealthCheckView.as_view(), name="api_health_check"),
 ]
 
-# ---- Development: Serve media files locally ----------------
+# ---- Media files ---------------------------------------------
+# Served by Django in production too: the reverse proxy forwards ALL paths
+# here, and locally-stored call recordings (Cloudinary fallback) live under
+# MEDIA_ROOT. Static files are handled by WhiteNoise.
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+else:
+    urlpatterns += [
+        re_path(
+            r"^media/(?P<path>.*)$",
+            media_serve,
+            {"document_root": settings.MEDIA_ROOT},
+        ),
+    ]
 
     # DRF Browsable API in debug mode
     urlpatterns += [

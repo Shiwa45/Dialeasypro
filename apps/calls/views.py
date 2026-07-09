@@ -229,6 +229,11 @@ class CallRecordingUploadView(APIView):
             public_id=public_id,
         )
         if not result:
+            # Local-media fallback: Cloudinary isn't configured (or the upload
+            # failed) — store the file on the server's media volume instead so
+            # recordings still work with zero external configuration.
+            result = self._store_locally(request, upload, ext or "m4a", call)
+        if not result:
             return Response(
                 {
                     "error": "upload_failed",
@@ -264,6 +269,28 @@ class CallRecordingUploadView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    def _store_locally(self, request, upload, ext: str, call) -> dict | None:
+        """Save the recording under MEDIA_ROOT and return Cloudinary-shaped metadata."""
+        try:
+            from django.conf import settings
+            from django.core.files.storage import default_storage
+
+            rel_path = f"call_recordings/{connection.schema_name}/call_{call.pk}.{ext}"
+            if default_storage.exists(rel_path):
+                default_storage.delete(rel_path)
+            saved = default_storage.save(rel_path, upload)
+            url = request.build_absolute_uri(settings.MEDIA_URL + saved)
+            return {
+                "url": url,
+                "public_id": f"local:{saved}",
+                "bytes": upload.size,
+                "duration": 0,
+                "format": ext,
+            }
+        except Exception as exc:
+            logger.error(f"[Recording] Local storage fallback failed: {exc}")
+            return None
 
 
 class ClickToCallView(APIView):

@@ -38,8 +38,8 @@ class TranscriptStatus:
 # ring-out, a wrong number, or a two-word "not interested". Don't pay for it.
 MIN_TRANSCRIPT_CHARS = 120
 
-# Opus 4.8 has a 1M-token context, but a single call transcript should never
-# come close. Anything past this is a runaway ASR loop, not a conversation.
+# Gemini's context window is far larger, but a single call transcript should
+# never come close. Anything past this is a runaway transcription, not a call.
 MAX_TRANSCRIPT_CHARS = 200_000
 
 # Recordings longer than this are almost certainly not a single sales call.

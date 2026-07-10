@@ -53,10 +53,10 @@ django-unfold==0.44.0
 # --------------- Payments (Razorpay India) ------------------
 razorpay==1.4.2
 
-# --------------- AI Suite (call insights) -------------------
-# Speech-to-text is called over plain HTTP (apps/ai/services/transcription.py),
-# so no vendor SDK is needed for it.
-anthropic>=0.72,<1.0
+# --------------- AI Suite (transcription + insights) --------
+# Gemini reads call audio natively, so one SDK covers both stages.
+google-genai>=1.0.0,<2.0.0
+pydantic>=2.7,<3.0
 
 # --------------- HTTP Clients -------------------------------
 requests==2.32.3

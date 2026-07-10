@@ -1,7 +1,7 @@
 """
 TeleCRM Backend — apps/ai/serializers.py
 
-Every field is read-only. An insight is Claude's output; a client that could
+Every field is read-only. An insight is the model's output; a client that could
 edit it would be editing the audit trail of what the model actually said.
 """
 from rest_framework import serializers

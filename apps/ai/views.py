@@ -82,8 +82,8 @@ class CallTranscribeView(_CallScopedView):
     """
     POST /api/v1/ai/calls/{call_id}/transcribe/
 
-    Re-runs speech-to-text. Managers and admins only — each run costs ASR
-    minutes, so it isn't something an agent should be able to loop on.
+    Re-runs speech-to-text. Managers and admins only — each run costs audio
+    tokens, so it isn't something an agent should be able to loop on.
     """
 
     permission_classes = [
@@ -197,7 +197,7 @@ class BackfillView(APIView):
     POST /api/v1/ai/backfill/  {"limit": 50}
 
     Queue transcription for recordings that predate the module. Admin only —
-    it fans out to as many paid ASR calls as `limit`.
+    it fans out to as many paid transcription calls as `limit`.
     """
 
     permission_classes = [

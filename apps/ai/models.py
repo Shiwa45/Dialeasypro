@@ -15,7 +15,7 @@ from apps.core.models import TimeStampedModel
 
 class CallInsight(TimeStampedModel):
     """
-    Claude's read of one call: what happened, how it went, what to do next.
+    Gemini's read of one call: what happened, how it went, what to do next.
 
     One row per call. Regenerating overwrites in place — an insight is a
     derived view of the transcript, not an audit record.

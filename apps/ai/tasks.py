@@ -40,13 +40,13 @@ def transcribe_call(self, schema_name, call_id):
     if not _tenant_has(schema_name, FeatureKey.AI_CALL_TRANSCRIPTION):
         return {"skipped": "feature_not_enabled"}
     if not transcription.is_enabled():
-        return {"skipped": "no_asr_provider_configured"}
+        return {"skipped": "no_api_key_configured"}
 
     recording = CallRecording.objects.filter(call_id=call_id).first()
     if recording is None:
         return {"skipped": "no_recording"}
     if recording.transcript_status == TranscriptStatus.DONE and recording.transcript:
-        # Already transcribed — re-running would just burn ASR minutes.
+        # Already transcribed — re-running would just burn audio tokens.
         analyse_call.delay(schema_name, str(call_id))
         return {"skipped": "already_transcribed"}
 
@@ -57,11 +57,11 @@ def transcribe_call(self, schema_name, call_id):
         result = transcription.transcribe(recording)
     except transcription.TranscriptionUnavailable as exc:
         # Misconfiguration, not a bad recording. Leave it pending so a later
-        # run picks it up once the provider is wired in.
+        # run picks it up once GEMINI_API_KEY is set.
         recording.transcript_status = TranscriptStatus.PENDING
         recording.save(update_fields=["transcript_status"])
         logger.warning("[ai] transcription unavailable for %s: %s", call_id, exc)
-        return {"skipped": "no_asr_provider_configured"}
+        return {"skipped": "no_api_key_configured"}
     except Exception as exc:
         recording.transcript_status = TranscriptStatus.FAILED
         recording.transcript_error = str(exc)[:500]
@@ -86,7 +86,7 @@ def transcribe_call(self, schema_name, call_id):
 
 @shared_task(base=TenantAwareTask, bind=True, max_retries=3, default_retry_delay=300)
 def analyse_call(self, schema_name, call_id):
-    """Run Claude over an existing transcript and store the insight."""
+    """Run Gemini over an existing transcript and store the insight."""
     from apps.ai.models import CallInsight
     from apps.ai.services import insights
     from apps.calls.models import CallDisposition, CallLog
@@ -161,7 +161,7 @@ def analyse_call(self, schema_name, call_id):
 def backfill_transcripts(self, schema_name, limit=50):
     """
     Transcribe recordings that were uploaded before the tenant bought the AI
-    module (or while the ASR provider was down). Newest first — recent calls
+    module (or while Gemini was unreachable). Newest first — recent calls
     are the ones a manager actually reviews.
     """
     from apps.calls.models import CallRecording

@@ -483,16 +483,15 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 # ============================================================
 # AI Suite (ModuleKey.AI_SUITE)
 # ============================================================
-# Call insights — summary, sentiment, coaching. Uses the Anthropic API.
-ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
-
-# Speech-to-text. Claude takes no audio input, so transcription goes to a
-# separate provider. Anything that speaks the OpenAI /v1/audio/transcriptions
-# multipart shape works: OpenAI, Groq, or a self-hosted faster-whisper server.
-# Leave the URL empty and transcription (and therefore insights) stay off.
-AI_TRANSCRIPTION_URL = config("AI_TRANSCRIPTION_URL", default="")
-AI_TRANSCRIPTION_API_KEY = config("AI_TRANSCRIPTION_API_KEY", default="")
-AI_TRANSCRIPTION_MODEL = config("AI_TRANSCRIPTION_MODEL", default="whisper-1")
+# Google Gemini powers both halves of the pipeline: it reads the call audio
+# directly (transcription) and then the transcript (insights). Leave the key
+# empty and the whole module stays dormant — recordings sit at "pending" and
+# nothing is billed.
+GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
+GEMINI_MODEL = config("GEMINI_MODEL", default="gemini-2.5-flash")
+# Transcription is the expensive half (audio tokens). Point it at a cheaper or
+# stronger model independently if you need to; defaults to GEMINI_MODEL.
+GEMINI_TRANSCRIBE_MODEL = config("GEMINI_TRANSCRIBE_MODEL", default="")
 
 # ============================================================
 # Razorpay (Payment Gateway — India)

@@ -4,8 +4,81 @@ TeleCRM Backend — apps/communications/serializers.py
 from rest_framework import serializers
 from apps.communications.models import (
     BulkCampaign, CampaignRecipient, EmailLog,
-    SMSLog, WhatsAppMessage, WhatsAppTemplate,
+    SMSLog, WhatsAppConfig, WhatsAppMessage, WhatsAppTemplate,
 )
+
+
+# Which credential keys each provider expects. Drives the settings form and
+# lets us mask secrets on read without ever shipping their values to the client.
+PROVIDER_CREDENTIAL_FIELDS = {
+    "meta_cloud": ["access_token", "phone_number_id", "business_account_id"],
+    "interakt": ["api_key"],
+    "aisensy": ["api_key", "text_campaign"],
+    "wati": ["access_token", "api_endpoint"],
+    "gupshup": ["api_key", "app_name", "source_number"],
+    "twilio": ["account_sid", "auth_token", "from_number"],
+    "360dialog": ["api_key"],
+}
+
+# Keys whose values must never be echoed back to the client.
+_SECRET_KEYS = {"access_token", "api_key", "auth_token", "account_sid"}
+
+
+class WhatsAppConfigSerializer(serializers.ModelSerializer):
+    """
+    A tenant's WhatsApp connection.
+
+    Credentials are write-only: the client sends `{provider, credentials}` and
+    reads back only `configured_fields` (which keys are set) — the secret values
+    never leave the server once stored.
+    """
+
+    credentials = serializers.DictField(write_only=True, required=False)
+    configured_fields = serializers.SerializerMethodField()
+    required_fields = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WhatsAppConfig
+        fields = [
+            "provider", "is_active", "default_language",
+            "credentials", "configured_fields", "required_fields",
+            "last_verified_at", "last_error", "updated_at",
+        ]
+        read_only_fields = ["is_active", "last_verified_at", "last_error", "updated_at"]
+
+    def get_configured_fields(self, obj) -> dict:
+        """{key: masked_or_value} — secrets shown only as a set/unset flag."""
+        creds = obj.credentials or {}
+        out = {}
+        for key, value in creds.items():
+            if key in _SECRET_KEYS:
+                out[key] = "••••••••" if value else ""
+            else:
+                out[key] = value  # non-secret (endpoint URL, app name, phone id)
+        return out
+
+    def get_required_fields(self, obj) -> list:
+        return PROVIDER_CREDENTIAL_FIELDS.get(obj.provider, [])
+
+    def update(self, instance, validated_data):
+        new_creds = validated_data.pop("credentials", None)
+        instance.provider = validated_data.get("provider", instance.provider)
+        instance.default_language = validated_data.get("default_language", instance.default_language)
+        if new_creds is not None:
+            # Merge, so a client can update one secret without resending all of
+            # them — but drop blanks and the mask placeholder so an untouched
+            # masked field doesn't overwrite the real secret with dots.
+            merged = dict(instance.credentials or {})
+            for key, value in new_creds.items():
+                if value in ("", None) or value == "••••••••":
+                    continue
+                merged[key] = value
+            instance.credentials = merged
+        # Any credential change forces re-verification before sends resume.
+        instance.is_active = False
+        instance.last_error = ""
+        instance.save()
+        return instance
 
 
 class WhatsAppTemplateSerializer(serializers.ModelSerializer):

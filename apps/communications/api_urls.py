@@ -6,9 +6,12 @@ from apps.communications.views import (
     BulkCampaignListCreateView, BulkCampaignDetailView,
     BulkCampaignLaunchView, BulkCampaignPauseView,
     WhatsAppWebhookView, TemplateMediaUploadView,
+    WhatsAppConfigView, WhatsAppConfigTestView,
 )
 
 urlpatterns = [
+    path("whatsapp/config/", WhatsAppConfigView.as_view(), name="api_wa_config"),
+    path("whatsapp/config/test/", WhatsAppConfigTestView.as_view(), name="api_wa_config_test"),
     path("whatsapp/templates/", WhatsAppTemplateListView.as_view(), name="api_wa_templates"),
     path("template-media/", TemplateMediaUploadView.as_view(), name="api_template_media"),
     path("whatsapp/messages/", WhatsAppMessageListView.as_view(), name="api_wa_messages"),

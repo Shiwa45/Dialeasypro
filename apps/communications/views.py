@@ -26,11 +26,13 @@ from apps.authentication.permissions import (
     HasFeatureAccess, IsActiveAgent, IsAuthenticatedAgent, IsManagerOrAdmin,
     IsTenantAdmin, feature_required, require_channel_feature,
 )
-from apps.communications.models import BulkCampaign, WhatsAppMessage, WhatsAppTemplate
+from apps.communications.models import (
+    BulkCampaign, WhatsAppConfig, WhatsAppMessage, WhatsAppTemplate,
+)
 from apps.communications.serializers import (
     BulkCampaignCreateSerializer, BulkCampaignSerializer,
     SendSMSSerializer, SendWhatsAppSerializer,
-    WhatsAppMessageSerializer, WhatsAppTemplateSerializer,
+    WhatsAppConfigSerializer, WhatsAppMessageSerializer, WhatsAppTemplateSerializer,
 )
 from apps.core.constants import FeatureKey
 from apps.core.pagination import StandardResultsSetPagination
@@ -326,6 +328,108 @@ class BulkCampaignPauseView(APIView):
         return Response({"message": "Campaign paused."})
 
 
+class WhatsAppConfigView(APIView):
+    """
+    GET/PUT /api/v1/comms/whatsapp/config/
+
+    The tenant's WhatsApp Business connection: which provider they send through
+    and that provider's credentials. Admin-only, and only useful to a tenant
+    whose plan includes a WhatsApp feature (one-click or bulk) — otherwise
+    there's nothing to send. Credentials are write-only; the response never
+    contains a secret's value.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def _require_whatsapp_feature(self, request):
+        """403→402 upsell unless the plan has any WhatsApp channel feature."""
+        has = getattr(request, "has_feature", lambda k: False)
+        if has(FeatureKey.ONE_CLICK_WHATSAPP) or has(FeatureKey.BULK_WHATSAPP):
+            return
+        from apps.core.exceptions import FeatureNotEnabledException
+        raise FeatureNotEnabledException(feature_key=FeatureKey.BULK_WHATSAPP)
+
+    def get(self, request):
+        self._require_whatsapp_feature(request)
+        config = WhatsAppConfig.get_solo()
+        return Response(WhatsAppConfigSerializer(config).data)
+
+    def put(self, request):
+        self._require_whatsapp_feature(request)
+        config = WhatsAppConfig.get_solo()
+        serializer = WhatsAppConfigSerializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_type="agent",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            tenant_schema=connection.schema_name,
+            entity_type="WhatsAppConfig",
+            description=f"Updated WhatsApp provider to {config.provider}",
+            request=request,
+            is_sensitive=True,
+        )
+        return Response(WhatsAppConfigSerializer(config).data)
+
+
+class WhatsAppConfigTestView(APIView):
+    """
+    POST /api/v1/comms/whatsapp/config/test/   {"phone": "+9198...", "message": "..."}
+
+    Sends a real one-off message through the saved credentials. On success the
+    config is marked active (sends start flowing); on failure the provider's own
+    error is stored and returned, and the config stays inactive. Admin-only.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def post(self, request):
+        from django.utils import timezone
+
+        from apps.communications.providers.whatsapp import (
+            WhatsAppError, provider_class, verify_config,
+        )
+
+        config = WhatsAppConfig.get_solo()
+        phone = (request.data.get("phone") or "").strip()
+        message = (request.data.get("message") or "TeleCRM WhatsApp test message.").strip()
+        if not phone:
+            return Response(
+                {"error": "phone_required", "message": "Provide a phone number to test with."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ok, detail = verify_config(config)
+        if not ok:
+            config.is_active = False
+            config.last_error = detail
+            config.save(update_fields=["is_active", "last_error", "updated_at"])
+            return Response(
+                {"ok": False, "error": "invalid_credentials", "message": detail},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        provider = provider_class(config.provider)(dict(config.credentials or {}))
+        try:
+            msg_id = provider.send_text(phone=phone, message=message)
+        except WhatsAppError as exc:
+            config.is_active = False
+            config.last_error = str(exc)[:500]
+            config.save(update_fields=["is_active", "last_error", "updated_at"])
+            return Response(
+                {"ok": False, "error": "send_failed", "message": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        config.is_active = True
+        config.last_error = ""
+        config.last_verified_at = timezone.now()
+        config.save(update_fields=["is_active", "last_error", "last_verified_at", "updated_at"])
+        return Response({"ok": True, "provider_message_id": msg_id, "sent_to": phone})
+
+
 class WhatsAppWebhookView(APIView):
     """
     POST /api/v1/comms/webhook/whatsapp/{provider}/
@@ -342,7 +446,7 @@ class WhatsAppWebhookView(APIView):
         try:
             if provider == "interakt":
                 self._handle_interakt(payload)
-            elif provider in ["aisensy", "wati", "gupshup"]:
+            elif provider in ["aisensy", "wati", "gupshup", "meta_cloud"]:
                 self._handle_generic(payload, provider)
         except Exception as exc:
             logger.error(f"[WA Webhook] Handler error ({provider}): {exc}", exc_info=True)

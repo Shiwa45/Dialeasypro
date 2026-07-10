@@ -18,6 +18,7 @@ Indian context:
 import uuid
 from django.db import models
 from django.utils import timezone
+from apps.core.crypto import EncryptedJSONField
 from apps.core.models import TimeStampedModel, TimeStampedUUIDModel
 from apps.core.constants import WhatsAppProvider
 
@@ -25,6 +26,58 @@ from apps.core.constants import WhatsAppProvider
 # ============================================================
 # WhatsApp
 # ============================================================
+class WhatsAppConfig(TimeStampedModel):
+    """
+    A tenant's own WhatsApp Business connection.
+
+    One row per tenant (singleton). Holds which provider they send through and
+    that provider's credentials — encrypted at rest, so a database dump never
+    exposes a tenant's API keys. Each provider needs a different bag of
+    credentials; the shape is documented per-provider in providers/whatsapp.py.
+    """
+
+    # Enforced as a singleton in save(); a tenant sends through one provider.
+    singleton = models.PositiveSmallIntegerField(default=1, unique=True, editable=False)
+
+    provider = models.CharField(
+        max_length=30, choices=WhatsAppProvider.CHOICES, default=WhatsAppProvider.INTERAKT,
+        help_text="Which WhatsApp Business API the tenant sends through.",
+    )
+    is_active = models.BooleanField(
+        default=False, db_index=True,
+        help_text="Off until credentials are verified. Sends fall back to a no-op while off.",
+    )
+
+    # Provider-specific secrets, e.g. Meta Cloud:
+    #   {"access_token": "...", "phone_number_id": "...", "business_account_id": "..."}
+    # Interakt / AiSensy: {"api_key": "..."}; WATI: {"access_token": "...", "api_endpoint": "..."};
+    # Gupshup: {"api_key": "...", "app_name": "...", "source_number": "..."}
+    credentials = EncryptedJSONField(default=dict, blank=True)
+
+    # Default language code for template sends (Meta requires it per template).
+    default_language = models.CharField(max_length=10, default="en")
+
+    # Populated by the test-send / webhook so an admin can see it's working.
+    last_verified_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True, default="")
+
+    class Meta:
+        verbose_name = "WhatsApp Configuration"
+        verbose_name_plural = "WhatsApp Configuration"
+
+    def __str__(self):
+        state = "active" if self.is_active else "inactive"
+        return f"WhatsApp via {self.get_provider_display()} ({state})"
+
+    def save(self, *args, **kwargs):
+        self.singleton = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls) -> "WhatsAppConfig":
+        """The tenant's config row, created inactive on first access."""
+        obj, _ = cls.objects.get_or_create(singleton=1)
+        return obj
 
 class WhatsAppTemplate(TimeStampedModel):
     """

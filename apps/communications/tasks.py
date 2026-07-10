@@ -117,7 +117,7 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
         logger.error(f"[WA Chunk] Setup failed: {exc}")
         return
 
-    provider_service = _get_whatsapp_provider(campaign.template.provider if campaign.template else "interakt")
+    provider_service, provider_slug = _get_whatsapp_provider()
 
     sent, failed = 0, 0
     for recipient in recipients:
@@ -142,7 +142,7 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
                 message_type="template",
                 content=rendered_body,
                 template=campaign.template,
-                provider=campaign.template.provider if campaign.template else "interakt",
+                provider=provider_slug,
                 provider_message_id=message_id,
                 status="sent",
                 sent_at=timezone.now(),
@@ -413,7 +413,7 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
             from apps.authentication.models import Agent
             sent_by = Agent.objects.filter(pk=sent_by_id).first()
 
-        provider_service = _get_whatsapp_provider(template.provider if template else "interakt")
+        provider_service, provider_slug = _get_whatsapp_provider()
 
         if template:
             msg_id = provider_service.send_template(
@@ -428,7 +428,7 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
             lead=lead, sent_by=sent_by, direction="outbound",
             message_type="template" if template else "text",
             content=message, template=template,
-            provider=template.provider if template else "interakt",
+            provider=provider_slug,
             provider_message_id=msg_id, status="sent", sent_at=timezone.now(),
         )
         LeadActivity.objects.create(
@@ -544,20 +544,23 @@ def _check_campaign_completion(campaign_id: str):
         )
 
 
-def _get_whatsapp_provider(provider_slug: str):
-    """Return the configured WhatsApp provider service."""
-    # Pluggable provider pattern — add new providers here
-    from apps.communications.providers.whatsapp import (
-        InteraktProvider, MockWhatsAppProvider
-    )
-    providers = {
-        "interakt": InteraktProvider,
-        "aisensy": MockWhatsAppProvider,
-        "wati": MockWhatsAppProvider,
-        "gupshup": MockWhatsAppProvider,
-    }
-    cls = providers.get(provider_slug, MockWhatsAppProvider)
-    return cls()
+def _get_whatsapp_provider():
+    """
+    Build the WhatsApp provider from the *tenant's* saved config.
+
+    The provider and its credentials come from the tenant's WhatsAppConfig
+    singleton, not from a template or global settings — every tenant sends
+    through their own WhatsApp Business account. Returns (provider, slug) so
+    callers can record which provider actually sent the message; slug is
+    "mock" when the tenant hasn't configured (or activated) one.
+    """
+    from apps.communications.models import WhatsAppConfig
+    from apps.communications.providers.whatsapp import build_provider
+
+    config = WhatsAppConfig.objects.filter(singleton=1).first()
+    provider = build_provider(config)
+    slug = config.provider if (config and config.is_active) else "mock"
+    return provider, slug
 
 
 def _get_sms_provider():

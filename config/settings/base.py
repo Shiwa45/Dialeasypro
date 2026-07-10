@@ -22,6 +22,13 @@ SECRET_KEY = config("SECRET_KEY")
 DEBUG = config("DEBUG", default=False, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*", cast=Csv())
 
+# Key for at-rest encryption of sensitive model fields (WhatsApp provider
+# credentials via apps.core.crypto). A urlsafe-base64 Fernet key — generate one
+# with:  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# If unset, a key is derived from SECRET_KEY so dev works with no config; set it
+# explicitly in production so rotating SECRET_KEY doesn't orphan stored secrets.
+FIELD_ENCRYPTION_KEY = config("FIELD_ENCRYPTION_KEY", default="")
+
 # ============================================================
 # django-tenants: Multi-Tenant Configuration
 # CRITICAL: SHARED_APPS must come before TENANT_APPS in INSTALLED_APPS

@@ -5,8 +5,19 @@ from unfold.decorators import display
 from django.utils.html import format_html
 from apps.communications.models import (
     BulkCampaign, CampaignRecipient, EmailLog,
-    SMSLog, WhatsAppMessage, WhatsAppTemplate,
+    SMSLog, WhatsAppConfig, WhatsAppMessage, WhatsAppTemplate,
 )
+
+
+@admin.register(WhatsAppConfig)
+class WhatsAppConfigAdmin(ModelAdmin):
+    # Credentials are an encrypted blob — never surface them in the changelist.
+    list_display = ["provider", "is_active", "last_verified_at", "last_error"]
+    readonly_fields = ["last_verified_at", "singleton"]
+
+    def has_add_permission(self, request):
+        # Singleton per tenant — created on first access via the API.
+        return not WhatsAppConfig.objects.exists()
 
 @admin.register(WhatsAppTemplate)
 class WhatsAppTemplateAdmin(ModelAdmin):

@@ -48,6 +48,21 @@ app.conf.beat_schedule = {
         "options": {"queue": "default"},
     },
 
+    # ---- HRMS (no-op for tenants without the module) -------
+    # Derive yesterday's attendance from dialer session logs, 00:30 IST
+    # (19:00 UTC prev day) — after all of the day's intervals have closed.
+    "hrms-sync-attendance": {
+        "task": "apps.hrms.tasks.sync_attendance_all_tenants",
+        "schedule": crontab(hour=19, minute=0),
+        "options": {"queue": "default"},
+    },
+    # Refresh the running month's incentive earnings nightly, 1:30 AM IST.
+    "hrms-recompute-incentives": {
+        "task": "apps.hrms.tasks.recompute_incentives_all_tenants",
+        "schedule": crontab(hour=20, minute=0),
+        "options": {"queue": "default"},
+    },
+
     # ---- Trial Management ----------------------------------
     # Check trial expirations daily at 9 AM IST (3:30 AM UTC)
     "check-trial-expirations": {

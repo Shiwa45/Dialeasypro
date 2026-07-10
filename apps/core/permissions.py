@@ -132,10 +132,13 @@ class HasFeatureAccess(permissions.BasePermission):
             return False
 
         # Use the has_feature helper injected by TenantFeatureFlagMiddleware
-        if hasattr(request, "has_feature"):
-            return request.has_feature(feature_key)
+        if hasattr(request, "has_feature") and request.has_feature(feature_key):
+            return True
 
-        return False
+        # Raise (rather than return False) so the client gets a 402 with the
+        # structured upsell payload instead of an opaque 403.
+        from apps.core.exceptions import FeatureNotEnabledException
+        raise FeatureNotEnabledException(feature_key=feature_key)
 
 
 def feature_required(feature_key):

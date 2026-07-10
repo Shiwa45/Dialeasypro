@@ -58,6 +58,7 @@ from apps.leads.serializers import (
     LeadUpdateSerializer,
 )
 from apps.authentication.permissions import (
+    HasFeatureAccess,
     IsActiveAgent,
     IsAuthenticatedAgent,
     IsManagerOrAdmin,
@@ -564,9 +565,11 @@ class LeadImportView(APIView):
     POST /api/v1/leads/import/
     Upload CSV/XLSX file to import leads.
     Returns an import job ID for progress tracking.
+    Plan-gated on LEAD_IMPORT.
     """
 
-    permission_classes = [IsManagerOrAdmin]
+    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.LEAD_IMPORT
     parser_classes = [MultiPartParser]
 
     def post(self, request):
@@ -663,8 +666,10 @@ class CustomFieldListView(generics.ListCreateAPIView):
     pagination_class = None  # Small finite list; return plain array
 
     def get_permissions(self):
+        # Reading custom fields is always allowed (agents must render existing
+        # data); CREATING them is plan-gated on CUSTOM_FIELDS.
         if self.request.method == "POST":
-            return [IsTenantAdmin()]
+            return [IsTenantAdmin(), feature_required(FeatureKey.CUSTOM_FIELDS)()]
         return [IsAuthenticatedAgent()]
 
     def get_queryset(self):
@@ -796,11 +801,12 @@ class LeadExportView(APIView):
     """
     GET /api/v1/leads/export/
     Export leads as CSV. Respects same filters as LeadListCreateView.
-    Checks LEAD_EXPORT feature flag.
+    Plan-gated on LEAD_EXPORT.
     Returns streaming CSV response.
     """
 
-    permission_classes = [IsManagerOrAdmin]
+    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.LEAD_EXPORT
 
     def get(self, request):
         import csv

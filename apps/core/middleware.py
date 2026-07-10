@@ -32,6 +32,7 @@ from django.core.cache import cache
 from django.db import connection
 from django.http import HttpResponse, JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+from django.utils.functional import SimpleLazyObject
 
 from apps.core.constants import CacheTimeout, SubscriptionStatus
 
@@ -221,7 +222,12 @@ class TenantFeatureFlagMiddleware(MiddlewareMixin):
         # Load features from cache or DB
         features = self._get_tenant_features(tenant)
         request.tenant_features = features
-        request.tenant_plan = getattr(tenant, "_cached_plan", None)
+
+        # Resolve the plan lazily: `_cached_plan` is only populated on a cache
+        # MISS, so reading it directly left tenant_plan None on nearly every
+        # request. SimpleLazyObject costs nothing unless something reads it.
+        # NOTE: it is never `is None` — test it for truthiness instead.
+        request.tenant_plan = SimpleLazyObject(lambda: self._get_tenant_plan(tenant))
 
         # Inject helper method
         def has_feature(feature_key):
@@ -262,12 +268,48 @@ class TenantFeatureFlagMiddleware(MiddlewareMixin):
         cache.set(cache_key, features, timeout=CacheTimeout.FEATURE_FLAGS)
         return features
 
-    def _load_features_from_db(self, tenant) -> dict:
-        """Query the tenant's plan features from the public schema."""
-        try:
-            from apps.plans.models import PlanFeature, Subscription
+    def _get_tenant_plan(self, tenant):
+        """Resolve the tenant's active Plan (id cached; 0 means 'no plan')."""
+        cache_key = f"tenant_plan_id:{tenant.schema_name}"
+        plan_id = cache.get(cache_key)
 
-            # Get active subscription
+        if plan_id is None:
+            from apps.plans.models import Subscription
+            subscription = (
+                Subscription.objects.filter(
+                    tenant=tenant, status__in=SubscriptionStatus.ACTIVE_STATUSES
+                )
+                .select_related("plan")
+                .first()
+            )
+            plan = subscription.plan if subscription else None
+            cache.set(cache_key, plan.pk if plan else 0, timeout=CacheTimeout.FEATURE_FLAGS)
+            return plan
+
+        if not plan_id:
+            return None
+
+        from apps.plans.models import Plan
+        return Plan.objects.filter(pk=plan_id).first()
+
+    def _load_features_from_db(self, tenant) -> dict:
+        """
+        Resolve the tenant's EFFECTIVE feature map from the public schema:
+
+            plan's PlanFeature set, then TenantEntitlement applied over it
+
+        Entitlements are how add-on modules (HRMS/ERP/AI) are sold independently
+        of the plan tier. A grant adds a feature; is_enabled=False explicitly
+        revokes one the plan would otherwise allow. Expired rows are ignored.
+        A tenant with no subscription can still hold entitlements.
+        """
+        from django.db.models import Q
+        from django.utils import timezone
+
+        features: dict = {}
+        try:
+            from apps.plans.models import PlanFeature, Subscription, TenantEntitlement
+
             subscription = (
                 Subscription.objects.filter(
                     tenant=tenant,
@@ -277,24 +319,32 @@ class TenantFeatureFlagMiddleware(MiddlewareMixin):
                 .first()
             )
 
-            if not subscription:
-                return {}
+            if subscription:
+                # Cache plan reference on tenant object
+                tenant._cached_plan = subscription.plan
+                features = {
+                    pf["feature_key"]: pf["is_enabled"]
+                    for pf in PlanFeature.objects.filter(
+                        plan=subscription.plan
+                    ).values("feature_key", "is_enabled")
+                }
 
-            # Cache plan reference on tenant object
-            tenant._cached_plan = subscription.plan
-
-            # Load all feature flags for this plan
-            plan_features = PlanFeature.objects.filter(
-                plan=subscription.plan
+            # Layer per-tenant entitlements (add-ons / bespoke grants) on top.
+            now = timezone.now()
+            entitlements = TenantEntitlement.objects.filter(
+                Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+                tenant=tenant,
             ).values("feature_key", "is_enabled")
+            for ent in entitlements:
+                features[ent["feature_key"]] = ent["is_enabled"]
 
-            return {pf["feature_key"]: pf["is_enabled"] for pf in plan_features}
+            return features
 
         except Exception as exc:
             logger.warning(
                 f"Failed to load features for tenant {tenant.schema_name}: {exc}"
             )
-            return {}
+            return features
 
     def _is_tenant_active(self, tenant) -> bool:
         """
@@ -332,11 +382,12 @@ class TenantFeatureFlagMiddleware(MiddlewareMixin):
     @staticmethod
     def invalidate_cache(schema_name: str):
         """
-        Call this when a tenant's plan changes.
-        Clears the feature flag cache for immediate effect.
+        Call this when a tenant's plan, entitlements or status change.
+        Clears the cached feature map for immediate effect.
         """
         cache.delete(f"tenant_features:{schema_name}")
         cache.delete(f"tenant_active:{schema_name}")
+        cache.delete(f"tenant_plan_id:{schema_name}")
 
 
 class RequestTimingMiddleware(MiddlewareMixin):

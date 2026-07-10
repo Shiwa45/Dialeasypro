@@ -19,6 +19,7 @@ from apps.authentication.views import (
     AgentStatusUpdateAPIView,
     LiveAgentsAPIView,
     TeamListAPIView,
+    TenantFeaturesAPIView,
     TenantInfoAPIView,
 )
 
@@ -34,6 +35,9 @@ urlpatterns = [
     # Current agent profile
     path("me/", AgentProfileAPIView.as_view(), name="api_agent_me"),
     path("change-password/", AgentPasswordChangeAPIView.as_view(), name="api_agent_change_password"),
+
+    # Tenant plan / feature entitlements (drives client-side UI gating)
+    path("features/", TenantFeaturesAPIView.as_view(), name="api_tenant_features"),
 
     # Live agent monitoring
     path("status/", AgentStatusUpdateAPIView.as_view(), name="api_agent_status"),

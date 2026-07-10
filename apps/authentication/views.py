@@ -40,6 +40,7 @@ from rest_framework.views import APIView
 from apps.authentication.models import Agent, AgentLoginSession, Team
 from apps.authentication.permissions import (
     CanManageAgent,
+    HasFeatureAccess,
     IsActiveAgent,
     IsAuthenticatedAgent,
     IsManagerOrAdmin,
@@ -61,7 +62,7 @@ from apps.authentication.tokens import (
     blacklist_refresh_token,
     generate_tokens_for_agent,
 )
-from apps.core.constants import AgentRole
+from apps.core.constants import AgentRole, FeatureKey
 from apps.core.exceptions import InvalidCredentialsException, PlanLimitExceededException
 from apps.core.pagination import StandardResultsSetPagination
 from apps.superadmin.models import AuditLog
@@ -514,6 +515,55 @@ class TeamListAPIView(generics.ListCreateAPIView):
         )
 
 
+class TenantFeaturesAPIView(APIView):
+    """
+    GET /api/v1/auth/features/
+    The tenant's EFFECTIVE feature map (plan + add-on entitlements), plan info
+    and capacity limits.
+
+    Clients use this to hide/disable gated UI. It is a UX convenience only —
+    the backend remains the source of truth and re-checks every gated endpoint.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def get(self, request):
+        from apps.core.constants import FeatureKey, ModuleKey
+
+        features = getattr(request, "tenant_features", {}) or {}
+        # Present every known key so clients don't guess on missing entries.
+        full_map = {key: bool(features.get(key, False)) for key in FeatureKey.ALL}
+
+        # `request.tenant_plan` is a SimpleLazyObject — never `is None`, so
+        # test truthiness (which forces evaluation).
+        plan = getattr(request, "tenant_plan", None)
+        plan_data = None
+        if plan:
+            plan_data = {
+                "slug": plan.slug,
+                "name": plan.name,
+                "limits": {
+                    "max_agents": plan.max_agents,
+                    "max_leads": plan.max_leads,
+                    "max_leads_per_day": plan.max_leads_per_day,
+                    "max_whatsapp_bulk_per_day": plan.max_whatsapp_bulk_per_day,
+                    "max_email_bulk_per_day": plan.max_email_bulk_per_day,
+                    "max_sms_per_day": plan.max_sms_per_day,
+                    "storage_gb": plan.storage_gb,
+                    "custom_fields_limit": plan.custom_fields_limit,
+                    "lead_sources_limit": plan.lead_sources_limit,
+                },
+            }
+
+        # A module counts as active only when ALL of its features are enabled.
+        modules = {
+            module: all(full_map.get(k, False) for k in keys)
+            for module, keys in ModuleKey.FEATURES.items()
+        }
+
+        return Response({"features": full_map, "modules": modules, "plan": plan_data})
+
+
 # ============================================================
 # Live Agent Monitoring API
 # ============================================================
@@ -570,9 +620,14 @@ class LiveAgentsAPIView(APIView):
     Manager/admin snapshot of every agent's current status + today's time
     totals. Used for the initial load of the Live Agents dashboard; ongoing
     updates arrive over the /ws/agent-monitor/ WebSocket.
+
+    Plan-gated on AGENT_MONITORING. Note the agent-side status/heartbeat
+    endpoints are deliberately NOT gated — agents must always be able to
+    report state, otherwise the dialer breaks on un-entitled plans.
     """
 
-    permission_classes = [IsManagerOrAdmin]
+    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.AGENT_MONITORING
 
     def get(self, request):
         from apps.authentication.models import AgentStatus

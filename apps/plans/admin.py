@@ -9,7 +9,36 @@ from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action, display
 
 from apps.core.constants import FeatureKey, SubscriptionStatus
-from apps.plans.models import Invoice, Plan, PlanFeature, Subscription
+from apps.plans.models import (
+    Invoice,
+    Plan,
+    PlanFeature,
+    Subscription,
+    TenantEntitlement,
+)
+
+
+@admin.register(TenantEntitlement)
+class TenantEntitlementAdmin(ModelAdmin):
+    """
+    Per-tenant feature grants/revokes layered over the plan — this is how
+    add-on modules (HRMS / ERP / AI Suite) are sold without changing tier.
+    """
+
+    list_display = ["tenant", "feature_key", "is_enabled", "module_key", "expires_at"]
+    list_filter = ["is_enabled", "module_key", "feature_key"]
+    search_fields = ["tenant__company_name", "tenant__schema_name", "feature_key"]
+    raw_id_fields = ["tenant"]
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        # Feature maps are cached in Redis — drop it so the change is immediate.
+        TenantEntitlement._invalidate(obj.tenant)
+
+    def delete_model(self, request, obj):
+        tenant = obj.tenant
+        super().delete_model(request, obj)
+        TenantEntitlement._invalidate(tenant)
 
 
 class PlanFeatureInline(TabularInline):

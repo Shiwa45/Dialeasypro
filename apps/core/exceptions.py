@@ -34,6 +34,17 @@ def custom_exception_handler(exc, context):
     # Let DRF handle standard exceptions first
     response = drf_exception_handler(exc, context)
 
+    # Exceptions that carry structured context (e.g. the upgrade-required
+    # upsell payload) render it verbatim rather than being flattened below.
+    # NOTE: checked via get_error_payload(), NOT get_full_details() — the
+    # latter exists on every DRF APIException and would hijack all errors.
+    if response is not None and hasattr(exc, "get_error_payload"):
+        try:
+            response.data = exc.get_error_payload()
+            return response
+        except Exception:  # fall through to the generic shape
+            pass
+
     if response is not None:
         error_code = "error"
         message = "An error occurred."
@@ -110,9 +121,24 @@ class TenantSuspendedException(TeleCRMBaseException):
 
 
 class FeatureNotEnabledException(TeleCRMBaseException):
-    """Raised when a tenant tries to use a feature not in their plan."""
-    status_code = status.HTTP_403_FORBIDDEN
-    default_code = "feature_not_enabled"
+    """
+    Raised when a tenant uses a feature their plan (+ add-ons) doesn't include.
+
+    Returns 402 Payment Required with a structured upsell payload so the web and
+    mobile clients can render an "Upgrade" call-to-action instead of a dead end:
+
+        {
+          "error": "upgrade_required",
+          "message": "...",
+          "feature_key": "hrms_payroll",
+          "feature_label": "HRMS — Payroll & Payslips",
+          "available_in": ["business", "enterprise"],
+          "module": "hrms",
+          "upgrade_url": "/crm/billing/"
+        }
+    """
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+    default_code = "upgrade_required"
     default_detail = "This feature is not available on your current plan. Please upgrade."
 
     def __init__(self, feature_key: str = None, upgrade_url: str = "/crm/billing/"):
@@ -120,11 +146,39 @@ class FeatureNotEnabledException(TeleCRMBaseException):
         self.feature_key = feature_key
         self.upgrade_url = upgrade_url
 
-    def get_full_details(self):
+    def _available_in(self) -> list:
+        """Plan slugs that include this feature (drives the upgrade CTA)."""
+        if not self.feature_key:
+            return []
+        try:
+            from apps.plans.models import PlanFeature
+            return list(
+                PlanFeature.objects.filter(
+                    feature_key=self.feature_key, is_enabled=True, plan__is_active=True
+                )
+                .order_by("plan__sort_order")
+                .values_list("plan__slug", flat=True)
+            )
+        except Exception:
+            return []
+
+    def _module(self) -> str | None:
+        """The add-on module this feature belongs to, if any."""
+        from apps.core.constants import ModuleKey
+        for module, keys in ModuleKey.FEATURES.items():
+            if self.feature_key in keys:
+                return module
+        return None
+
+    def get_error_payload(self) -> dict:
+        from apps.core.constants import FeatureKey
         return {
             "error": self.default_code,
             "message": str(self.default_detail),
             "feature_key": self.feature_key,
+            "feature_label": FeatureKey.LABELS.get(self.feature_key, self.feature_key),
+            "available_in": self._available_in(),
+            "module": self._module(),
             "upgrade_url": self.upgrade_url,
         }
 

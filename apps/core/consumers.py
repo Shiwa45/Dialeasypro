@@ -66,6 +66,13 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=4004)
             return
 
+        # Plan gate: the REST snapshot is gated, so the socket must be too —
+        # otherwise an un-entitled tenant could just subscribe directly.
+        if not await self._has_monitoring_feature(schema_name):
+            logger.warning(f"[WS] AgentMonitor: {schema_name} lacks agent_monitoring")
+            await self.close(code=4005)
+            return
+
         self.schema_name = schema_name
         self.group_name = f"monitor_{schema_name}"
         self.agent_id = agent_id
@@ -103,6 +110,28 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
                 return None
 
         return await verify()
+
+    @staticmethod
+    async def _has_monitoring_feature(schema_name: str) -> bool:
+        """Check the tenant's effective features for AGENT_MONITORING."""
+        from asgiref.sync import sync_to_async
+
+        @sync_to_async
+        def check():
+            try:
+                from apps.core.constants import FeatureKey
+                from apps.core.middleware import TenantFeatureFlagMiddleware
+                from apps.tenants.models import Tenant
+
+                tenant = Tenant.objects.get(schema_name=schema_name)
+                mw = TenantFeatureFlagMiddleware(lambda r: None)
+                features = mw._get_tenant_features(tenant)
+                return bool(features.get(FeatureKey.AGENT_MONITORING, False))
+            except Exception as exc:
+                logger.warning(f"[WS] AgentMonitor feature check failed: {exc}")
+                return False
+
+        return await check()
 
     async def disconnect(self, close_code):
         """Leave the monitoring group on disconnect."""

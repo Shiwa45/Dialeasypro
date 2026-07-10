@@ -19,6 +19,7 @@ from django.utils import timezone
 from apps.core.constants import (
     FeatureKey,
     GSTState,
+    ModuleKey,
     PlanSlug,
     SubscriptionStatus,
 )
@@ -148,6 +149,103 @@ class PlanFeature(models.Model):
         status = "✅" if self.is_enabled else "❌"
         label = FeatureKey.LABELS.get(self.feature_key, self.feature_key)
         return f"{status} {self.plan.name} — {label}"
+
+
+class TenantEntitlement(TimeStampedModel):
+    """
+    A per-tenant feature grant or revoke, layered ON TOP of the plan's features.
+
+    This is what makes add-on modules sellable independently of the plan tier
+    ("Growth plan + HRMS module"). Resolution order, computed in
+    TenantFeatureFlagMiddleware:
+
+        effective = plan's PlanFeature set, then entitlements applied over it
+
+    An entitlement with is_enabled=False explicitly REVOKES a feature the plan
+    would otherwise grant (useful for abuse control or bespoke deals).
+    Expired rows are ignored entirely.
+    """
+
+    tenant = models.ForeignKey(
+        "tenants.Tenant", on_delete=models.CASCADE, related_name="entitlements"
+    )
+    feature_key = models.CharField(
+        max_length=100,
+        choices=FeatureKey.CHOICES,
+        db_index=True,
+        help_text="Feature identifier from FeatureKey constants.",
+    )
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text="True = grant this feature. False = explicitly revoke it.",
+    )
+    module_key = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="Which add-on module granted this (provenance, for bulk revoke).",
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this entitlement lapses. Null = never expires.",
+    )
+    note = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        unique_together = ("tenant", "feature_key")
+        verbose_name = "Tenant Entitlement"
+        verbose_name_plural = "Tenant Entitlements"
+        ordering = ["tenant", "feature_key"]
+        indexes = [
+            models.Index(fields=["tenant", "feature_key"], name="entl_tenant_feature_idx"),
+        ]
+
+    def __str__(self):
+        state = "grant" if self.is_enabled else "revoke"
+        label = FeatureKey.LABELS.get(self.feature_key, self.feature_key)
+        return f"{self.tenant.schema_name}: {state} {label}"
+
+    @property
+    def is_expired(self) -> bool:
+        return bool(self.expires_at and self.expires_at <= timezone.now())
+
+    # ---- Module helpers ------------------------------------
+
+    @classmethod
+    def grant_module(cls, tenant, module_key: str, expires_at=None, note: str = ""):
+        """Grant every feature in a module to a tenant. Returns rows touched."""
+        keys = ModuleKey.FEATURES.get(module_key)
+        if not keys:
+            raise ValueError(f"Unknown module: {module_key}")
+        rows = []
+        for key in keys:
+            row, _ = cls.objects.update_or_create(
+                tenant=tenant,
+                feature_key=key,
+                defaults={
+                    "is_enabled": True,
+                    "module_key": module_key,
+                    "expires_at": expires_at,
+                    "note": note,
+                },
+            )
+            rows.append(row)
+        cls._invalidate(tenant)
+        return rows
+
+    @classmethod
+    def revoke_module(cls, tenant, module_key: str) -> int:
+        """Remove a module's entitlements from a tenant. Returns rows deleted."""
+        deleted, _ = cls.objects.filter(tenant=tenant, module_key=module_key).delete()
+        cls._invalidate(tenant)
+        return deleted
+
+    @staticmethod
+    def _invalidate(tenant):
+        """Drop the cached feature map so the change takes effect immediately."""
+        from apps.core.middleware import TenantFeatureFlagMiddleware
+        TenantFeatureFlagMiddleware.invalidate_cache(tenant.schema_name)
 
 
 class Subscription(TimeStampedModel):

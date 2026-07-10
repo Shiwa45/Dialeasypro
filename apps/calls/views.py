@@ -21,7 +21,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.permissions import IsActiveAgent, IsAuthenticatedAgent, IsManagerOrAdmin
+from apps.authentication.permissions import (
+    HasFeatureAccess,
+    IsActiveAgent,
+    IsAuthenticatedAgent,
+    IsManagerOrAdmin,
+)
 from apps.calls.models import CallDisposition, CallLog, CallRecording
 from apps.calls.serializers import (
     CallDispositionSerializer,
@@ -29,7 +34,7 @@ from apps.calls.serializers import (
     CallLogSerializer,
     ClickToCallSerializer,
 )
-from apps.core.constants import AgentRole
+from apps.core.constants import AgentRole, FeatureKey
 from apps.core.pagination import StandardResultsSetPagination
 from apps.leads.models import Lead, LeadActivity
 
@@ -135,7 +140,8 @@ class CallRecordingUploadView(APIView):
       matched_by       (optional) filename_number | timestamp | manual
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.CALL_RECORDING_ACCESS
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     # Reject anything that isn't plausibly a call recording.

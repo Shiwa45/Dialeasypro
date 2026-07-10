@@ -83,6 +83,24 @@ class FeatureKey:
     WHITE_LABEL = "white_label"
     PRIORITY_SUPPORT = "priority_support"
 
+    # ---- AI Suite (add-on module) --------------------------
+    AI_CALL_TRANSCRIPTION = "ai_call_transcription"
+    AI_CALL_INSIGHTS = "ai_call_insights"
+
+    # ---- HRMS (add-on module) ------------------------------
+    HRMS_ATTENDANCE = "hrms_attendance"
+    HRMS_LEAVE = "hrms_leave"
+    HRMS_PAYROLL = "hrms_payroll"
+    HRMS_EXPENSES = "hrms_expenses"
+    INCENTIVE_ENGINE = "incentive_engine"
+
+    # ---- ERP / Sales Ops (add-on module) -------------------
+    ERP_PRODUCTS = "erp_products"
+    ERP_QUOTATIONS = "erp_quotations"
+    ERP_SALES_ORDERS = "erp_sales_orders"
+    ERP_CUSTOMER_INVOICING = "erp_customer_invoicing"
+    TALLY_INTEGRATION = "tally_integration"
+
     # All feature keys as a list (for validation)
     ALL = [
         INDIAMART, META_LEAD_ADS, NINETYNINEACRES, HOUSING_COM, MAGICBRICKS,
@@ -97,6 +115,10 @@ class FeatureKey:
         TEAM_MANAGEMENT, AGENT_MONITORING, AGENT_GPS_TRACKING, AGENT_PERFORMANCE_REPORTS,
         BASIC_REPORTS, ADVANCED_REPORTS, SCHEDULED_REPORTS, CUSTOM_DASHBOARDS,
         API_ACCESS, WHITE_LABEL, PRIORITY_SUPPORT,
+        AI_CALL_TRANSCRIPTION, AI_CALL_INSIGHTS,
+        HRMS_ATTENDANCE, HRMS_LEAVE, HRMS_PAYROLL, HRMS_EXPENSES, INCENTIVE_ENGINE,
+        ERP_PRODUCTS, ERP_QUOTATIONS, ERP_SALES_ORDERS, ERP_CUSTOMER_INVOICING,
+        TALLY_INTEGRATION,
     ]
 
     # Human-readable labels
@@ -147,10 +169,68 @@ class FeatureKey:
         API_ACCESS: "REST API Access",
         WHITE_LABEL: "White-label Branding",
         PRIORITY_SUPPORT: "Priority Support",
+        AI_CALL_TRANSCRIPTION: "AI Call Transcription",
+        AI_CALL_INSIGHTS: "AI Call Insights (sentiment, coaching)",
+        HRMS_ATTENDANCE: "HRMS — Attendance & Timesheets",
+        HRMS_LEAVE: "HRMS — Leave Management",
+        HRMS_PAYROLL: "HRMS — Payroll & Payslips",
+        HRMS_EXPENSES: "HRMS — Expense Claims",
+        INCENTIVE_ENGINE: "Agent Incentive & Commission Engine",
+        ERP_PRODUCTS: "ERP — Products & Price Lists",
+        ERP_QUOTATIONS: "ERP — Quotations",
+        ERP_SALES_ORDERS: "ERP — Sales Orders",
+        ERP_CUSTOMER_INVOICING: "ERP — GST Customer Invoicing",
+        TALLY_INTEGRATION: "Tally / Zoho Books Integration",
     }
 
     # Feature choices for Django model field
     CHOICES = [(key, label) for key, label in LABELS.items()]
+
+
+# ============================================================
+# Sellable Modules — bundles of features sold as plan add-ons
+#
+# A tenant's effective features are:
+#     plan's PlanFeature set  ∪  TenantEntitlement grants  −  revokes
+#
+# Granting a module simply creates a TenantEntitlement row per feature it
+# contains, so `request.has_feature()` stays a single dict lookup.
+# ============================================================
+
+class ModuleKey:
+    AI_SUITE = "ai_suite"
+    HRMS = "hrms"
+    ERP_SALES = "erp_sales"
+
+    CHOICES = [
+        (AI_SUITE, "AI Suite"),
+        (HRMS, "HRMS"),
+        (ERP_SALES, "ERP — Sales Ops"),
+    ]
+
+    ALL = [AI_SUITE, HRMS, ERP_SALES]
+
+    # module → the feature keys it unlocks
+    FEATURES = {
+        AI_SUITE: [
+            FeatureKey.AI_CALL_TRANSCRIPTION,
+            FeatureKey.AI_CALL_INSIGHTS,
+        ],
+        HRMS: [
+            FeatureKey.HRMS_ATTENDANCE,
+            FeatureKey.HRMS_LEAVE,
+            FeatureKey.HRMS_PAYROLL,
+            FeatureKey.HRMS_EXPENSES,
+            FeatureKey.INCENTIVE_ENGINE,
+        ],
+        ERP_SALES: [
+            FeatureKey.ERP_PRODUCTS,
+            FeatureKey.ERP_QUOTATIONS,
+            FeatureKey.ERP_SALES_ORDERS,
+            FeatureKey.ERP_CUSTOMER_INVOICING,
+            FeatureKey.TALLY_INTEGRATION,
+        ],
+    }
 
 
 # ============================================================

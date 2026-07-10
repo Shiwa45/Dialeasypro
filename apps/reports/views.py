@@ -20,8 +20,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.permissions import IsAuthenticatedAgent, IsManagerOrAdmin
-from apps.core.constants import AgentRole, LeadStatus, LeadSource
+from apps.authentication.permissions import (
+    HasFeatureAccess,
+    IsAuthenticatedAgent,
+    IsManagerOrAdmin,
+)
+from apps.core.constants import AgentRole, FeatureKey, LeadStatus, LeadSource
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,8 @@ class AgentPerformanceReportView(APIView):
     Params: date_from, date_to, agent_id (optional filter)
     """
 
-    permission_classes = [IsManagerOrAdmin]
+    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.AGENT_PERFORMANCE_REPORTS
 
     def get(self, request):
         from apps.calls.models import CallLog
@@ -120,7 +125,8 @@ class LeadSourceReportView(APIView):
     Lead volume and conversion by source. Identifies best-performing channels.
     """
 
-    permission_classes = [IsManagerOrAdmin]
+    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.ADVANCED_REPORTS
 
     def get(self, request):
         from apps.leads.models import Lead
@@ -176,7 +182,8 @@ class CallAnalyticsReportView(APIView):
     Call volume trends, connection rates, duration distribution, and disposition breakdown.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.BASIC_REPORTS
 
     def get(self, request):
         from apps.calls.models import CallLog
@@ -262,7 +269,8 @@ class ConversionFunnelView(APIView):
     Lead pipeline funnel: how many leads at each status stage.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.BASIC_REPORTS
 
     def get(self, request):
         from apps.leads.models import Lead
@@ -316,7 +324,8 @@ class DailyActivityView(APIView):
     Used for the real-time dashboard ticker.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.BASIC_REPORTS
 
     def get(self, request):
         from apps.leads.models import Lead, FollowUp

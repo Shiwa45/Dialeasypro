@@ -24,8 +24,13 @@ from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.permissions import IsAuthenticatedAgent, IsTenantAdmin
+from apps.authentication.permissions import (
+    IsAuthenticatedAgent,
+    IsTenantAdmin,
+    require_feature,
+)
 from apps.core.constants import LeadPriority, LeadSource
+from apps.core.exceptions import PlanLimitExceededException
 from apps.core.utils import normalize_indian_phone
 from apps.integrations.models import LeadSourceConfig, WebhookLog
 from apps.integrations.serializers import LeadSourceConfigSerializer
@@ -481,6 +486,10 @@ class IntegrationConfigListView(generics.ListCreateAPIView):
     """
     GET  /api/v1/integrations/configs/  → List all configured integrations
     POST /api/v1/integrations/configs/  → Enable/configure a new integration
+
+    Each lead source maps to its own plan feature (LeadSource.FEATURE_MAP), and
+    the plan also caps how many integrations may be active at once
+    (Plan.lead_sources_limit).
     """
 
     permission_classes = [IsTenantAdmin]
@@ -491,6 +500,23 @@ class IntegrationConfigListView(generics.ListCreateAPIView):
         return LeadSourceConfig.objects.order_by("source")
 
     def perform_create(self, serializer):
+        source = serializer.validated_data.get("source")
+
+        # Gate on the feature for this specific source (per-source pricing).
+        if feature_key := LeadSource.FEATURE_MAP.get(source):
+            require_feature(self.request, feature_key)
+
+        # Enforce the plan's cap on simultaneously-active integrations.
+        plan = getattr(self.request, "tenant_plan", None)
+        if plan and plan.lead_sources_limit:
+            active = LeadSourceConfig.objects.filter(is_active=True).count()
+            if active >= plan.lead_sources_limit:
+                raise PlanLimitExceededException(
+                    limit_type="lead source integrations",
+                    current=active,
+                    max_allowed=plan.lead_sources_limit,
+                )
+
         serializer.save()
 
 

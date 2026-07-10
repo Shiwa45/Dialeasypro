@@ -19,6 +19,8 @@ from apps.core.permissions import (  # noqa: F401
     tenant_admin_required,
     role_required,
     feature_access_required,
+    require_feature,
+    require_channel_feature,
 )
 
 from rest_framework import permissions

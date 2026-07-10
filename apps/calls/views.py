@@ -309,7 +309,8 @@ class ClickToCallView(APIView):
     The provider's webhook updates it with actual duration/status.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.CLOUD_TELEPHONY
 
     def post(self, request):
         serializer = ClickToCallSerializer(data=request.data)

@@ -41,15 +41,62 @@ from django.utils import timezone
 
 from apps.core.constants import FeatureKey, ModuleKey, PlanSlug, SubscriptionStatus
 
-# Features that are actually enforced in code today. Keep in sync as gates are
-# added — this is exactly the set that --grandfather protects.
-ENFORCED_FEATURES = [
-    FeatureKey.AGENT_MONITORING,
-    FeatureKey.LEAD_IMPORT,
-    FeatureKey.LEAD_EXPORT,
-    FeatureKey.CUSTOM_FIELDS,
-    FeatureKey.CALL_RECORDING_ACCESS,
+# Gates applied imperatively (inside a handler or get_permissions), which cannot
+# be discovered by walking the URLconf. Everything declared as
+# `required_feature = ...` on a view IS discovered automatically — see
+# discover_enforced_features() — so this list stays tiny and rarely changes.
+#
+# Deliberately EXCLUDED: the per-lead-source integration keys
+# (LeadSource.FEATURE_MAP). A tenant must not silently gain every marketplace
+# integration just because we switched enforcement on.
+DYNAMIC_FEATURES = [
+    FeatureKey.CUSTOM_FIELDS,        # CustomFieldListView.get_permissions()
+    FeatureKey.AGENT_MONITORING,     # also gated on the WebSocket consumer
+    # Bulk / one-click gates resolve from the request's channel at runtime.
+    FeatureKey.BULK_WHATSAPP,
+    FeatureKey.BULK_EMAIL,
+    FeatureKey.BULK_SMS,
+    FeatureKey.ONE_CLICK_WHATSAPP,
+    FeatureKey.ONE_CLICK_EMAIL,
+    FeatureKey.ONE_CLICK_SMS,
 ]
+
+
+def discover_enforced_features() -> list:
+    """
+    The set of features actually enforced right now = every `required_feature`
+    reachable from the URLconf, plus the imperative gates above.
+
+    Deriving this from the code (rather than a hand-maintained list) means a
+    newly-gated endpoint can never be forgotten by --grandfather, which would
+    otherwise silently strip the feature from every existing tenant.
+    """
+    from django.conf import settings
+    from django.urls import get_resolver
+
+    found = set(DYNAMIC_FEATURES)
+
+    def walk(patterns):
+        for p in patterns:
+            if hasattr(p, "url_patterns"):
+                walk(p.url_patterns)
+                continue
+            cb = getattr(p, "callback", None)
+            view = getattr(cb, "cls", None) or getattr(cb, "view_class", None)
+            if view is None:
+                continue
+            if key := getattr(view, "required_feature", None):
+                found.add(key)
+            for perm in getattr(view, "permission_classes", None) or []:
+                if key := getattr(perm, "required_feature", None):
+                    found.add(key)
+
+    try:
+        walk(get_resolver(settings.ROOT_URLCONF).url_patterns)
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+    return sorted(found)
 
 
 class Command(BaseCommand):
@@ -115,7 +162,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  plan          : {sub.plan.slug if sub else self.style.ERROR('NO ACTIVE SUBSCRIPTION')}")
             self.stdout.write(f"  entitlements  : {ents}")
             self.stdout.write(f"  features ON   : {len(on)}")
-            missing = [f for f in ENFORCED_FEATURES if not features.get(f)]
+            missing = [f for f in discover_enforced_features() if not features.get(f)]
             if missing:
                 self.stdout.write(self.style.WARNING(f"  would LOSE     : {', '.join(missing)}"))
 
@@ -157,10 +204,13 @@ class Command(BaseCommand):
     def _grandfather(self):
         from apps.plans.models import TenantEntitlement
 
+        enforced = discover_enforced_features()
+        self.stdout.write(f"Enforced features discovered: {len(enforced)}")
+
         granted = 0
         for t in self._tenants():
             features = self._effective(t)
-            for key in ENFORCED_FEATURES:
+            for key in enforced:
                 if features.get(key):
                     continue  # plan already grants it
                 self.stdout.write(f"  [{t.schema_name}] grant {key}")

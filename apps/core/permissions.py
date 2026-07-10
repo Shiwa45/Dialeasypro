@@ -164,6 +164,43 @@ def feature_required(feature_key):
     )
 
 
+def require_feature(request, feature_key):
+    """
+    Imperative gate for cases where the required feature depends on the request
+    body (e.g. a bulk campaign's channel, or an integration's lead source), so
+    it can't be expressed as a static `required_feature` on the view.
+
+    Raises FeatureNotEnabledException (402 + upsell payload) when not entitled.
+    """
+    from apps.core.exceptions import FeatureNotEnabledException
+
+    if not getattr(request, "has_feature", lambda k: False)(feature_key):
+        raise FeatureNotEnabledException(feature_key=feature_key)
+
+
+# Bulk-messaging channel → the plan feature that unlocks it.
+BULK_CHANNEL_FEATURES = {
+    "whatsapp": FeatureKey.BULK_WHATSAPP,
+    "email": FeatureKey.BULK_EMAIL,
+    "sms": FeatureKey.BULK_SMS,
+}
+
+# Single-message channel → the plan feature that unlocks it.
+ONE_CLICK_CHANNEL_FEATURES = {
+    "whatsapp": FeatureKey.ONE_CLICK_WHATSAPP,
+    "email": FeatureKey.ONE_CLICK_EMAIL,
+    "sms": FeatureKey.ONE_CLICK_SMS,
+}
+
+
+def require_channel_feature(request, channel: str, *, bulk: bool):
+    """Gate a messaging action on the feature for its channel."""
+    mapping = BULK_CHANNEL_FEATURES if bulk else ONE_CLICK_CHANNEL_FEATURES
+    feature_key = mapping.get(channel)
+    if feature_key:
+        require_feature(request, feature_key)
+
+
 class IsOwnResourceOrManagerAbove(permissions.BasePermission):
     """
     Object-level permission: agents can only access their own resources,

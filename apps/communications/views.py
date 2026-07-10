@@ -23,7 +23,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.authentication.permissions import (
-    IsActiveAgent, IsAuthenticatedAgent, IsManagerOrAdmin, IsTenantAdmin, feature_required,
+    HasFeatureAccess, IsActiveAgent, IsAuthenticatedAgent, IsManagerOrAdmin,
+    IsTenantAdmin, feature_required, require_channel_feature,
 )
 from apps.communications.models import BulkCampaign, WhatsAppMessage, WhatsAppTemplate
 from apps.communications.serializers import (
@@ -127,9 +128,11 @@ class SendWhatsAppView(APIView):
     POST /api/v1/comms/whatsapp/send/
     Send a single WhatsApp message to a lead.
     Queues as Celery task for reliable delivery.
+    Plan-gated on ONE_CLICK_WHATSAPP.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.ONE_CLICK_WHATSAPP
 
     def post(self, request):
         serializer = SendWhatsAppSerializer(data=request.data)
@@ -159,9 +162,10 @@ class SendWhatsAppView(APIView):
 
 
 class SendSMSView(APIView):
-    """POST /api/v1/comms/sms/send/ — Send a single SMS to a lead."""
+    """POST /api/v1/comms/sms/send/ — Send a single SMS. Gated on ONE_CLICK_SMS."""
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.ONE_CLICK_SMS
 
     def post(self, request):
         serializer = SendSMSSerializer(data=request.data)
@@ -217,6 +221,11 @@ class BulkCampaignListCreateView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
+        # The required feature depends on the campaign's channel, so it can't
+        # be a static required_feature on the view.
+        require_channel_feature(
+            self.request, serializer.validated_data.get("channel"), bulk=True
+        )
         campaign = serializer.save(created_by=self.request.user)
         # Estimate recipient count
         from apps.communications.tasks import _resolve_campaign_audience
@@ -247,7 +256,11 @@ class BulkCampaignDetailView(generics.RetrieveAPIView):
 
 
 class BulkCampaignLaunchView(APIView):
-    """POST /api/v1/comms/campaigns/{id}/launch/ — Start sending a campaign."""
+    """
+    POST /api/v1/comms/campaigns/{id}/launch/ — Start sending a campaign.
+    Gated per channel (bulk_whatsapp / bulk_email / bulk_sms). Re-checked here
+    and not only at creation, since a plan can lapse between the two.
+    """
 
     permission_classes = [IsManagerOrAdmin]
 
@@ -256,6 +269,8 @@ class BulkCampaignLaunchView(APIView):
             campaign = BulkCampaign.objects.get(pk=pk, status__in=["draft", "scheduled", "paused"])
         except BulkCampaign.DoesNotExist:
             return Response({"error": "campaign_not_found_or_not_launchable"}, status=404)
+
+        require_channel_feature(request, campaign.channel, bulk=True)
 
         from apps.communications import tasks as comm_tasks
 

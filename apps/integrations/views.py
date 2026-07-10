@@ -31,6 +31,7 @@ from apps.authentication.permissions import (
 )
 from apps.core.constants import LeadPriority, LeadSource
 from apps.core.exceptions import PlanLimitExceededException
+from apps.core.quotas import enforce_lead_quota, note_leads_created
 from apps.core.utils import normalize_indian_phone
 from apps.integrations.models import LeadSourceConfig, WebhookLog
 from apps.integrations.serializers import LeadSourceConfigSerializer
@@ -94,6 +95,21 @@ class BaseWebhookView(View):
                 config.last_received_at = timezone.now()
                 config.error_message = ""
                 config.save(update_fields=["total_leads_received", "last_received_at", "error_message"])
+
+        except PlanLimitExceededException as exc:
+            # The tenant is over their plan's lead cap. Surface it distinctly so
+            # the Integrations UI shows an upgrade prompt rather than a generic
+            # failure — and still answer 200 so the provider doesn't retry
+            # forever against a limit that only an upgrade can lift.
+            msg = str(exc.detail)
+            logger.warning(f"[Integration] Lead quota reached — source={self.source}: {msg}")
+            log.error = msg[:500]
+            log.save(update_fields=["error"])
+            if config:
+                config.error_message = msg[:500]
+                config.status = "error"
+                config.save(update_fields=["error_message", "status"])
+            return JsonResponse({"status": "quota_exceeded", "message": msg}, status=200)
 
         except Exception as exc:
             logger.error(f"[Integration] Processing failed — source={self.source}: {exc}", exc_info=True)
@@ -166,6 +182,10 @@ class BaseWebhookView(View):
                 self._save_custom_values(existing, lead_data.get("custom_values"))
                 return False, existing
 
+        # Plan capacity. A new lead (not a dedupe-update) counts against the
+        # tenant's max_leads / max_leads_per_day caps.
+        enforce_lead_quota(1)
+
         lead = Lead.objects.create(
             phone=phone,
             name=lead_data.get("name", "Unknown"),
@@ -183,6 +203,7 @@ class BaseWebhookView(View):
             priority=lead_data.get("priority", LeadPriority.WARM),
             assigned_to=assigned_to,
         )
+        note_leads_created(1)
 
         # Persist any mapped custom-field values.
         self._save_custom_values(lead, lead_data.get("custom_values"))
@@ -629,6 +650,8 @@ class MetaSyncLeadsView(APIView):
         msg = f"{result['created']} new lead(s) imported"
         if result["skipped"]:
             msg += f", {result['skipped']} already in CRM"
+        if result.get("quota_reached"):
+            msg += ". Stopped early — your plan's lead limit was reached. Upgrade to import the rest."
         return Response({**result, "message": msg})
 
 

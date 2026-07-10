@@ -15,6 +15,7 @@ import logging
 import requests
 from django.utils import timezone
 
+from apps.core.exceptions import PlanLimitExceededException
 from apps.integrations.field_mapping import apply_field_mapping, flatten_meta_field_data
 
 logger = logging.getLogger(__name__)
@@ -54,12 +55,15 @@ def sync_meta_leads(config, max_per_form: int = 200) -> dict:
     form_ids = [f["id"] for f in fr.json().get("data", []) if f.get("status") == "ACTIVE"]
 
     created = skipped = failed = seen = 0
+    quota_reached = False
 
     for form_id in form_ids:
+        if quota_reached:
+            break
         url = f"{GRAPH}/{form_id}/leads"
         params = {"access_token": token, "fields": "id,created_time,field_data", "limit": 100}
         fetched = 0
-        while url and fetched < max_per_form:
+        while url and fetched < max_per_form and not quota_reached:
             r = requests.get(url, params=params, timeout=30)
             if r.status_code != 200:
                 logger.warning(f"[MetaSync] leads fetch {form_id}: {r.text[:200]}")
@@ -83,9 +87,17 @@ def sync_meta_leads(config, max_per_form: int = 200) -> dict:
                         created += 1
                     else:
                         skipped += 1
+                except PlanLimitExceededException as exc:
+                    # Stop immediately: every remaining lead would fail the same
+                    # way, and marking hundreds as "failed" is just noise.
+                    logger.warning(f"[MetaSync] lead quota reached: {exc.detail}")
+                    quota_reached = True
+                    break
                 except Exception as exc:
                     failed += 1
                     logger.warning(f"[MetaSync] create failed: {exc}")
+            if quota_reached:
+                break
             url = data.get("paging", {}).get("next")
             params = None  # paging.next already carries the cursor + token
 
@@ -101,4 +113,5 @@ def sync_meta_leads(config, max_per_form: int = 200) -> dict:
         "failed": failed,
         "seen": seen,
         "forms": len(form_ids),
+        "quota_reached": quota_reached,
     }

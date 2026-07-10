@@ -230,9 +230,15 @@ class LeadCreateSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
+        from apps.core.quotas import enforce_lead_quota, note_leads_created
+
         custom_fields_data = validated_data.pop("custom_fields", {})
 
+        # Plan capacity: raises 402 with the limit details.
+        enforce_lead_quota(1)
+
         lead = Lead.objects.create(**validated_data)
+        note_leads_created(1)
 
         # Save custom field values
         if custom_fields_data:

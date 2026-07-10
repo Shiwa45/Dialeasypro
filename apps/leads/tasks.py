@@ -167,6 +167,26 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
         if (row_idx - 1) % 100 == 0:
             job.save(update_fields=["processed_rows"])
 
+    # --- Plan capacity ----------------------------------------
+    # Truncate to what the plan still allows rather than failing the whole job:
+    # importing 900 of 1000 rows is far more useful than importing none.
+    from apps.core.quotas import note_leads_created, remaining_lead_allowance
+
+    allowance = remaining_lead_allowance()
+    if allowance is not None and len(leads_to_create) > allowance:
+        skipped = len(leads_to_create) - allowance
+        leads_to_create = leads_to_create[:allowance]
+        failed += skipped
+        row_errors.append({
+            "row": "-",
+            "data": "",
+            "error": (
+                f"Plan lead limit reached — {skipped} row(s) not imported. "
+                f"Upgrade your plan to import more."
+            ),
+        })
+        logger.warning(f"[Import] job={job.pk} truncated {skipped} rows (plan limit)")
+
     # --- Bulk create -----------------------------------------
     if leads_to_create:
         try:
@@ -187,6 +207,7 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
                 if activities:
                     LeadActivity.objects.bulk_create(activities)
             successful += len(leads_to_create)
+            note_leads_created(len(leads_to_create))
         except Exception as exc:
             logger.error(f"[Import] Bulk create failed: {exc}", exc_info=True)
             failed += len(leads_to_create)

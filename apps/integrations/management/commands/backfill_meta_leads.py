@@ -27,6 +27,8 @@ import requests
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
+from apps.core.exceptions import PlanLimitExceededException
+
 GRAPH = "https://graph.facebook.com/v18.0"
 
 
@@ -82,6 +84,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Processing {len(form_ids)} form(s) in schema '{schema}'.")
 
         total_created = total_skipped = total_failed = total_seen = 0
+        quota_reached = False
 
         for form_id in form_ids:
             self.stdout.write(f"\n→ Form {form_id}")
@@ -119,9 +122,20 @@ class Command(BaseCommand):
                         total_created += 1
                     else:
                         total_skipped += 1
+                except PlanLimitExceededException as exc:
+                    # Every remaining lead would hit the same cap — stop here.
+                    self.stderr.write(self.style.WARNING(
+                        f"\n   ! Plan lead limit reached: {exc.detail}\n"
+                        f"   ! Stopping. Upgrade the plan (or raise max_leads) and re-run."
+                    ))
+                    quota_reached = True
+                    break
                 except Exception as exc:
                     total_failed += 1
                     self.stderr.write(f"   ! failed: {exc}")
+
+            if quota_reached:
+                break
 
         self.stdout.write(self.style.SUCCESS(
             f"\nDone. seen={total_seen} created={total_created} "

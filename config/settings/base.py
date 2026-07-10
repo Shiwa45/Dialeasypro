@@ -73,6 +73,7 @@ TENANT_APPS = [
     "apps.integrations",    # Phase 3
     "apps.reports",         # Phase 3 — no DB tables, but needs Django app registration
     "apps.hrms",            # Add-on module (ModuleKey.HRMS)
+    "apps.erp",             # Add-on module (ModuleKey.ERP_SALES)
 ]
 
 # django-tenants requires this exact format:

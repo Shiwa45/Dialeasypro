@@ -74,6 +74,7 @@ TENANT_APPS = [
     "apps.reports",         # Phase 3 — no DB tables, but needs Django app registration
     "apps.hrms",            # Add-on module (ModuleKey.HRMS)
     "apps.erp",             # Add-on module (ModuleKey.ERP_SALES)
+    "apps.ai",              # Add-on module (ModuleKey.AI_SUITE)
 ]
 
 # django-tenants requires this exact format:
@@ -478,6 +479,20 @@ META_VERIFY_TOKEN = config("META_VERIFY_TOKEN", default="meta_webhook_verify_tok
 # Google Ads (for Lead Form webhook signature validation)
 GOOGLE_ADS_DEVELOPER_TOKEN = config("GOOGLE_ADS_DEVELOPER_TOKEN", default="")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
+
+# ============================================================
+# AI Suite (ModuleKey.AI_SUITE)
+# ============================================================
+# Call insights — summary, sentiment, coaching. Uses the Anthropic API.
+ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
+
+# Speech-to-text. Claude takes no audio input, so transcription goes to a
+# separate provider. Anything that speaks the OpenAI /v1/audio/transcriptions
+# multipart shape works: OpenAI, Groq, or a self-hosted faster-whisper server.
+# Leave the URL empty and transcription (and therefore insights) stay off.
+AI_TRANSCRIPTION_URL = config("AI_TRANSCRIPTION_URL", default="")
+AI_TRANSCRIPTION_API_KEY = config("AI_TRANSCRIPTION_API_KEY", default="")
+AI_TRANSCRIPTION_MODEL = config("AI_TRANSCRIPTION_MODEL", default="whisper-1")
 
 # ============================================================
 # Razorpay (Payment Gateway — India)

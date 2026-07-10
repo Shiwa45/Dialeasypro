@@ -228,14 +228,26 @@ class CallRecording(models.Model):
     format = models.CharField(max_length=10, default="mp3", choices=[
         ("mp3", "MP3"), ("wav", "WAV"), ("ogg", "OGG"), ("m4a", "M4A"), ("amr", "AMR"),
     ])
-    # Transcription (Phase 4 — Whisper integration)
+    # Transcription — produced by apps.ai.tasks.transcribe_call
     transcript = models.TextField(blank=True, default="")
     transcript_status = models.CharField(
         max_length=20,
         choices=[("pending", "Pending"), ("processing", "Processing"),
                  ("done", "Done"), ("failed", "Failed")],
         default="pending",
+        db_index=True,
     )
+    transcript_language = models.CharField(
+        max_length=20, blank=True, default="",
+        help_text="Language auto-detected by the speech-to-text provider.",
+    )
+    transcript_provider = models.CharField(
+        max_length=60, blank=True, default="",
+        help_text="Speech-to-text model that produced the transcript.",
+    )
+    transcript_error = models.TextField(blank=True, default="")
+    transcribed_at = models.DateTimeField(null=True, blank=True)
+
     uploaded_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

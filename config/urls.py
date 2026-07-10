@@ -37,6 +37,7 @@ urlpatterns = [
     path("api/v1/reports/", include(("apps.reports.api_urls", "reports"), namespace="api_reports")),
     path("api/v1/hrms/", include(("apps.hrms.api_urls", "hrms"), namespace="api_hrms")),
     path("api/v1/erp/", include(("apps.erp.api_urls", "erp"), namespace="api_erp")),
+    path("api/v1/ai/", include(("apps.ai.api_urls", "ai"), namespace="api_ai")),
 
     # ---- Health Check (used by load balancer) --------------
     path("health/", HealthCheckView.as_view(), name="health_check"),

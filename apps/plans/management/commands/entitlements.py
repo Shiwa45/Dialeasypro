@@ -207,6 +207,19 @@ class Command(BaseCommand):
         enforced = discover_enforced_features()
         self.stdout.write(f"Enforced features discovered: {len(enforced)}")
 
+        # Grandfathering exists to stop an existing tenant losing something they
+        # already had when we switch a gate on. It must never *give* them
+        # something they never bought — the add-on modules (HRMS, ERP, AI Suite)
+        # are sold separately, and their endpoints are new, so no tenant can
+        # have been relying on them. Sell them with --grant-module instead.
+        addons = {k for m in ModuleKey.ALL for k in ModuleKey.FEATURES[m]}
+        skipped = sorted(set(enforced) & addons)
+        if skipped:
+            self.stdout.write(
+                f"Skipping {len(skipped)} paid add-on feature(s): {', '.join(skipped)}"
+            )
+        enforced = [k for k in enforced if k not in addons]
+
         granted = 0
         for t in self._tenants():
             features = self._effective(t)

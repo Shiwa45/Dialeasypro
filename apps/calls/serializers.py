@@ -18,6 +18,7 @@ class CallRecordingSerializer(serializers.ModelSerializer):
         model = CallRecording
         fields = [
             "id", "duration_seconds", "format", "transcript", "transcript_status",
+            "transcript_language", "transcribed_at",
             "playback_url", "source_filename", "matched_by", "uploaded_at",
         ]
 

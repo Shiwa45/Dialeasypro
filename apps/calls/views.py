@@ -125,6 +125,23 @@ class CallLogDetailView(generics.RetrieveAPIView):
         return qs
 
 
+def _queue_ai_pipeline(call) -> None:
+    """
+    Kick off transcription (which chains into insights) for a freshly uploaded
+    recording. The task no-ops for tenants without the AI Suite module, so
+    there's nothing to check here.
+
+    A broker that's down must never fail the upload — the recording is already
+    stored, and `POST /api/v1/ai/backfill/` can pick it up later.
+    """
+    from apps.ai.tasks import transcribe_call
+
+    try:
+        transcribe_call.delay(connection.schema_name, str(call.pk))
+    except Exception as exc:  # noqa: BLE001 — broker unreachable, etc.
+        logger.warning("Could not queue AI pipeline for call %s: %s", call.pk, exc)
+
+
 class CallRecordingUploadView(APIView):
     """
     POST /api/v1/calls/{id}/recording/   (multipart/form-data)
@@ -188,6 +205,7 @@ class CallRecordingUploadView(APIView):
                     "uploaded_at": timezone.now(),
                 },
             )
+            _queue_ai_pipeline(call)
             return Response(
                 {"id": rec.pk, "playback_url": rec.cloud_url, "duration_seconds": rec.duration_seconds},
                 status=status.HTTP_201_CREATED,
@@ -266,6 +284,7 @@ class CallRecordingUploadView(APIView):
                 "uploaded_at": timezone.now(),
             },
         )
+        _queue_ai_pipeline(call)
 
         return Response(
             {

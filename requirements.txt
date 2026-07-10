@@ -53,6 +53,11 @@ django-unfold==0.44.0
 # --------------- Payments (Razorpay India) ------------------
 razorpay==1.4.2
 
+# --------------- AI Suite (call insights) -------------------
+# Speech-to-text is called over plain HTTP (apps/ai/services/transcription.py),
+# so no vendor SDK is needed for it.
+anthropic>=0.72,<1.0
+
 # --------------- HTTP Clients -------------------------------
 requests==2.32.3
 httpx==0.28.1

@@ -113,3 +113,7 @@ dialeasypro_flutter/build/
 *.tmp
 *.temp
 *.orig
+
+# ---- Local scratch files (never commit: may hold API keys) ----
+/test.py
+/scratch*.py

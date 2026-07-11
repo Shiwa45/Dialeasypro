@@ -16,7 +16,7 @@ import logging
 
 from rest_framework import permissions
 
-from apps.core.constants import AgentRole
+from apps.core.constants import AgentRole, FeatureKey
 
 logger = logging.getLogger(__name__)
 

@@ -13,13 +13,16 @@ from apps.hrms.views import (
     EmployeeListCreateView,
     ExpenseClaimListCreateView,
     ExpenseDecisionView,
+    HolidayDetailView,
     HolidayListCreateView,
     IncentiveComputeView,
     IncentiveEarningListView,
+    IncentiveRuleDetailView,
     IncentiveRuleListCreateView,
     LeaveBalanceListView,
     LeaveDecisionView,
     LeaveRequestListCreateView,
+    LeaveTypeDetailView,
     LeaveTypeListCreateView,
     MyEmployeeView,
     PayrollRunView,
@@ -40,9 +43,11 @@ urlpatterns = [
     path("attendance/check-out/", CheckOutView.as_view(), name="api_hrms_check_out"),
     path("attendance/sync/", AttendanceSyncView.as_view(), name="api_hrms_attendance_sync"),
     path("holidays/", HolidayListCreateView.as_view(), name="api_hrms_holidays"),
+    path("holidays/<int:pk>/", HolidayDetailView.as_view(), name="api_hrms_holiday_detail"),
 
     # Leave
     path("leave-types/", LeaveTypeListCreateView.as_view(), name="api_hrms_leave_types"),
+    path("leave-types/<int:pk>/", LeaveTypeDetailView.as_view(), name="api_hrms_leave_type_detail"),
     path("leave-balances/", LeaveBalanceListView.as_view(), name="api_hrms_leave_balances"),
     path("leave/", LeaveRequestListCreateView.as_view(), name="api_hrms_leave"),
     re_path(
@@ -59,6 +64,7 @@ urlpatterns = [
 
     # Incentives
     path("incentive-rules/", IncentiveRuleListCreateView.as_view(), name="api_hrms_incentive_rules"),
+    path("incentive-rules/<int:pk>/", IncentiveRuleDetailView.as_view(), name="api_hrms_incentive_rule_detail"),
     path("incentives/", IncentiveEarningListView.as_view(), name="api_hrms_incentives"),
     path("incentives/compute/", IncentiveComputeView.as_view(), name="api_hrms_incentive_compute"),
 

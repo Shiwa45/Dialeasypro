@@ -14,6 +14,7 @@ import logging
 from django.db import transaction
 from django.http import StreamingHttpResponse
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -25,7 +26,7 @@ from apps.authentication.permissions import (
 )
 from apps.core.constants import FeatureKey
 from apps.core.pagination import StandardResultsSetPagination
-from apps.erp.constants import InvoiceStatus
+from apps.erp.constants import InvoiceStatus, QuotationStatus
 from apps.erp.models import (
     Customer,
     CustomerInvoice,
@@ -137,13 +138,38 @@ class QuotationListCreateView(generics.ListCreateAPIView):
         return Response(QuotationSerializer(quotation).data, status=status.HTTP_201_CREATED)
 
 
-class QuotationDetailView(generics.RetrieveDestroyAPIView):
+class QuotationDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    PATCH accepts only `notes` and `valid_until` — everything else on a
+    quotation is either computed (totals) or moves through a dedicated
+    endpoint (status via QuotationStatusView, items via QuotationItemView),
+    so a raw PATCH can't be used to sidestep those rules.
+    """
+
     serializer_class = QuotationSerializer
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
     required_feature = FeatureKey.ERP_QUOTATIONS
+    http_method_names = ["get", "patch", "delete", "options"]
 
     def get_queryset(self):
         return Quotation.objects.select_related("customer").prefetch_related("items")
+
+    def get_serializer(self, *args, **kwargs):
+        if self.request.method == "PATCH":
+            kwargs["partial"] = True
+        return super().get_serializer(*args, **kwargs)
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        if not instance.is_editable:
+            raise ValidationError(f"A {instance.status} quotation cannot be edited.")
+        # Ignore anything beyond the two header fields a PATCH may touch —
+        # status and totals have their own governed paths.
+        allowed = {"notes", "valid_until"}
+        extra = set(serializer.validated_data) - allowed
+        for key in extra:
+            serializer.validated_data.pop(key)
+        serializer.save()
 
     def perform_destroy(self, instance):
         if not instance.is_editable:
@@ -151,8 +177,45 @@ class QuotationDetailView(generics.RetrieveDestroyAPIView):
         instance.delete()
 
 
+class QuotationStatusView(APIView):
+    """
+    POST /quotations/{id}/status/  {"status": "sent"|"accepted"|"rejected"}
+
+    A quotation's paper trail: mark it sent to the customer, then record
+    their decision. Conversion to a sales order (QuotationConvertView) is a
+    separate step and works from any non-terminal status — this endpoint is
+    for tracking the customer-facing negotiation, not gating the pipeline.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.ERP_QUOTATIONS
+
+    # From -> allowed to
+    TRANSITIONS = {
+        QuotationStatus.DRAFT: {QuotationStatus.SENT},
+        QuotationStatus.SENT: {QuotationStatus.ACCEPTED, QuotationStatus.REJECTED},
+    }
+
+    def post(self, request, pk):
+        quotation = Quotation.objects.filter(pk=pk).first()
+        if quotation is None:
+            return _bad("Quotation not found.", "not_found", 404)
+
+        target = request.data.get("status")
+        allowed = self.TRANSITIONS.get(quotation.status, set())
+        if target not in allowed:
+            return _bad(
+                f"Cannot move a {quotation.status} quotation to {target}. "
+                f"Allowed: {sorted(allowed) or 'none — already final'}.",
+                "invalid_transition",
+            )
+        quotation.status = target
+        quotation.save(update_fields=["status", "updated_at"])
+        return Response(QuotationSerializer(quotation).data)
+
+
 class QuotationItemView(APIView):
-    """POST add a line, DELETE remove one. Totals recompute on both."""
+    """POST add a line, PATCH edit one, DELETE remove one. Totals recompute on all three."""
 
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
     required_feature = FeatureKey.ERP_QUOTATIONS
@@ -171,6 +234,24 @@ class QuotationItemView(APIView):
         doc_svc.recalculate(quotation, quotation.items.all())
         quotation.refresh_from_db()
         return Response(QuotationSerializer(quotation).data, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    def patch(self, request, pk, item_id):
+        quotation = Quotation.objects.filter(pk=pk).first()
+        if quotation is None:
+            return _bad("Quotation not found.", "not_found", 404)
+        if not quotation.is_editable:
+            return _bad(f"A {quotation.status} quotation cannot be edited.", "not_editable")
+        item = QuotationItem.objects.filter(pk=item_id, quotation=quotation).first()
+        if item is None:
+            return _bad("Line item not found.", "not_found", 404)
+
+        serializer = QuotationItemSerializer(item, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        doc_svc.recalculate(quotation, quotation.items.all())
+        quotation.refresh_from_db()
+        return Response(QuotationSerializer(quotation).data)
 
     @transaction.atomic
     def delete(self, request, pk, item_id):

@@ -19,6 +19,7 @@ from apps.erp.views import (
     QuotationDetailView,
     QuotationItemView,
     QuotationListCreateView,
+    QuotationStatusView,
     SalesOrderDetailView,
     SalesOrderInvoiceView,
     SalesOrderListView,
@@ -37,6 +38,7 @@ urlpatterns = [
     path("quotations/<int:pk>/", QuotationDetailView.as_view(), name="api_erp_quotation_detail"),
     path("quotations/<int:pk>/items/", QuotationItemView.as_view(), name="api_erp_quotation_items"),
     path("quotations/<int:pk>/items/<int:item_id>/", QuotationItemView.as_view(), name="api_erp_quotation_item"),
+    path("quotations/<int:pk>/status/", QuotationStatusView.as_view(), name="api_erp_quotation_status"),
     path("quotations/<int:pk>/convert/", QuotationConvertView.as_view(), name="api_erp_quotation_convert"),
 
     # Sales orders

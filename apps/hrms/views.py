@@ -214,6 +214,13 @@ class HolidayListCreateView(generics.ListCreateAPIView):
         return [IsAuthenticatedAgent(), HasFeatureAccess()]
 
 
+class HolidayDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = HolidaySerializer
+    queryset = Holiday.objects.all()
+    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.HRMS_ATTENDANCE
+
+
 # ============================================================
 # Leave
 # ============================================================
@@ -228,6 +235,24 @@ class LeaveTypeListCreateView(generics.ListCreateAPIView):
         if self.request.method == "POST":
             return [IsTenantAdmin(), HasFeatureAccess()]
         return [IsAuthenticatedAgent(), HasFeatureAccess()]
+
+
+class LeaveTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    PATCH/DELETE an existing leave type. Deletion is a soft `is_active=False`
+    flip via the serializer, not a real delete — a leave type may already be
+    referenced by LeaveBalance/LeaveRequest rows, and removing it would orphan
+    them or make historical requests unrenderable.
+    """
+
+    serializer_class = LeaveTypeSerializer
+    queryset = LeaveType.objects.all()
+    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.HRMS_LEAVE
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
 
 
 class LeaveBalanceListView(generics.ListAPIView):
@@ -367,6 +392,25 @@ class IncentiveRuleListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsTenantAdmin, HasFeatureAccess]
     required_feature = FeatureKey.INCENTIVE_ENGINE
     pagination_class = None
+
+
+class IncentiveRuleDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    PATCH/DELETE an existing rule. Deletion is soft (`is_active=False`) —
+    IncentiveEarning rows reference their rule by FK and are a paid-out
+    historical record; a hard delete would either cascade them away or leave
+    a dangling reference depending on the FK's on_delete, neither of which is
+    acceptable for something that already appears on a payslip.
+    """
+
+    serializer_class = IncentiveRuleSerializer
+    queryset = IncentiveRule.objects.all()
+    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.INCENTIVE_ENGINE
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
 
 
 class IncentiveEarningListView(generics.ListAPIView):

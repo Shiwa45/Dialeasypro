@@ -1,0 +1,88 @@
+services:
+  # ---- PostgreSQL: primary relational DB ----
+  postgres:
+    image: postgres:16-alpine
+    container_name: bazaarx_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bazaarx
+      POSTGRES_PASSWORD: bazaarx_dev_password
+      POSTGRES_DB: bazaarx
+    ports:
+      - '5432:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U bazaarx']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- MongoDB: logs, product specs, cart sessions, CMS ----
+  mongo:
+    image: mongo:7
+    container_name: bazaarx_mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Redis: cache, sessions, OTP store, rate limiting ----
+  redis:
+    image: redis:7-alpine
+    container_name: bazaarx_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Elasticsearch: product search engine ----
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.0
+    container_name: bazaarx_elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m'
+    ports:
+      - '9200:9200'
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -s http://localhost:9200/_cluster/health || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ---- Kibana: optional ES dashboard (dev only) ----
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.14.0
+    container_name: bazaarx_kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - '5601:5601'
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+volumes:
+  pg_data:
+  mongo_data:
+  redis_data:
+  es_data:

@@ -16,8 +16,16 @@ class WhatsAppConfigAdmin(ModelAdmin):
     readonly_fields = ["last_verified_at", "singleton"]
 
     def has_add_permission(self, request):
-        # Singleton per tenant — created on first access via the API.
-        return not WhatsAppConfig.objects.exists()
+        # Singleton, created on first access via GET /comms/whatsapp/config/
+        # (WhatsAppConfig.get_solo()) — the admin never creates the first row.
+        #
+        # Deliberately no DB query here: Django's admin index builds its
+        # sidebar by calling this with no schema context guaranteed — the
+        # PUBLIC schema (where /superadmin-secure/ lives) enumerates every
+        # registered admin including this tenant-only app's, and this table
+        # doesn't exist there at all. A query here 500s the entire superadmin
+        # panel, not just this page.
+        return False
 
 @admin.register(WhatsAppTemplate)
 class WhatsAppTemplateAdmin(ModelAdmin):

@@ -46,7 +46,13 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> with Single
   Future<void> _callLead(Lead lead) async {
     HapticFeedback.heavyImpact();
     await ref.read(dialerProvider.notifier).startSingleCall(lead);
-    if (mounted) context.push('/dialer');
+    if (mounted) {
+      await context.push('/dialer');
+      // Refresh lead data after returning from dialer — the backend will have
+      // advanced the status (e.g. new → attempted) when the call was logged.
+      ref.invalidate(_leadDetailProvider(lead.id));
+      ref.invalidate(_callsForLeadProvider(lead.id));
+    }
   }
 
   Future<void> _whatsAppLead(Lead lead) async {

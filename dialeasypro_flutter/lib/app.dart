@@ -13,6 +13,7 @@ import 'features/dialer/dialer_screen.dart';
 import 'features/dialer/queue_starter_screen.dart';
 import 'features/features_provider.dart';
 import 'features/hrms/my_work_screen.dart';
+import 'features/leads/followups_screen.dart';
 import 'features/leads/lead_detail_screen.dart';
 import 'features/leads/lead_form_screen.dart';
 import 'features/leads/lead_import_screen.dart';
@@ -80,6 +81,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
         builder: (_, s) => WhatsAppSendScreen(leadId: int.parse(s.pathParameters['id']!)),
       ),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+      GoRoute(path: '/followups', builder: (_, __) => const FollowupsScreen()),
       GoRoute(path: '/dialer/queue', builder: (_, __) => const QueueStarterScreen()),
       GoRoute(path: '/dialer', builder: (_, __) => const DialerScreen()),
     ],

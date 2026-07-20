@@ -435,7 +435,7 @@ class _TasksCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       color: hasOverdue ? AppColors.errorBg : AppColors.warningBg,
       borderColor: hasOverdue ? AppColors.error : AppColors.warning,
-      onTap: () => context.push('/dialer/queue'),
+      onTap: () => context.push('/followups'),
       child: Row(children: [
         Container(
           padding: const EdgeInsets.all(10),
@@ -460,12 +460,12 @@ class _TasksCard extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             hasOverdue
-              ? 'Tap to dial these leads now'
+              ? 'View & call ${stats.overdueFollowups} overdue lead${stats.overdueFollowups == 1 ? '' : 's'}'
               : '${stats.followupsDue} follow-up${stats.followupsDue == 1 ? '' : 's'} scheduled',
             style: AppTextStyles.bodyMedium,
           ),
         ])),
-        const Icon(Icons.flash_on, color: AppColors.black, size: 20),
+        const Icon(Icons.chevron_right, color: AppColors.black, size: 20),
       ]),
     );
   }

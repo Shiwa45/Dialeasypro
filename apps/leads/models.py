@@ -473,8 +473,12 @@ class CallQueue(TimeStampedModel):
         ordered per the queue's order_by.
         """
         from django.db.models import Q
+        from apps.core.constants import LeadStatus
 
         qs = Lead.objects.filter(is_deleted=False, assigned_to=agent)
+
+        # Never serve leads in terminal states — regardless of queue config.
+        qs = qs.exclude(status__in=LeadStatus.FINAL_STATUSES)
 
         if self.filter_statuses:
             qs = qs.filter(status__in=[s.lower() for s in self.filter_statuses])

@@ -43,6 +43,7 @@ class LeadsService {
     int page = 1, int pageSize = 20,
     String? status, String? priority, String? source,
     String? search, String? assignedTo, bool? overdue,
+    bool? followupDueToday,
   }) async {
     final r = await _dio.get('/leads/', queryParameters: {
       'page': page, 'page_size': pageSize,
@@ -52,6 +53,7 @@ class LeadsService {
       if (search != null && search.isNotEmpty) 'search': search,
       if (assignedTo != null && assignedTo.isNotEmpty) 'assigned_to': assignedTo,
       if (overdue == true) 'overdue': 'true',
+      if (followupDueToday == true) 'followup_due_today': 'true',
       'order_by': '-created_at',
     });
     return PaginatedResponse.fromJson(r.data, Lead.fromJson);

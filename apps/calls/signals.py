@@ -15,10 +15,34 @@ logger = logging.getLogger(__name__)
 
 @receiver(post_save, sender=CallLog)
 def calllog_post_save(sender, instance, created, **kwargs):
-    """Auto-schedule follow-up when disposition has auto_followup_hours set."""
-    if not created or not instance.disposition:
+    """
+    Post-save handler for CallLog:
+    1. Mark the lead as worked & advance status new → attempted (safety net
+       for webhook-created calls and any code path that bypasses the view).
+    2. Auto-schedule follow-up when disposition has auto_followup_hours set.
+    """
+    if not created or not instance.lead:
         return
-    if not instance.disposition.auto_followup_hours or not instance.lead:
+
+    # ---- Safety net: mark worked & advance status ----
+    lead = instance.lead
+    changed = []
+    if not lead.has_been_worked:
+        lead.has_been_worked = True
+        changed.append("has_been_worked")
+    if lead.status == "new":
+        lead.status = "attempted"
+        changed.append("status")
+    if changed:
+        try:
+            lead.save(update_fields=changed)
+        except Exception as exc:
+            logger.warning(f"[Signal] Could not update lead {lead.pk}: {exc}")
+
+    # ---- Auto follow-up from disposition ----
+    if not instance.disposition:
+        return
+    if not instance.disposition.auto_followup_hours:
         return
     try:
         from datetime import timedelta

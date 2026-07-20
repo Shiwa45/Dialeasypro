@@ -34,7 +34,7 @@ from apps.calls.serializers import (
     CallLogSerializer,
     ClickToCallSerializer,
 )
-from apps.core.constants import AgentRole, FeatureKey
+from apps.core.constants import AgentRole, FeatureKey, LeadStatus
 from apps.core.pagination import StandardResultsSetPagination
 from apps.leads.models import Lead, LeadActivity
 
@@ -93,10 +93,17 @@ class CallLogListCreateView(generics.ListCreateAPIView):
             lead.locked_at = None
             lead.lock_expires_at = None
             lead.locked_queue = None
-            lead.save(update_fields=[
+            # Auto-advance status: new → attempted so the lead is never
+            # treated as untouched again. Only advance from "new" — we must
+            # never downgrade a lead that's already at a later stage.
+            update_fields = [
                 "has_been_worked", "last_dialed_at",
                 "locked_by", "locked_at", "lock_expires_at", "locked_queue",
-            ])
+            ]
+            if lead.status == LeadStatus.NEW:
+                lead.status = LeadStatus.ATTEMPTED
+                update_fields.append("status")
+            lead.save(update_fields=update_fields)
             # Log in lead activity feed
             LeadActivity.objects.create(
                 lead=call.lead,
@@ -351,6 +358,16 @@ class ClickToCallView(APIView):
             direction="outbound",
             phone_number=phone,
         )
+
+        # Mark the lead as worked & advance status (same as manual call logging)
+        lead.log_contact(contact_type="call")
+        update_fields = ["has_been_worked", "last_dialed_at"]
+        lead.has_been_worked = True
+        lead.last_dialed_at = timezone.now()
+        if lead.status == LeadStatus.NEW:
+            lead.status = LeadStatus.ATTEMPTED
+            update_fields.append("status")
+        lead.save(update_fields=update_fields)
 
         # Attempt provider call
         try:

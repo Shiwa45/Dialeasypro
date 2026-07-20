@@ -39,10 +39,24 @@ class Command(BaseCommand):
         apply = options["apply"]
         schema = options.get("schema", "").strip()
 
-        if schema:
-            connection.set_schema(schema)
-            self.stdout.write(f"Switched to schema: {schema}")
+        from django.db import connection
+        from apps.tenants.models import Tenant
 
+        if schema:
+            tenants = Tenant.objects.filter(schema_name=schema)
+            if not tenants.exists():
+                self.stdout.write(self.style.ERROR(f"Schema '{schema}' not found."))
+                return
+        else:
+            # By default, run on all tenants except public
+            tenants = Tenant.objects.exclude(schema_name="public")
+
+        for tenant in tenants:
+            self.stdout.write(self.style.NOTICE(f"\n--- Processing Tenant: {tenant.schema_name} ---"))
+            connection.set_schema(tenant.schema_name)
+            self._process_tenant(apply)
+
+    def _process_tenant(self, apply):
         from apps.leads.models import Lead
         from apps.calls.models import CallLog
 

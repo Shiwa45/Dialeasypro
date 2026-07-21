@@ -378,6 +378,8 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://[\w-]+\.telecrm\.in$",
     r"^https://[\w-]+\.dialeasypro\.easyian\.com$",
     r"^https://dialeasypro\.easyian\.com$",
+    r"^https://[\w-]+\.easyian\.shop$",
+    r"^https://easyian\.shop$",
     r"^https://[\w-]+\.vercel\.app$",
 ]
 CORS_ALLOW_HEADERS = [

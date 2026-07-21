@@ -32,8 +32,8 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
 
         subject = f"Welcome to TeleCRM — Your account is ready, {tenant.primary_contact_name}!"
 
-        # Build login URL
-        login_url = f"https://{tenant.schema_name}.{settings.BASE_DOMAIN}/crm/login/"
+        # Build login URL as requested
+        login_url = "https://dialeasypro.easyian.com/"
 
         context = {
             "tenant": tenant,
@@ -49,9 +49,11 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
         except Exception:
             # Fallback if templates not built yet
             plain_message = (
-                f"Welcome to TeleCRM, {tenant.primary_contact_name}!\n\n"
-                f"Your CRM is ready at: {login_url}\n"
-                f"Email: {tenant.primary_contact_email}\n"
+                f"Welcome to DialEasypro, {tenant.primary_contact_name}!\n\n"
+                f"Your CRM is ready at: {login_url}\n\n"
+                f"--- LOGIN CREDENTIALS ---\n"
+                f"Workspace Name: {tenant.schema_name}\n"
+                f"Username: {tenant.primary_contact_email}\n"
                 f"Password: {temp_password or '[Check your registration email]'}\n\n"
                 f"Your trial runs for {settings.DEFAULT_TRIAL_DAYS} days.\n\n"
                 f"Need help? Email {settings.SUPPORT_EMAIL}"

@@ -73,7 +73,68 @@ class TenantAdmin(ModelAdmin):
         return base
     ordering = ["-created_at"]
     inlines = [DomainInline]
-    actions = ["suspend_tenants", "activate_tenants", "reset_trial"]
+    actions = ["suspend_tenants", "activate_tenants", "reset_trial", "sync_subscriptions"]
+
+    def save_model(self, request, obj, form, change):
+        """When saving from admin, ensure the Subscription row matches the tenant's plan."""
+        super().save_model(request, obj, form, change)
+        
+        if obj.plan:
+            from apps.plans.models import Subscription
+            # Find the active subscription and update it, or create one
+            sub = Subscription.objects.filter(
+                tenant=obj, 
+                status__in=SubscriptionStatus.ACTIVE_STATUSES
+            ).first()
+            
+            if sub:
+                if sub.plan != obj.plan:
+                    sub.plan = obj.plan
+                    sub.save(update_fields=["plan"])
+            else:
+                # No active subscription? Create one to match the tenant status
+                Subscription.objects.create(
+                    tenant=obj,
+                    plan=obj.plan,
+                    status=obj.subscription_status,
+                    trial_end=obj.trial_ends_at
+                )
+            
+            # Invalidate cache
+            from apps.core.middleware import TenantFeatureFlagMiddleware
+            TenantFeatureFlagMiddleware.invalidate_cache(obj.schema_name)
+
+    @action(description="Sync Plan to Subscription table")
+    def sync_subscriptions(self, request, queryset):
+        """Forces the Subscription table to match the Tenant's assigned Plan."""
+        from apps.plans.models import Subscription
+        from apps.core.middleware import TenantFeatureFlagMiddleware
+        
+        count = 0
+        for tenant in queryset.exclude(schema_name="public"):
+            if not tenant.plan:
+                continue
+                
+            sub = Subscription.objects.filter(
+                tenant=tenant, 
+                status__in=SubscriptionStatus.ACTIVE_STATUSES
+            ).first()
+            
+            if sub:
+                sub.plan = tenant.plan
+                sub.save(update_fields=["plan"])
+            else:
+                Subscription.objects.create(
+                    tenant=tenant,
+                    plan=tenant.plan,
+                    status=tenant.subscription_status,
+                    trial_end=tenant.trial_ends_at
+                )
+            
+            TenantFeatureFlagMiddleware.invalidate_cache(tenant.schema_name)
+            count += 1
+            
+        self.message_user(request, f"✅ Synced subscriptions for {count} tenant(s).")
 
     fieldsets = (
         (

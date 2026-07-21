@@ -73,7 +73,7 @@ class TenantAdmin(ModelAdmin):
         return base
     ordering = ["-created_at"]
     inlines = [DomainInline]
-    actions = ["suspend_tenants", "activate_tenants", "reset_trial", "sync_subscriptions"]
+    actions = ["suspend_tenants", "activate_tenants", "reset_trial", "sync_subscriptions", "send_welcome_emails"]
 
     def save_model(self, request, obj, form, change):
         """When saving from admin, ensure the Subscription row matches the tenant's plan."""
@@ -135,6 +135,63 @@ class TenantAdmin(ModelAdmin):
             count += 1
             
         self.message_user(request, f"✅ Synced subscriptions for {count} tenant(s).")
+
+    @action(description="Send / Resend Welcome Email")
+    def send_welcome_emails(self, request, queryset):
+        """
+        Manually trigger the welcome email for selected tenants.
+        If an admin agent already exists, resets their password to a new temporary one
+        (only if they haven't set their own password yet, i.e. must_change_password=True).
+        """
+        from apps.tenants.signals import _create_default_tenant_admin, _generate_temp_password
+        from apps.tenants.tasks import send_tenant_welcome_email
+        from django.db import connection
+        
+        count = 0
+        for tenant in queryset.exclude(schema_name="public"):
+            if not tenant.primary_contact_email:
+                continue
+                
+            previous_schema = connection.schema_name
+            temp_password = None
+            
+            try:
+                connection.set_schema(tenant.schema_name)
+                from apps.authentication.models import Agent
+                
+                admin_agent = Agent.objects.filter(is_tenant_admin=True).first()
+                if not admin_agent:
+                    # Admin doesn't exist, create it (this sets tenant._temp_admin_password)
+                    _create_default_tenant_admin(tenant)
+                    temp_password = getattr(tenant, "_temp_admin_password", None)
+                else:
+                    # Admin exists. If they haven't set their own password yet, we can reset it safely.
+                    if admin_agent.must_change_password:
+                        temp_password = _generate_temp_password()
+                        admin_agent.set_password(temp_password)
+                        admin_agent.save(update_fields=["password"])
+                    else:
+                        # User has already set their own password, don't overwrite it.
+                        # We just send the email without the temp_password (it will say '[Check your registration email]').
+                        temp_password = None
+                        
+            except Exception as e:
+                self.message_user(request, f"❌ Failed to process {tenant.schema_name}: {e}", level="ERROR")
+                continue
+            finally:
+                connection.set_schema(previous_schema)
+                
+            # Queue the email
+            send_tenant_welcome_email.apply_async(
+                kwargs={
+                    "tenant_id": tenant.pk,
+                    "temp_password": temp_password,
+                },
+                queue="notifications",
+            )
+            count += 1
+            
+        self.message_user(request, f"✅ Queued welcome emails for {count} tenant(s).")
 
     fieldsets = (
         (

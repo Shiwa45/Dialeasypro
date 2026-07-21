@@ -21,7 +21,7 @@ from django.conf import settings
 from django.db import connection
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
-from django_tenants.signals import post_schema_sync, schema_needs_to_be_deleted
+from django_tenants.signals import post_schema_sync
 
 from apps.tenants.models import Tenant
 

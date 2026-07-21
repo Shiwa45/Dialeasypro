@@ -151,6 +151,50 @@ class PlanAdmin(ModelAdmin):
     def is_active_display(self, obj):
         return obj.is_active
 
+    actions = ["sync_all_features"]
+
+    @action(description="Sync all available features to selected plans (disabled by default)")
+    def sync_all_features(self, request, queryset):
+        """
+        For each selected plan, checks all known FeatureKeys.
+        If a feature is missing from the plan, creates it as disabled by default.
+        """
+        from apps.core.constants import FeatureKey
+        from apps.plans.models import PlanFeature
+
+        features_created = 0
+        plans_updated = 0
+
+        for plan in queryset:
+            existing_features = set(plan.features.values_list("feature_key", flat=True))
+            new_features = []
+            
+            for key in FeatureKey.ALL:
+                if key not in existing_features:
+                    # Enable ALL features if it's the Business or Enterprise plan
+                    # Otherwise default to False so they can be manually enabled
+                    is_enabled = plan.slug in ["business", "enterprise"]
+                    new_features.append(
+                        PlanFeature(plan=plan, feature_key=key, is_enabled=is_enabled)
+                    )
+            
+            if new_features:
+                PlanFeature.objects.bulk_create(new_features)
+                features_created += len(new_features)
+                plans_updated += 1
+                
+            # Clear feature cache for any tenants on this plan
+            from apps.core.middleware import TenantFeatureFlagMiddleware
+            from apps.plans.models import Subscription
+            for sub in Subscription.objects.filter(plan=plan):
+                TenantFeatureFlagMiddleware.invalidate_cache(sub.tenant.schema_name)
+
+        self.message_user(
+            request,
+            f"Successfully synced features for {plans_updated} plans. "
+            f"Added {features_created} new feature flags.",
+        )
+
 
 @admin.register(PlanFeature)
 class PlanFeatureAdmin(ModelAdmin):

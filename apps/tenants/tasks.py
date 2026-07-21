@@ -55,7 +55,6 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
                 f"Workspace Name: {tenant.schema_name}\n"
                 f"Username: {tenant.primary_contact_email}\n"
                 f"Password: {temp_password or '[Check your registration email]'}\n\n"
-                f"Your trial runs for {settings.DEFAULT_TRIAL_DAYS} days.\n\n"
                 f"Need help? Email {settings.SUPPORT_EMAIL}"
             )
             html_message = None

@@ -1,0 +1,15 @@
+Welcome to DialEasypro, {{ tenant.primary_contact_name }}!
+
+Your DialEasypro CRM workspace has been successfully created and is ready to use.
+
+--- LOGIN CREDENTIALS ---
+Workspace Name: {{ tenant.schema_name }}
+Username: {{ tenant.primary_contact_email }}
+Password: {{ temp_password|default:"[Check your registration email]" }}
+
+Login to Your Workspace here:
+{{ login_url }}
+
+Need help getting started? Email {{ support_email }}
+
+(c) DialEasypro. All rights reserved.

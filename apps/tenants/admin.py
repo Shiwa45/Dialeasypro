@@ -146,6 +146,7 @@ class TenantAdmin(ModelAdmin):
         from apps.tenants.signals import _create_default_tenant_admin, _generate_temp_password
         from apps.tenants.tasks import send_tenant_welcome_email
         from django.db import connection
+        from django.contrib import messages
         
         count = 0
         for tenant in queryset.exclude(schema_name="public"):
@@ -175,23 +176,23 @@ class TenantAdmin(ModelAdmin):
                         # We just send the email without the temp_password (it will say '[Check your registration email]').
                         temp_password = None
                         
+                # Queue the email
+                send_tenant_welcome_email.apply_async(
+                    kwargs={
+                        "tenant_id": tenant.pk,
+                        "temp_password": temp_password,
+                    },
+                    queue="notifications",
+                )
+                count += 1
+                        
             except Exception as e:
-                self.message_user(request, f"❌ Failed to process {tenant.schema_name}: {e}", level="ERROR")
+                self.message_user(request, f"❌ Failed to process {tenant.schema_name}: {e}", level=messages.ERROR)
                 continue
             finally:
                 connection.set_schema(previous_schema)
-                
-            # Queue the email
-            send_tenant_welcome_email.apply_async(
-                kwargs={
-                    "tenant_id": tenant.pk,
-                    "temp_password": temp_password,
-                },
-                queue="notifications",
-            )
-            count += 1
             
-        self.message_user(request, f"✅ Queued welcome emails for {count} tenant(s).")
+        self.message_user(request, f"✅ Queued welcome emails for {count} tenant(s).", level=messages.SUCCESS)
 
     fieldsets = (
         (

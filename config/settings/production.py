@@ -38,6 +38,8 @@ X_FRAME_OPTIONS = "DENY"
 CSRF_TRUSTED_ORIGINS = [
     f"https://{config('BASE_DOMAIN', default='api.dialeasypro.easyian.com')}",
     f"https://*.{config('BASE_DOMAIN', default='api.dialeasypro.easyian.com')}",
+    "https://easyian.shop",
+    "https://*.easyian.shop",
 ]
 
 # ---- Production: Email (AWS SES) ---------------------------

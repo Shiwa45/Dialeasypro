@@ -513,6 +513,14 @@ RAZORPAY_WEBHOOK_SECRET = config("RAZORPAY_WEBHOOK_SECRET", default="")
 # Platform Configuration
 # ============================================================
 BASE_DOMAIN = config("BASE_DOMAIN", default="telecrm.in")
+# All root domains that tenants should be registered on.
+# When a new tenant is created, a Domain row is created for each entry.
+# This enables the gradual migration from dialeasypro.easyian.com → easyian.shop.
+BASE_DOMAINS = config(
+    "BASE_DOMAINS",
+    default=BASE_DOMAIN,
+    cast=lambda v: [d.strip() for d in v.split(",") if d.strip()],
+)
 SUPER_ADMIN_DOMAIN = config("SUPER_ADMIN_DOMAIN", default="admin.telecrm.in")
 DEFAULT_TRIAL_DAYS = config("DEFAULT_TRIAL_DAYS", default=14, cast=int)
 MAINTENANCE_MODE = config("MAINTENANCE_MODE", default=False, cast=bool)

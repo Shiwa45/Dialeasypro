@@ -96,14 +96,9 @@ class TenantRegistrationSerializer(serializers.Serializer):
             plan=plan,
         )
         tenant.save()  # ← This triggers schema creation + post_schema_sync signal
-
-        # Create primary domain
-        from django.conf import settings
-        Domain.objects.create(
-            domain=f"{schema_name}.{settings.BASE_DOMAIN}",
-            tenant=tenant,
-            is_primary=True,
-        )
+        # NOTE: Domain registration is handled by _register_tenant_domains()
+        # in the post_schema_sync signal, which creates domains for ALL
+        # configured BASE_DOMAINS (supporting multi-domain migration).
 
         return tenant
 

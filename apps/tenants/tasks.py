@@ -30,10 +30,11 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
 
         tenant = Tenant.objects.get(pk=tenant_id)
 
-        subject = f"Welcome to TeleCRM — Your account is ready, {tenant.primary_contact_name}!"
+        subject = f"Welcome to DialEasypro — Your account is ready, {tenant.primary_contact_name}!"
 
-        # Build login URL as requested
-        login_url = "https://dialeasypro.easyian.com/"
+        # Build login URL dynamically from the primary BASE_DOMAIN
+        base_domain = getattr(settings, "BASE_DOMAIN", "dialeasypro.easyian.com")
+        login_url = f"https://{base_domain}/"
 
         context = {
             "tenant": tenant,

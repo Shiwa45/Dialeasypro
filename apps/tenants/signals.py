@@ -266,19 +266,11 @@ def _seed_default_dispositions(tenant):
         logger.warning(f"[Tenant Signal] Could not seed dispositions: {exc}")
 
 
-def _generate_temp_password(length: int = 12) -> str:
-    """Generate a secure temporary password."""
-    alphabet = string.ascii_letters + string.digits + "!@#$%"
-    # Ensure at least one of each required character type
-    password = [
-        secrets.choice(string.ascii_uppercase),
-        secrets.choice(string.ascii_lowercase),
-        secrets.choice(string.digits),
-        secrets.choice("!@#$%"),
-    ]
-    password += [secrets.choice(alphabet) for _ in range(length - 4)]
-    secrets.SystemRandom().shuffle(password)
-    return "".join(password)
+def _generate_temp_password(length: int = 10) -> str:
+    """Generate a clean, unambiguous temporary password (e.g. Pass-9k2mP4xL)."""
+    chars = string.ascii_letters + string.digits
+    rand_str = "".join(secrets.choice(chars) for _ in range(8))
+    return f"Pass-{rand_str}"
 
 
 @receiver(pre_delete, sender=Tenant)

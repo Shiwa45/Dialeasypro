@@ -162,20 +162,16 @@ class TenantAdmin(ModelAdmin):
                 
                 admin_agent = Agent.objects.filter(is_tenant_admin=True).first()
                 if not admin_agent:
-                    # Admin doesn't exist, create it (this sets tenant._temp_admin_password)
+                    # Admin doesn't exist, create it
                     _create_default_tenant_admin(tenant)
                     temp_password = getattr(tenant, "_temp_admin_password", None)
                 else:
-                    # Admin exists. If they haven't set their own password yet, we can reset it safely.
-                    if admin_agent.must_change_password:
-                        temp_password = _generate_temp_password()
-                        admin_agent.set_password(temp_password)
-                        admin_agent.save(update_fields=["password"])
-                    else:
-                        # User has already set their own password, don't overwrite it.
-                        # We just send the email without the temp_password (it will say '[Check your registration email]').
-                        temp_password = None
-                        
+                    # Admin exists, generate a fresh clean temporary password
+                    temp_password = _generate_temp_password()
+                    admin_agent.set_password(temp_password)
+                    admin_agent.must_change_password = True
+                    admin_agent.save(update_fields=["password", "must_change_password"])
+
                 # Queue the email
                 send_tenant_welcome_email.apply_async(
                     kwargs={

@@ -20,7 +20,7 @@ from apps.integrations.field_mapping import apply_field_mapping, flatten_meta_fi
 
 logger = logging.getLogger(__name__)
 
-GRAPH = "https://graph.facebook.com/v18.0"
+GRAPH = "https://graph.facebook.com/v25.0"
 
 
 def sync_meta_leads(config, max_per_form: int = 200) -> dict:

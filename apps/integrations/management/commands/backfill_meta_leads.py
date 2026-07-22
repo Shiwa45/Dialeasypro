@@ -29,7 +29,7 @@ from django.db import connection
 
 from apps.core.exceptions import PlanLimitExceededException
 
-GRAPH = "https://graph.facebook.com/v18.0"
+GRAPH = "https://graph.facebook.com/v25.0"
 
 
 class Command(BaseCommand):

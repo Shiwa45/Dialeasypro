@@ -383,7 +383,7 @@ class MetaLeadAdsWebhookView(BaseWebhookView):
 
             # Request campaign/ad attribution alongside the form field data.
             resp = req.get(
-                f"https://graph.facebook.com/v18.0/{lead_id}",
+                f"https://graph.facebook.com/v25.0/{lead_id}",
                 params={
                     "access_token": access_token,
                     "fields": (
@@ -588,7 +588,7 @@ class MetaFormFieldsView(APIView):
 
             # Try primary page_id first
             resp = req.get(
-                f"https://graph.facebook.com/v18.0/{page_id}/leadgen_forms",
+                f"https://graph.facebook.com/v25.0/{page_id}/leadgen_forms",
                 params={"access_token": access_token, "fields": "id,name,status,questions"},
                 timeout=15,
             )
@@ -612,7 +612,7 @@ class MetaFormFieldsView(APIView):
             # If primary page_id fails (e.g. 400), fallback to /me/accounts
             logger.info("[Meta] Primary page_id call failed, trying /me/accounts fallback...")
             accounts_resp = req.get(
-                "https://graph.facebook.com/v18.0/me/accounts",
+                "https://graph.facebook.com/v25.0/me/accounts",
                 params={"access_token": access_token},
                 timeout=15,
             )
@@ -623,7 +623,7 @@ class MetaFormFieldsView(APIView):
                     p_id = p.get("id")
                     p_token = p.get("access_token") or access_token
                     f_resp = req.get(
-                        f"https://graph.facebook.com/v18.0/{p_id}/leadgen_forms",
+                        f"https://graph.facebook.com/v25.0/{p_id}/leadgen_forms",
                         params={"access_token": p_token, "fields": "id,name,status,questions"},
                         timeout=10,
                     )

@@ -21,6 +21,7 @@ from apps.leads.views import (
     LeadDashboardStatsView,
     LeadDetailView,
     LeadImportJobDetailView,
+    LeadImportPreviewView,
     LeadImportView,
     LeadListCreateView,
     LeadNoteListCreateView,
@@ -57,6 +58,7 @@ urlpatterns = [
     path("<int:lead_id>/activities/", LeadActivityListView.as_view(), name="api_lead_activities"),
 
     # ---- Import --------------------------------------------
+    path("import/preview/", LeadImportPreviewView.as_view(), name="api_lead_import_preview"),
     path("import/", LeadImportView.as_view(), name="api_lead_import"),
     path("import/<uuid:pk>/", LeadImportJobDetailView.as_view(), name="api_lead_import_status"),
 

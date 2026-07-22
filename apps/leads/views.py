@@ -642,6 +642,93 @@ class LeadImportView(APIView):
         )
 
 
+class LeadImportPreviewView(APIView):
+    """
+    POST /api/v1/leads/import/preview/
+    Upload CSV/XLSX file to parse headers and preview sample rows for column mapping.
+    """
+
+    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.LEAD_IMPORT
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        from apps.leads.tasks import _parse_import_file
+        from apps.leads.models import CustomField
+
+        file = request.FILES.get("file")
+        if not file:
+            return Response(
+                {"error": "file_required", "message": "Please upload a CSV or XLSX file."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        filename = file.name.lower()
+        if not filename.endswith((".csv", ".xlsx", ".xls")):
+            return Response(
+                {"error": "invalid_file_type", "message": "Only CSV and XLSX files are supported."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        file_content = file.read()
+        rows = _parse_import_file(file_content, filename)
+        if rows is None or not rows:
+            return Response(
+                {"error": "empty_file", "message": "The uploaded file is empty or unreadable."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        headers = list(rows[0].keys())
+        sample_rows = rows[:3]
+
+        # Auto-match headers to CRM lead fields
+        default_mapping = {
+            "name": ["name", "full name", "contact name", "customer name", "lead name", "first name"],
+            "phone": ["phone", "mobile", "contact", "phone number", "mobile number", "contact no", "cell"],
+            "email": ["email", "email address", "mail"],
+            "city": ["city", "location", "town"],
+            "state": ["state"],
+            "requirement": ["requirement", "query", "message", "remarks", "comments", "description"],
+            "budget": ["budget", "amount", "price"],
+            "notes": ["notes", "note"],
+        }
+
+        auto_mapping = {}
+        normalized_headers = {h.lower().strip(): h for h in headers}
+        for lead_field, aliases in default_mapping.items():
+            for alias in aliases:
+                if alias in normalized_headers:
+                    auto_mapping[lead_field] = normalized_headers[alias]
+                    break
+
+        available_fields = [
+            {"key": "name", "label": "Full Name / Lead Name", "required": True},
+            {"key": "phone", "label": "Phone Number", "required": True},
+            {"key": "email", "label": "Email Address"},
+            {"key": "city", "label": "City"},
+            {"key": "state", "label": "State"},
+            {"key": "requirement", "label": "Requirement / Query"},
+            {"key": "budget", "label": "Budget"},
+            {"key": "notes", "label": "Notes / Remarks"},
+        ]
+
+        # Add custom fields if defined for tenant
+        c_fields = CustomField.objects.all()
+        for cf in c_fields:
+            available_fields.append({
+                "key": f"custom_{cf.field_name}",
+                "label": f"{cf.label} (Custom Field)",
+            })
+
+        return Response({
+            "headers": headers,
+            "sample_rows": sample_rows,
+            "total_rows": len(rows),
+            "auto_mapping": auto_mapping,
+            "available_fields": available_fields,
+        })
+
+
 class LeadImportJobDetailView(generics.RetrieveAPIView):
     """GET /api/v1/leads/import/{id}/ — Poll import job status."""
 

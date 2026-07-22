@@ -161,13 +161,12 @@ class TenantAdmin(ModelAdmin):
                 from apps.authentication.models import Agent
                 
                 admin_agent = Agent.objects.filter(is_tenant_admin=True).first()
+                temp_password = getattr(settings, "DEFAULT_TENANT_PASSWORD", "Admin@123456")
                 if not admin_agent:
                     # Admin doesn't exist, create it
                     _create_default_tenant_admin(tenant)
-                    temp_password = getattr(tenant, "_temp_admin_password", None)
                 else:
-                    # Admin exists, generate a fresh clean temporary password
-                    temp_password = _generate_temp_password()
+                    # Reset to standard default password and force change
                     admin_agent.set_password(temp_password)
                     admin_agent.must_change_password = True
                     admin_agent.save(update_fields=["password", "must_change_password"])

@@ -36,10 +36,12 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
         base_domain = getattr(settings, "BASE_DOMAIN", "dialeasypro.easyian.com")
         login_url = f"https://{base_domain}/"
 
+        pwd = temp_password or getattr(settings, "DEFAULT_TENANT_PASSWORD", "Admin@123456")
+
         context = {
             "tenant": tenant,
             "login_url": login_url,
-            "temp_password": temp_password,
+            "temp_password": pwd,
             "trial_days": settings.DEFAULT_TRIAL_DAYS,
             "support_email": settings.SUPPORT_EMAIL,
         }
@@ -55,7 +57,8 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
                 f"--- LOGIN CREDENTIALS ---\n"
                 f"Workspace Name: {tenant.schema_name}\n"
                 f"Username: {tenant.primary_contact_email}\n"
-                f"Password: {temp_password or '[Check your registration email]'}\n\n"
+                f"Default Password: {pwd}\n\n"
+                f"⚠️ IMPORTANT: Please change your password after logging in!\n\n"
                 f"Need help? Email {settings.SUPPORT_EMAIL}"
             )
             html_message = None

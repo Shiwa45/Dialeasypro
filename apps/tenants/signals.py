@@ -94,8 +94,8 @@ def _create_default_tenant_admin(tenant: Tenant):
             )
             return
 
-        # Generate a secure temporary password
-        temp_password = _generate_temp_password()
+        # Set fixed default password for tenant admin
+        temp_password = getattr(settings, "DEFAULT_TENANT_PASSWORD", "Admin@123456")
 
         admin_agent = Agent(
             email=tenant.primary_contact_email,

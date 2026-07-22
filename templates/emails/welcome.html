@@ -151,10 +151,14 @@
                             <span class="credential-value">{{ tenant.primary_contact_email }}</span>
                         </div>
                         <div class="credential-row">
-                            <span class="credential-label">Password:</span>
-                            <span class="credential-value">{{ temp_password|default:"[Check your registration email]" }}</span>
+                            <span class="credential-label">Default Password:</span>
+                            <span class="credential-value">{{ temp_password|default:"Admin@123456" }}</span>
                         </div>
                     </div>
+                    
+                    <p style="color: #d97706; font-weight: 600; margin-top: 15px; font-size: 14px; text-align: center;">
+                        ⚠️ <strong>Security Notice:</strong> Please change your password immediately after your first login.
+                    </p>
                     
                     <div class="btn-container">
                         <a href="{{ login_url }}" class="btn">Login to Your Workspace</a>

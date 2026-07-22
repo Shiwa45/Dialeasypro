@@ -5,7 +5,9 @@ Your DialEasypro CRM workspace has been successfully created and is ready to use
 --- LOGIN CREDENTIALS ---
 Workspace Name: {{ tenant.schema_name }}
 Username: {{ tenant.primary_contact_email }}
-Password: {{ temp_password|default:"[Check your registration email]" }}
+Default Password: {{ temp_password|default:"Admin@123456" }}
+
+⚠️ IMPORTANT: Please change your password immediately after your first login!
 
 Login to Your Workspace here:
 {{ login_url }}

@@ -41,13 +41,15 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=config.settings.production
       - REDIS_HOST=redis
-      - DB_SSLMODE=require
-      - PGSSLMODE=require
+      - DB_SSLMODE=${DB_SSLMODE:-prefer}
+      - PGSSLMODE=${DB_SSLMODE:-prefer}
     ports:
       - "8000:8000"
     volumes:
       - ./staticfiles:/app/staticfiles
       - ./mediafiles:/app/mediafiles
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - redis
     networks:
@@ -66,14 +68,16 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=config.settings.production
       - REDIS_HOST=redis
-      - DB_SSLMODE=require
-      - PGSSLMODE=require
+      - DB_SSLMODE=${DB_SSLMODE:-prefer}
+      - PGSSLMODE=${DB_SSLMODE:-prefer}
     command: >
       celery -A config.celery worker
       --loglevel=info
       --concurrency=4
       -Q default,bulk_ops,notifications,integrations,call_uploads
       --hostname=worker@%h
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - redis
     networks:
@@ -92,12 +96,14 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=config.settings.production
       - REDIS_HOST=redis
-      - DB_SSLMODE=require
-      - PGSSLMODE=require
+      - DB_SSLMODE=${DB_SSLMODE:-prefer}
+      - PGSSLMODE=${DB_SSLMODE:-prefer}
     command: >
       celery -A config.celery beat
       --loglevel=info
       --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - redis
     networks:

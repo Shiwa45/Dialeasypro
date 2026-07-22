@@ -54,6 +54,7 @@ class FeatureKey:
     CALL_RECORDING_DOWNLOAD = "call_recording_download"
     CLOUD_TELEPHONY = "cloud_telephony"
     AUTO_DIALER = "auto_dialer"
+    CALL_QUEUES = "call_queues"
 
     # ---- CRM Features --------------------------------------
     CUSTOM_FIELDS = "custom_fields"
@@ -110,6 +111,7 @@ class FeatureKey:
         BULK_EMAIL, BULK_SMS, ONE_CLICK_WHATSAPP, ONE_CLICK_EMAIL, ONE_CLICK_SMS,
         EMAIL_CAMPAIGNS, SMS_CAMPAIGNS, WHATSAPP_INCOMING,
         CALL_RECORDING_ACCESS, CALL_RECORDING_DOWNLOAD, CLOUD_TELEPHONY, AUTO_DIALER,
+        CALL_QUEUES,
         CUSTOM_FIELDS, LEAD_SCORING, LEAD_PIPELINE, LEAD_IMPORT, LEAD_EXPORT,
         FOLLOW_UP_AUTOMATION, CONTACT_HISTORY,
         TEAM_MANAGEMENT, AGENT_MONITORING, AGENT_GPS_TRACKING, AGENT_PERFORMANCE_REPORTS,
@@ -147,6 +149,7 @@ class FeatureKey:
         EMAIL_CAMPAIGNS: "Email Campaign Management",
         SMS_CAMPAIGNS: "SMS Campaign Management",
         WHATSAPP_INCOMING: "Incoming WhatsApp Messages",
+        CALL_QUEUES: "Call Queues",
         CALL_RECORDING_ACCESS: "Call Recording Access (Play)",
         CALL_RECORDING_DOWNLOAD: "Call Recording Download",
         CLOUD_TELEPHONY: "Cloud Telephony (Exotel/Knowlarity)",

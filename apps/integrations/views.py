@@ -585,11 +585,51 @@ class MetaFormFieldsView(APIView):
 
         try:
             import requests as req
+
+            # Try primary page_id first
             resp = req.get(
                 f"https://graph.facebook.com/v18.0/{page_id}/leadgen_forms",
                 params={"access_token": access_token, "fields": "id,name,status,questions"},
                 timeout=15,
             )
+
+            # If primary page_id fails (e.g. 400 because user ID was entered), fallback to /me/accounts
+            if resp.status_code != 200:
+                logger.info("[Meta] Primary page_id call failed, trying /me/accounts fallback...")
+                accounts_resp = req.get(
+                    "https://graph.facebook.com/v18.0/me/accounts",
+                    params={"access_token": access_token},
+                    timeout=15,
+                )
+                if accounts_resp.status_code == 200:
+                    pages = accounts_resp.json().get("data", [])
+                    all_forms = []
+                    for p in pages:
+                        p_id = p.get("id")
+                        p_token = p.get("access_token") or access_token
+                        f_resp = req.get(
+                            f"https://graph.facebook.com/v18.0/{p_id}/leadgen_forms",
+                            params={"access_token": p_token, "fields": "id,name,status,questions"},
+                            timeout=10,
+                        )
+                        if f_resp.status_code == 200:
+                            # Auto-update config with correct Page ID
+                            config.credentials["page_id"] = p_id
+                            config.save(update_fields=["credentials"])
+                            for form in f_resp.json().get("data", []):
+                                questions = [
+                                    {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
+                                    for q in form.get("questions", [])
+                                ]
+                                all_forms.append({
+                                    "id": form.get("id"),
+                                    "name": f"{form.get('name')} ({p.get('name')})",
+                                    "status": form.get("status"),
+                                    "fields": questions,
+                                })
+                    if all_forms:
+                        return Response({"forms": all_forms})
+
             resp.raise_for_status()
             forms = []
             for form in resp.json().get("data", []):

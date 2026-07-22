@@ -604,11 +604,25 @@ class MetaFormFieldsView(APIView):
                     "fields": questions,
                 })
             return Response({"forms": forms})
+        except req.exceptions.HTTPError as exc:
+            meta_err = ""
+            try:
+                meta_err = exc.response.json().get("error", {}).get("message", "")
+            except Exception:
+                meta_err = str(exc)
+            logger.warning(f"[Meta] Form introspection failed: {meta_err or exc}")
+            return Response(
+                {
+                    "error": "fetch_failed",
+                    "message": f"Meta API Error: {meta_err or str(exc)}. Check your Page ID and Page Access Token.",
+                },
+                status=400,
+            )
         except Exception as exc:
             logger.warning(f"[Meta] Form introspection failed: {exc}")
             return Response(
-                {"error": "fetch_failed", "message": "Could not fetch forms from Meta. Check the token/page ID."},
-                status=502,
+                {"error": "fetch_failed", "message": f"Could not fetch forms from Meta: {exc}"},
+                status=400,
             )
 
 

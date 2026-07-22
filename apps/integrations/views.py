@@ -593,73 +593,77 @@ class MetaFormFieldsView(APIView):
                 timeout=15,
             )
 
-            # If primary page_id fails (e.g. 400 because user ID was entered), fallback to /me/accounts
-            if resp.status_code != 200:
-                logger.info("[Meta] Primary page_id call failed, trying /me/accounts fallback...")
-                accounts_resp = req.get(
-                    "https://graph.facebook.com/v18.0/me/accounts",
-                    params={"access_token": access_token},
-                    timeout=15,
-                )
-                if accounts_resp.status_code == 200:
-                    pages = accounts_resp.json().get("data", [])
-                    all_forms = []
-                    for p in pages:
-                        p_id = p.get("id")
-                        p_token = p.get("access_token") or access_token
-                        f_resp = req.get(
-                            f"https://graph.facebook.com/v18.0/{p_id}/leadgen_forms",
-                            params={"access_token": p_token, "fields": "id,name,status,questions"},
-                            timeout=10,
-                        )
-                        if f_resp.status_code == 200:
-                            # Auto-update config with correct Page ID
-                            config.credentials["page_id"] = p_id
-                            config.save(update_fields=["credentials"])
-                            for form in f_resp.json().get("data", []):
-                                questions = [
-                                    {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
-                                    for q in form.get("questions", [])
-                                ]
-                                all_forms.append({
-                                    "id": form.get("id"),
-                                    "name": f"{form.get('name')} ({p.get('name')})",
-                                    "status": form.get("status"),
-                                    "fields": questions,
-                                })
-                    if all_forms:
-                        return Response({"forms": all_forms})
+            # If primary call succeeded:
+            if resp.status_code == 200:
+                forms = []
+                for form in resp.json().get("data", []):
+                    questions = [
+                        {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
+                        for q in form.get("questions", [])
+                    ]
+                    forms.append({
+                        "id": form.get("id"),
+                        "name": form.get("name"),
+                        "status": form.get("status"),
+                        "fields": questions,
+                    })
+                return Response({"forms": forms})
 
-            resp.raise_for_status()
-            forms = []
-            for form in resp.json().get("data", []):
-                questions = [
-                    {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
-                    for q in form.get("questions", [])
-                ]
-                forms.append({
-                    "id": form.get("id"),
-                    "name": form.get("name"),
-                    "status": form.get("status"),
-                    "fields": questions,
-                })
-            return Response({"forms": forms})
-        except req.exceptions.HTTPError as exc:
-            meta_err = ""
+            # If primary page_id fails (e.g. 400), fallback to /me/accounts
+            logger.info("[Meta] Primary page_id call failed, trying /me/accounts fallback...")
+            accounts_resp = req.get(
+                "https://graph.facebook.com/v18.0/me/accounts",
+                params={"access_token": access_token},
+                timeout=15,
+            )
+            if accounts_resp.status_code == 200:
+                pages = accounts_resp.json().get("data", [])
+                all_forms = []
+                for p in pages:
+                    p_id = p.get("id")
+                    p_token = p.get("access_token") or access_token
+                    f_resp = req.get(
+                        f"https://graph.facebook.com/v18.0/{p_id}/leadgen_forms",
+                        params={"access_token": p_token, "fields": "id,name,status,questions"},
+                        timeout=10,
+                    )
+                    if f_resp.status_code == 200:
+                        # Auto-update config with correct Page ID
+                        config.credentials["page_id"] = p_id
+                        config.save(update_fields=["credentials"])
+                        for form in f_resp.json().get("data", []):
+                            questions = [
+                                {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
+                                for q in form.get("questions", [])
+                            ]
+                            all_forms.append({
+                                "id": form.get("id"),
+                                "name": f"{form.get('name')} ({p.get('name')})",
+                                "status": form.get("status"),
+                                "fields": questions,
+                            })
+                if all_forms:
+                    return Response({"forms": all_forms})
+
+            # If primary call failed and fallback couldn't find forms, log and return detailed Meta error
+            logger.warning(f"[Meta] Primary page_id {page_id} call returned {resp.status_code}: {resp.text}")
+
+            meta_err_msg = ""
             try:
-                meta_err = exc.response.json().get("error", {}).get("message", "")
+                err_data = resp.json().get("error", {})
+                meta_err_msg = err_data.get("message") or str(err_data)
             except Exception:
-                meta_err = str(exc)
-            logger.warning(f"[Meta] Form introspection failed: {meta_err or exc}")
+                meta_err_msg = resp.text[:300]
+
             return Response(
                 {
                     "error": "fetch_failed",
-                    "message": f"Meta API Error: {meta_err or str(exc)}. Check your Page ID and Page Access Token.",
+                    "message": f"Meta API error ({resp.status_code}): {meta_err_msg}",
                 },
                 status=400,
             )
         except Exception as exc:
-            logger.warning(f"[Meta] Form introspection failed: {exc}")
+            logger.warning(f"[Meta] Form introspection failed: {exc}", exc_info=True)
             return Response(
                 {"error": "fetch_failed", "message": f"Could not fetch forms from Meta: {exc}"},
                 status=400,

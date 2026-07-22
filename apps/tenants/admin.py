@@ -4,6 +4,7 @@ TeleCRM Backend — apps/tenants/admin.py
 Django Admin (Unfold-themed) for Tenant and Domain management.
 Accessible only to Django superusers at /superadmin/
 """
+from django.conf import settings
 from django.contrib import admin
 from django.db.models import Count, Q
 from django.utils import timezone

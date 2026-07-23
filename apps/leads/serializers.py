@@ -26,6 +26,8 @@ from apps.leads.models import (
 # ============================================================
 
 class CustomFieldSerializer(serializers.ModelSerializer):
+    field_key = serializers.CharField(required=False, allow_blank=True)
+
     class Meta:
         model = CustomField
         fields = [

@@ -583,19 +583,8 @@ class LeadImportView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        allowed_types = [
-            "text/csv", "application/csv",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-excel",
-        ]
-        if file.content_type not in allowed_types and not file.name.endswith((".csv", ".xlsx")):
-            return Response(
-                {
-                    "error": "invalid_file_type",
-                    "message": "Only CSV and XLSX files are supported.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # Accept any file — format auto-detected during parsing
+        pass
 
         # Get column mapping from form data
         import json
@@ -664,17 +653,11 @@ class LeadImportPreviewView(APIView):
             )
 
         filename = file.name.lower()
-        if not filename.endswith((".csv", ".xlsx", ".xls")):
-            return Response(
-                {"error": "invalid_file_type", "message": "Only CSV and XLSX files are supported."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         file_content = file.read()
         rows = _parse_import_file(file_content, filename)
         if rows is None or not rows:
             return Response(
-                {"error": "empty_file", "message": "The uploaded file is empty or unreadable."},
+                {"error": "invalid_file", "message": "Could not read data from the uploaded file. Please make sure it is a valid CSV or Excel spreadsheet with header rows."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

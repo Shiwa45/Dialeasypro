@@ -609,8 +609,39 @@ class MetaFormFieldsView(APIView):
                     })
                 return Response({"forms": forms})
 
-            # If primary page_id fails (e.g. 400), fallback to /me/accounts
-            logger.info("[Meta] Primary page_id call failed, trying /me/accounts fallback...")
+            # If primary page_id fails (e.g. 400), fallback 1: Try /me/leadgen_forms (works if access_token is a Page Access Token)
+            logger.info("[Meta] Primary page_id call failed, trying /me/leadgen_forms fallback for Page Token...")
+            me_forms_resp = req.get(
+                "https://graph.facebook.com/v25.0/me/leadgen_forms",
+                params={"access_token": access_token, "fields": "id,name,status,questions"},
+                timeout=15,
+            )
+            if me_forms_resp.status_code == 200:
+                # Get actual Page ID from /me
+                me_info = req.get("https://graph.facebook.com/v25.0/me", params={"access_token": access_token}, timeout=10)
+                if me_info.status_code == 200:
+                    real_page_id = me_info.json().get("id")
+                    if real_page_id:
+                        config.credentials["page_id"] = real_page_id
+                        config.save(update_fields=["credentials"])
+                        logger.info(f"[Meta] Auto-corrected Page ID to {real_page_id}")
+
+                forms = []
+                for form in me_forms_resp.json().get("data", []):
+                    questions = [
+                        {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
+                        for q in form.get("questions", [])
+                    ]
+                    forms.append({
+                        "id": form.get("id"),
+                        "name": form.get("name"),
+                        "status": form.get("status"),
+                        "fields": questions,
+                    })
+                return Response({"forms": forms})
+
+            # Fallback 2: Try /me/accounts (works if access_token is a User Access Token)
+            logger.info("[Meta] /me/leadgen_forms failed, trying /me/accounts fallback for User Token...")
             accounts_resp = req.get(
                 "https://graph.facebook.com/v25.0/me/accounts",
                 params={"access_token": access_token},
@@ -628,8 +659,10 @@ class MetaFormFieldsView(APIView):
                         timeout=10,
                     )
                     if f_resp.status_code == 200:
-                        # Auto-update config with correct Page ID
+                        # Auto-update config with correct Page ID & Page Token
                         config.credentials["page_id"] = p_id
+                        if p.get("access_token"):
+                            config.credentials["access_token"] = p.get("access_token")
                         config.save(update_fields=["credentials"])
                         for form in f_resp.json().get("data", []):
                             questions = [

@@ -644,7 +644,10 @@ class MetaFormFieldsView(APIView):
             logger.info("[Meta] /me/leadgen_forms failed, trying /me/accounts fallback for User Token...")
             accounts_resp = req.get(
                 "https://graph.facebook.com/v25.0/me/accounts",
-                params={"access_token": access_token},
+                # Explicitly request the Page token.  Without this field Meta
+                # returns only basic Page data, causing the request below to
+                # retry leadgen_forms with the User token (which Meta rejects).
+                params={"access_token": access_token, "fields": "id,name,access_token"},
                 timeout=15,
             )
             if accounts_resp.status_code == 200:

@@ -24,13 +24,13 @@ class TenantConfig {
   /// Default root domain for the SaaS deployment (overridable via --dart-define)
   static const String defaultRootDomain = String.fromEnvironment(
     'ROOT_DOMAIN',
-    defaultValue: 'dialeasypro.easyian.com',
+    defaultValue: 'easyian.shop',
   );
 
   /// Default API base URL when no tenant is configured (e.g. dev)
   static const String defaultBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://dialeasypro.easyian.com',
+    defaultValue: 'https://easyian.shop',
   );
 
   /// Local development mode. Android emulators reach the host machine via

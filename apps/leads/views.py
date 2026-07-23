@@ -696,11 +696,11 @@ class LeadImportPreviewView(APIView):
         ]
 
         # Add custom fields if defined for tenant
-        c_fields = CustomField.objects.all()
+        c_fields = CustomField.objects.filter(is_active=True)
         for cf in c_fields:
             available_fields.append({
-                "key": f"custom_{cf.field_name}",
-                "label": f"{cf.label} (Custom Field)",
+                "key": f"custom_{cf.field_key}",
+                "label": f"{cf.name} (Custom Field)",
             })
 
         return Response({

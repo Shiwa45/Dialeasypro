@@ -566,11 +566,22 @@ class MetaFormFieldsView(APIView):
     permission_classes = [IsTenantAdmin]
 
     def get(self, request):
-        config = LeadSourceConfig.objects.filter(
+        configs = LeadSourceConfig.objects.filter(
             source__in=[LeadSource.META_FACEBOOK, LeadSource.META_INSTAGRAM]
-        ).first()
+        )
+        # The integrations page can contain more than one Meta configuration.
+        # Use the card the administrator is currently editing instead of an
+        # arbitrary `.first()` record, which may hold an old User token.
+        config_id = request.query_params.get("config_id")
+        config = configs.filter(pk=config_id).first() if config_id else configs.order_by("id").first()
         if not config:
-            return Response({"error": "no_config", "message": "Add the Meta integration first."}, status=404)
+            return Response(
+                {
+                    "error": "no_config",
+                    "message": "The selected Meta integration was not found. Reopen its configuration and try again.",
+                },
+                status=404,
+            )
 
         access_token = (config.credentials or {}).get("access_token", "")
         page_id = (config.credentials or {}).get("page_id") or (config.options or {}).get("page_id")

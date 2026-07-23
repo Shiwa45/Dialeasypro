@@ -98,7 +98,7 @@ def _create_default_tenant_admin(tenant: Tenant):
         temp_password = getattr(settings, "DEFAULT_TENANT_PASSWORD", "Admin@123456")
 
         admin_agent = Agent(
-            email=tenant.primary_contact_email,
+            email=tenant.primary_contact_email.lower().strip(),
             name=tenant.primary_contact_name or "Admin",
             phone=getattr(tenant, "primary_contact_phone", ""),
             role=AgentRole.ADMIN,

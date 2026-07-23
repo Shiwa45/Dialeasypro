@@ -129,10 +129,9 @@ class AgentLoginAPIView(APIView):
         email = serializer.validated_data["email"]
         password = serializer.validated_data["password"]
 
-        # Look up agent
-        try:
-            agent = Agent.objects.get(email=email)
-        except Agent.DoesNotExist:
+        # Look up agent (case-insensitive)
+        agent = Agent.objects.filter(email__iexact=email).first()
+        if not agent:
             # Don't reveal which field is wrong (security)
             AuditLog.log(
                 action=AuditAction.LOGIN_FAILED,

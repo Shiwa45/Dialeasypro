@@ -951,8 +951,7 @@ class CallQueueListCreateView(generics.ListCreateAPIView):
     POST /api/v1/leads/queues/   → Create a queue (admin/manager)
     """
 
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
-    required_feature = FeatureKey.AUTO_DIALER
+    permission_classes = [IsManagerOrAdmin]
     serializer_class = CallQueueSerializer
     pagination_class = None
 
@@ -978,8 +977,7 @@ class AvailableQueuesView(APIView):
     Queues the current agent is a member of, with live pending-lead counts.
     """
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
-    required_feature = FeatureKey.AUTO_DIALER
+    permission_classes = [IsAuthenticatedAgent]
 
     def get(self, request):
         agent = request.user
@@ -1001,8 +999,7 @@ class QueuePullNextView(APIView):
     the requesting agent. Guarantees no two agents ever receive the same lead.
     """
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
-    required_feature = FeatureKey.AUTO_DIALER
+    permission_classes = [IsAuthenticatedAgent]
 
     def post(self, request, pk):
         agent = request.user

@@ -609,95 +609,106 @@ class MetaFormFieldsView(APIView):
                     })
                 return Response({"forms": forms})
 
-            # If primary page_id fails (e.g. 400), fallback 1: Try /me/leadgen_forms (works if access_token is a Page Access Token)
-            logger.info("[Meta] Primary page_id call failed, trying /me/leadgen_forms fallback for Page Token...")
-            me_forms_resp = req.get(
-                "https://graph.facebook.com/v25.0/me/leadgen_forms",
-                params={"access_token": access_token, "fields": "id,name,status,questions"},
-                timeout=15,
-            )
-            if me_forms_resp.status_code == 200:
-                # Get actual Page ID from /me
-                me_info = req.get("https://graph.facebook.com/v25.0/me", params={"access_token": access_token}, timeout=10)
-                if me_info.status_code == 200:
-                    real_page_id = me_info.json().get("id")
-                    if real_page_id:
-                        config.credentials["page_id"] = real_page_id
-                        config.save(update_fields=["credentials"])
-                        logger.info(f"[Meta] Auto-corrected Page ID to {real_page_id}")
-
-                forms = []
-                for form in me_forms_resp.json().get("data", []):
-                    questions = [
-                        {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
-                        for q in form.get("questions", [])
-                    ]
-                    forms.append({
-                        "id": form.get("id"),
-                        "name": form.get("name"),
-                        "status": form.get("status"),
-                        "fields": questions,
-                    })
-                return Response({"forms": forms})
-
-            # Fallback 2: Try /me/accounts (works if access_token is a User Access Token)
-            logger.info("[Meta] /me/leadgen_forms failed, trying /me/accounts fallback for User Token...")
+            # A 190 here means the saved token is a User token.  Convert it to
+            # the Page token for *this configured Page* before trying the edge
+            # again.  Do not scan/save a different managed Page.
+            logger.info("[Meta] Primary request failed; resolving a Page token through /me/accounts.")
             accounts_resp = req.get(
                 "https://graph.facebook.com/v25.0/me/accounts",
-                # Explicitly request the Page token.  Without this field Meta
-                # returns only basic Page data, causing the request below to
-                # retry leadgen_forms with the User token (which Meta rejects).
                 params={"access_token": access_token, "fields": "id,name,access_token"},
                 timeout=15,
             )
-            if accounts_resp.status_code == 200:
-                pages = accounts_resp.json().get("data", [])
-                all_forms = []
-                for p in pages:
-                    p_id = p.get("id")
-                    p_token = p.get("access_token") or access_token
-                    f_resp = req.get(
-                        f"https://graph.facebook.com/v25.0/{p_id}/leadgen_forms",
-                        params={"access_token": p_token, "fields": "id,name,status,questions"},
-                        timeout=10,
-                    )
-                    if f_resp.status_code == 200:
-                        # Auto-update config with correct Page ID & Page Token
-                        config.credentials["page_id"] = p_id
-                        if p.get("access_token"):
-                            config.credentials["access_token"] = p.get("access_token")
-                        config.save(update_fields=["credentials"])
-                        for form in f_resp.json().get("data", []):
-                            questions = [
-                                {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
-                                for q in form.get("questions", [])
-                            ]
-                            all_forms.append({
-                                "id": form.get("id"),
-                                "name": f"{form.get('name')} ({p.get('name')})",
-                                "status": form.get("status"),
-                                "fields": questions,
-                            })
-                if all_forms:
-                    return Response({"forms": all_forms})
 
-            # If primary call failed and fallback couldn't find forms, log and return detailed Meta error
-            logger.warning(f"[Meta] Primary page_id {page_id} call returned {resp.status_code}: {resp.text}")
+            def meta_error(response):
+                """Return Meta's safe error message without ever logging a token."""
+                try:
+                    return (response.json().get("error", {}).get("message") or response.text)[:300]
+                except (ValueError, TypeError):
+                    return response.text[:300]
 
-            meta_err_msg = ""
-            try:
-                err_data = resp.json().get("error", {})
-                meta_err_msg = err_data.get("message") or str(err_data)
-            except Exception:
-                meta_err_msg = resp.text[:300]
+            if accounts_resp.status_code != 200:
+                detail = meta_error(accounts_resp)
+                logger.warning("[Meta] /me/accounts failed (%s): %s", accounts_resp.status_code, detail)
+                return Response(
+                    {
+                        "error": "page_token_resolution_failed",
+                        "message": (
+                            f"Meta could not list Pages for this User Token ({accounts_resp.status_code}): {detail}. "
+                            "Generate a User Token for this app with pages_show_list, pages_read_engagement, "
+                            "and leads_retrieval, then save it again."
+                        ),
+                    },
+                    status=400,
+                )
 
-            return Response(
-                {
-                    "error": "fetch_failed",
-                    "message": f"Meta API error ({resp.status_code}): {meta_err_msg}",
-                },
-                status=400,
+            pages = accounts_resp.json().get("data", [])
+            page = next((item for item in pages if str(item.get("id")) == str(page_id)), None)
+            if not page:
+                logger.warning("[Meta] Configured Page %s was absent from /me/accounts (%d Page(s) returned).", page_id, len(pages))
+                return Response(
+                    {
+                        "error": "configured_page_not_available",
+                        "message": (
+                            "Meta did not return the configured Page for this User Token. "
+                            "Log in as a person with Facebook access to this Page and grant the app pages_show_list."
+                        ),
+                    },
+                    status=400,
+                )
+
+            page_token = page.get("access_token")
+            if not page_token:
+                logger.warning("[Meta] /me/accounts returned Page %s without a Page token.", page_id)
+                return Response(
+                    {
+                        "error": "page_token_not_returned",
+                        "message": (
+                            "Meta returned the Page but not its Page Access Token. "
+                            "Re-authorize the Dialeasypro Meta app with pages_show_list, pages_read_engagement, "
+                            "and leads_retrieval, then save the new User Token."
+                        ),
+                    },
+                    status=400,
+                )
+
+            page_forms_resp = req.get(
+                f"https://graph.facebook.com/v25.0/{page_id}/leadgen_forms",
+                params={"access_token": page_token, "fields": "id,name,status,questions"},
+                timeout=15,
             )
+            if page_forms_resp.status_code != 200:
+                detail = meta_error(page_forms_resp)
+                logger.warning("[Meta] Page token request for Page %s failed (%s): %s", page_id, page_forms_resp.status_code, detail)
+                return Response(
+                    {
+                        "error": "page_token_rejected",
+                        "message": f"Meta rejected the Page token ({page_forms_resp.status_code}): {detail}",
+                    },
+                    status=400,
+                )
+
+            # Persist the Page token even when there are no lead forms.  The
+            # previous implementation only saved it when at least one form was
+            # returned, leaving the User Token in place and repeating error 190.
+            credentials = dict(config.credentials or {})
+            credentials["page_id"] = str(page_id)
+            credentials["access_token"] = page_token
+            config.credentials = credentials
+            config.save(update_fields=["credentials"])
+
+            forms = []
+            for form in page_forms_resp.json().get("data", []):
+                questions = [
+                    {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
+                    for q in form.get("questions", [])
+                ]
+                forms.append({
+                    "id": form.get("id"),
+                    "name": form.get("name"),
+                    "status": form.get("status"),
+                    "fields": questions,
+                })
+            return Response({"forms": forms})
         except Exception as exc:
             logger.warning(f"[Meta] Form introspection failed: {exc}", exc_info=True)
             return Response(

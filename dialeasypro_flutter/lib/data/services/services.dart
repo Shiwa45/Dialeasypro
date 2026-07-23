@@ -1,7 +1,8 @@
 import 'api_client.dart';
 import '../models/models.dart';
+import 'package:dio/dio.dart';
 
-final _dio = ApiClient.instance.dio;
+Dio get _dio => ApiClient.instance.dio;
 
 // ─── AUTH ───────────────────────────────────────────────────
 class AuthService {

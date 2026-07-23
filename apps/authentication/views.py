@@ -109,6 +109,9 @@ class TenantInfoAPIView(APIView):
             )
 
 
+from rest_framework.throttling import ScopedRateThrottle
+
+
 class AgentLoginAPIView(APIView):
     """
     POST /api/v1/auth/login/
@@ -120,6 +123,7 @@ class AgentLoginAPIView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
     throttle_scope = "login"
 
     def post(self, request):

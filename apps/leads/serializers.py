@@ -263,6 +263,12 @@ class LeadCreateSerializer(serializers.ModelSerializer):
 class LeadUpdateSerializer(serializers.ModelSerializer):
     """Partial update serializer — handles status changes, reassignment, etc."""
 
+    custom_fields = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False, write_only=True,
+        help_text="Dict of {field_key: value} for custom fields.",
+    )
+
     class Meta:
         model = Lead
         fields = [
@@ -271,7 +277,7 @@ class LeadUpdateSerializer(serializers.ModelSerializer):
             "status", "priority", "score",
             "assigned_to", "budget", "requirement",
             "deal_value", "expected_close_date",
-            "pipeline_stage", "tags",
+            "pipeline_stage", "tags", "custom_fields",
         ]
 
     def validate_phone(self, value):
@@ -284,6 +290,23 @@ class LeadUpdateSerializer(serializers.ModelSerializer):
         ).exists():
             raise serializers.ValidationError("Another lead with this phone already exists.")
         return normalized
+
+    def update(self, instance, validated_data):
+        custom_fields_data = validated_data.pop("custom_fields", None)
+        lead = super().update(instance, validated_data)
+
+        if custom_fields_data is not None:
+            for field_key, value in custom_fields_data.items():
+                try:
+                    field = CustomField.objects.get(field_key=field_key, is_active=True)
+                    CustomFieldValue.objects.update_or_create(
+                        lead=lead, field=field,
+                        defaults={"value": value}
+                    )
+                except CustomField.DoesNotExist:
+                    pass
+
+        return lead
 
 
 class LeadBulkAssignSerializer(serializers.Serializer):

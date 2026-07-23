@@ -687,8 +687,8 @@ class TenantAdminLoginView(View):
 
         error = None
 
-        try:
-            agent = Agent.objects.get(email=email, is_active=True)
+        agent = Agent.objects.filter(email__iexact=email, is_active=True).first()
+        if agent:
             if agent.check_password(password):
                 # Set session
                 request.session["agent_id"] = agent.pk
@@ -719,7 +719,7 @@ class TenantAdminLoginView(View):
                 return redirect(next_url if next_url.startswith("/crm/") else "/crm/")
             else:
                 error = "Invalid email or password."
-        except Agent.DoesNotExist:
+        else:
             error = "Invalid email or password."
 
         return render(

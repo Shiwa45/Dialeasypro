@@ -654,29 +654,37 @@ class MetaFormFieldsView(APIView):
 
             pages = accounts_resp.json().get("data", [])
             page = next((item for item in pages if str(item.get("id")) == str(page_id)), None)
-            if not page:
-                logger.warning("[Meta] Configured Page %s was absent from /me/accounts (%d Page(s) returned).", page_id, len(pages))
-                return Response(
-                    {
-                        "error": "configured_page_not_available",
-                        "message": (
-                            "Meta did not return the configured Page for this User Token. "
-                            "Log in as a person with Facebook access to this Page and grant the app pages_show_list."
-                        ),
-                    },
-                    status=400,
-                )
+            page_token = page.get("access_token") if page else None
 
-            page_token = page.get("access_token")
+            # A System User token (created in Meta Business Settings) is not a
+            # human User token, so /me/accounts legitimately returns no Pages.
+            # It can nevertheless obtain the token for an asset assigned to the
+            # System User through the Page's access_token field.
             if not page_token:
-                logger.warning("[Meta] /me/accounts returned Page %s without a Page token.", page_id)
+                page_token_resp = req.get(
+                    f"https://graph.facebook.com/v25.0/{page_id}",
+                    params={"access_token": access_token, "fields": "id,name,access_token"},
+                    timeout=15,
+                )
+                if page_token_resp.status_code == 200:
+                    page_token = page_token_resp.json().get("access_token")
+
+            if not page_token:
+                detail = meta_error(page_token_resp) if 'page_token_resp' in locals() else ""
+                logger.warning(
+                    "[Meta] Could not resolve a Page token for Page %s; /me/accounts returned %d Page(s). %s",
+                    page_id,
+                    len(pages),
+                    detail,
+                )
                 return Response(
                     {
                         "error": "page_token_not_returned",
                         "message": (
-                            "Meta returned the Page but not its Page Access Token. "
-                            "Re-authorize the Dialeasypro Meta app with pages_show_list, pages_read_engagement, "
-                            "and leads_retrieval, then save the new User Token."
+                            "Meta could not obtain a Page Access Token for this Page. "
+                            "Assign the Easyian Page and Dialeasypro app to the Meta Business System User, "
+                            "then generate a System User token with leads_retrieval and save it here."
+                            + (f" Meta says: {detail}" if detail else "")
                         ),
                     },
                     status=400,

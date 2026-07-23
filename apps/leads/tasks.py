@@ -244,68 +244,45 @@ def _parse_import_file(file_content: bytes, filename: str) -> list | None:
         return None
 
     fname_lower = (filename or "").lower()
+    is_excel = file_content.startswith(b'PK\x03\x04') or file_content.startswith(b'\xd0\xcf\x11\xe0') or fname_lower.endswith((".xlsx", ".xls", ".xlsm", ".xlsb", ".ods"))
 
-    # 1. Try Pandas first (handles xlsx, xls, xlsm, ods, csv, tsv seamlessly)
-    try:
-        import pandas as pd
-
-        df = None
-        # Check magic bytes for Excel zip or OLE formats
-        is_excel_bytes = file_content.startswith(b'PK\x03\x04') or file_content.startswith(b'\xd0\xcf\x11\xe0')
-        
-        if is_excel_bytes or fname_lower.endswith((".xlsx", ".xls", ".xlsm", ".xlsb", ".ods")):
-            try:
-                df = pd.read_excel(io.BytesIO(file_content), dtype=str)
-            except Exception as e:
-                logger.info(f"[Import] pandas read_excel failed: {e}")
-
-        if df is None:
-            # Try parsing as CSV / TSV with pandas
-            for encoding in ["utf-8-sig", "utf-8", "cp1252", "latin-1", "iso-8859-1", "gbk"]:
-                for sep in [",", ";", "\t", "|"]:
-                    try:
-                        temp_df = pd.read_csv(
-                            io.BytesIO(file_content),
-                            sep=sep,
-                            encoding=encoding,
-                            dtype=str,
-                            on_bad_lines="skip",
-                        )
-                        if len(temp_df.columns) > 1 or df is None:
-                            df = temp_df
-                            if len(df.columns) > 1:
-                                break
-                    except Exception:
-                        continue
-                if df is not None and len(df.columns) > 1:
-                    break
-
-        if df is not None:
-            df = df.dropna(how="all")  # Drop completely empty rows
-            df.columns = [str(col).strip() for col in df.columns]
-            
+    # ============================================================
+    # 1. EXCEL PARSING (.xlsx, .xls, .xlsm, .ods)
+    # ============================================================
+    if is_excel:
+        # Strategy A: Openpyxl (standard mode)
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(file_content), data_only=True)
+            ws = wb.active
             rows = []
-            for _, row in df.iterrows():
-                row_dict = {}
-                for col in df.columns:
-                    val = row[col]
-                    if pd.isna(val) or val is None or str(val).strip().lower() in ("nan", "none", "null", "nat"):
-                        val_str = ""
-                    else:
-                        val_str = str(val).strip()
-                        # Clean float representations of integer numbers (e.g. "9876543210.0" -> "9876543210")
-                        if val_str.endswith(".0") and val_str[:-2].replace("-", "").isdigit():
-                            val_str = val_str[:-2]
-                    row_dict[col] = val_str
-                if any(v for v in row_dict.values()):
-                    rows.append(row_dict)
-            if rows:
-                return rows
-    except Exception as exc:
-        logger.info(f"[Import] pandas parsing attempt skipped/failed: {exc}")
+            for row in ws.iter_rows(values_only=True):
+                if any(cell is not None and str(cell).strip() != "" for cell in row):
+                    rows.append(row)
+            if rows and len(rows) >= 2:
+                headers = [str(c or "").strip() for c in rows[0]]
+                parsed_rows = []
+                for row_cells in rows[1:]:
+                    row_dict = {}
+                    for i, val in enumerate(row_cells):
+                        if i < len(headers) and headers[i]:
+                            if val is None:
+                                v_str = ""
+                            elif isinstance(val, float) and val.is_integer():
+                                v_str = str(int(val))
+                            else:
+                                v_str = str(val).strip()
+                                if v_str.endswith(".0") and v_str[:-2].isdigit():
+                                    v_str = v_str[:-2]
+                            row_dict[headers[i]] = v_str
+                    if any(v for v in row_dict.values()):
+                        parsed_rows.append(row_dict)
+                if parsed_rows:
+                    return parsed_rows
+        except Exception as exc:
+            logger.info(f"[Import] openpyxl standard load failed: {exc}")
 
-    # 2. Openpyxl fallback for .xlsx / .xlsm
-    if file_content.startswith(b'PK\x03\x04') or fname_lower.endswith((".xlsx", ".xlsm")):
+        # Strategy B: Openpyxl (read_only mode)
         try:
             import openpyxl
             wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
@@ -314,7 +291,7 @@ def _parse_import_file(file_content: bytes, filename: str) -> list | None:
             header_row = next(iterator, None)
             if header_row:
                 headers = [str(c or "").strip() for c in header_row]
-                rows = []
+                parsed_rows = []
                 for row in iterator:
                     row_dict = {}
                     for i, val in enumerate(row):
@@ -329,20 +306,52 @@ def _parse_import_file(file_content: bytes, filename: str) -> list | None:
                                     v_str = v_str[:-2]
                             row_dict[headers[i]] = v_str
                     if any(v for v in row_dict.values()):
-                        rows.append(row_dict)
-                if rows:
-                    return rows
+                        parsed_rows.append(row_dict)
+                if parsed_rows:
+                    return parsed_rows
         except Exception as exc:
-            logger.info(f"[Import] openpyxl parse error: {exc}")
+            logger.info(f"[Import] openpyxl read_only load failed: {exc}")
 
-    # 3. Standard CSV fallback with multiple encodings and delimiter detection
-    for encoding in ["utf-8-sig", "utf-8", "cp1252", "latin-1", "iso-8859-1"]:
+        # Strategy C: Pandas read_excel
+        try:
+            import pandas as pd
+            df = pd.read_excel(io.BytesIO(file_content), dtype=str)
+            df = df.dropna(how="all")
+            df.columns = [str(col).strip() for col in df.columns]
+            parsed_rows = []
+            for _, row in df.iterrows():
+                row_dict = {}
+                for col in df.columns:
+                    val = row[col]
+                    if pd.isna(val) or val is None or str(val).strip().lower() in ("nan", "none", "null", "nat"):
+                        val_str = ""
+                    else:
+                        val_str = str(val).strip()
+                        if val_str.endswith(".0") and val_str[:-2].replace("-", "").isdigit():
+                            val_str = val_str[:-2]
+                    row_dict[col] = val_str
+                if any(v for v in row_dict.values()):
+                    parsed_rows.append(row_dict)
+            if parsed_rows:
+                return parsed_rows
+        except Exception as exc:
+            logger.info(f"[Import] pandas read_excel failed: {exc}")
+
+    # ============================================================
+    # 2. CSV / TEXT PARSING (.csv, .tsv, .txt, or text bytes)
+    # ============================================================
+    for encoding in ["utf-8-sig", "utf-8", "cp1252", "latin-1", "iso-8859-1", "gbk"]:
         try:
             text = file_content.decode(encoding)
         except Exception:
             continue
 
+        # Skip binary garbage if accidentally passed here
+        if "\0" in text[:500]:
+            continue
+
         sample = text[:4096]
+        # Detect delimiter
         delimiter = ","
         if ";" in sample and sample.count(";") > sample.count(","):
             delimiter = ";"
@@ -367,8 +376,30 @@ def _parse_import_file(file_content: bytes, filename: str) -> list | None:
                     rows.append(cleaned_row)
             if rows:
                 return rows
-        except Exception:
-            continue
+        except Exception as exc:
+            logger.info(f"[Import] CSV decode/parse attempt ({encoding}, {delimiter}) failed: {exc}")
+
+    # Strategy D: Pandas read_csv fallback for complex CSVs
+    try:
+        import pandas as pd
+        for encoding in ["utf-8-sig", "utf-8", "latin-1", "cp1252"]:
+            for sep in [",", ";", "\t", "|"]:
+                try:
+                    df = pd.read_csv(io.BytesIO(file_content), sep=sep, encoding=encoding, dtype=str, on_bad_lines="skip")
+                    df = df.dropna(how="all")
+                    if not df.empty:
+                        df.columns = [str(c).strip() for c in df.columns]
+                        parsed_rows = []
+                        for _, row in df.iterrows():
+                            r_dict = {col: ("" if pd.isna(row[col]) else str(row[col]).strip()) for col in df.columns}
+                            if any(v for v in r_dict.values()):
+                                parsed_rows.append(r_dict)
+                        if parsed_rows:
+                            return parsed_rows
+                except Exception:
+                    continue
+    except Exception as exc:
+        logger.info(f"[Import] pandas read_csv fallback failed: {exc}")
 
     return None
 

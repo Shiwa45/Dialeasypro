@@ -30,41 +30,27 @@ logger = logging.getLogger(__name__)
 
 def normalize_indian_phone(phone: str) -> Optional[str]:
     """
-    Normalize an Indian phone number to E.164 format: +91XXXXXXXXXX
-
-    Handles:
-      - 10-digit numbers: 9876543210 → +919876543210
-      - With +91 prefix: +919876543210 → +919876543210
-      - With 0 prefix: 09876543210 → +919876543210
-      - With 91 prefix: 919876543210 → +919876543210
-      - Formatted: 98765-43210, (0)9876543210
-
-    Returns None if the number cannot be normalized.
+    Normalize a phone number to E.164 format.
+    Supports Indian mobile numbers (+91) as well as 7–15 digit numbers.
     """
     if not phone:
         return None
 
-    # Strip all non-digit characters
-    digits_only = re.sub(r"\D", "", str(phone))
+    s = str(phone).strip()
+    digits_only = re.sub(r"\D", "", s)
+    if not digits_only:
+        return None
 
-    # Handle different prefix formats
     if digits_only.startswith("91") and len(digits_only) == 12:
-        # Already has country code: 919876543210
-        number = digits_only[2:]
+        return f"+{digits_only}"
     elif digits_only.startswith("0") and len(digits_only) == 11:
-        # Has STD 0 prefix: 09876543210
-        number = digits_only[1:]
+        return f"+91{digits_only[1:]}"
     elif len(digits_only) == 10:
-        # Plain 10-digit: 9876543210
-        number = digits_only
-    else:
-        return None
+        return f"+91{digits_only}"
+    elif 7 <= len(digits_only) <= 15:
+        return f"+{digits_only}"
 
-    # Validate: Indian mobile numbers start with 6, 7, 8, or 9
-    if not number or len(number) != 10 or number[0] not in "6789":
-        return None
-
-    return f"+91{number}"
+    return None
 
 
 def mask_phone_number(phone: str) -> str:

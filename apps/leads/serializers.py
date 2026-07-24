@@ -201,9 +201,15 @@ class LeadCreateSerializer(serializers.ModelSerializer):
             "city", "state", "pincode",
             "source", "status", "priority",
             "assigned_to", "budget", "requirement",
-            "deal_value", "expected_close_date",
             "tags", "custom_fields",
         ]
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        for field in ["budget", "deal_value", "assigned_to", "email", "expected_close_date", "alternate_phone", "city", "state", "pincode"]:
+            if field in data and (data[field] == "" or data[field] is None):
+                data[field] = None
+        return super().to_internal_value(data)
 
     def validate_phone(self, value):
         normalized = normalize_indian_phone(value)

@@ -6,6 +6,7 @@ DRF serializers for all lead-related models.
 from django.utils import timezone
 from rest_framework import serializers
 
+from apps.authentication.models import Agent
 from apps.core.constants import FollowUpType, LeadPriority, LeadSource, LeadStatus
 from apps.core.utils import normalize_indian_phone
 from apps.leads.models import (

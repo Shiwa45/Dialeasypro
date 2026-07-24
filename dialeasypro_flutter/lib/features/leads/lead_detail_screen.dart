@@ -453,8 +453,9 @@ class _FollowupsTab extends ConsumerWidget {
         BrutalButton.primary(label: 'Schedule →', onPressed: when == null ? null : () async {
           try {
             await LeadsService.instance.createFollowup(leadId, {
-              'followup_type': type, 'scheduled_at': when!.toUtc().toIso8601String(),
-              'notes': notesCtrl.text, 'assigned_to': 0,
+              'followup_type': type,
+              'scheduled_at': when!.toUtc().toIso8601String(),
+              'notes': notesCtrl.text.trim(),
             });
             ref.invalidate(_followupsProvider(leadId));
             if (ctx.mounted) { Navigator.pop(ctx); AppToast.show(context, 'Follow-up scheduled', isSuccess: true); }

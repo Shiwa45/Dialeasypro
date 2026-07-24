@@ -70,15 +70,28 @@ class FollowUpSerializer(serializers.ModelSerializer):
         return not obj.is_completed and obj.scheduled_at < timezone.now()
 
 
+from datetime import timedelta
+
+
 class FollowUpCreateSerializer(serializers.ModelSerializer):
     """Used when creating a new follow-up from a lead detail view."""
+
+    assigned_to = serializers.PrimaryKeyRelatedField(
+        queryset=Agent.objects.all(), required=False, allow_null=True
+    )
 
     class Meta:
         model = FollowUp
         fields = ["followup_type", "scheduled_at", "notes", "assigned_to"]
 
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        if "assigned_to" in data and (data["assigned_to"] in (0, "0", "", None)):
+            data["assigned_to"] = None
+        return super().to_internal_value(data)
+
     def validate_scheduled_at(self, value):
-        if value < timezone.now():
+        if value < (timezone.now() - timedelta(minutes=5)):
             raise serializers.ValidationError(
                 "Follow-up time must be in the future."
             )

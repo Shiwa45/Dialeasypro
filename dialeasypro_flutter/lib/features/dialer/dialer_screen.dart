@@ -606,7 +606,6 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
             'followup_type': 'call',
             'scheduled_at': _followupDate!.toUtc().toIso8601String(),
             'notes': _notesCtrl.text,
-            'assigned_to': 0,
           },
         );
       } catch (_) {}
@@ -619,7 +618,6 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
             'followup_type': 'call',
             'scheduled_at': auto.toUtc().toIso8601String(),
             'notes': 'Auto-scheduled from ${_selected!.name} disposition',
-            'assigned_to': 0,
           },
         );
       } catch (_) {}

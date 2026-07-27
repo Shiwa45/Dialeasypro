@@ -76,6 +76,18 @@ def custom_exception_handler(exc, context):
         if detail:
             response.data["detail"] = detail
 
+        # A 400 body is invisible in `docker logs` — Django's own request
+        # logger only records the status code, not the response. Surface the
+        # actual per-field reason on the same WARNING line it already prints,
+        # so `docker compose logs web` alone is enough to diagnose a failed
+        # form submission without opening browser devtools or replaying the
+        # request by hand.
+        if response.status_code == 400:
+            view = context.get("view")
+            logger.warning(
+                f"[API 400] {view.__class__.__name__ if view else 'unknown'}: {detail or message}"
+            )
+
         # Log server errors
         if response.status_code >= 500:
             view = context.get("view")

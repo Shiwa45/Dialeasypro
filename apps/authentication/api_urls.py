@@ -14,6 +14,7 @@ from apps.authentication.views import (
     AgentLogoutAPIView,
     AgentPasswordChangeAPIView,
     AgentProfileAPIView,
+    AgentReactivateAPIView,
     AgentRefreshTokenAPIView,
     AgentSetPasswordAPIView,
     AgentStatusUpdateAPIView,
@@ -48,6 +49,7 @@ urlpatterns = [
     path("agents/", AgentListAPIView.as_view(), name="api_agent_list"),
     path("agents/<int:pk>/", AgentDetailAPIView.as_view(), name="api_agent_detail"),
     path("agents/<int:pk>/set-password/", AgentSetPasswordAPIView.as_view(), name="api_agent_set_password"),
+    path("agents/<int:pk>/reactivate/", AgentReactivateAPIView.as_view(), name="api_agent_reactivate"),
 
     # Teams
     path("teams/", TeamListAPIView.as_view(), name="api_team_list"),

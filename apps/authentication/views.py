@@ -373,7 +373,18 @@ class AgentListAPIView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         agent = self.request.user
-        qs = Agent.objects.filter(is_active=True).order_by("name")
+
+        # ?is_active=false lists deactivated agents (e.g. the "Deactivated"
+        # tab, or the Unassign Leads picker which needs former agents too);
+        # ?is_active=all lists both. Default stays active-only so existing
+        # callers (dropdowns, assignment pickers) are unaffected.
+        status_param = self.request.query_params.get("is_active")
+        if status_param == "false":
+            qs = Agent.objects.filter(is_active=False).order_by("name")
+        elif status_param == "all":
+            qs = Agent.objects.all().order_by("name")
+        else:
+            qs = Agent.objects.filter(is_active=True).order_by("name")
 
         # Managers see agents in their teams; admins see all
         if agent.role == AgentRole.MANAGER:
@@ -438,7 +449,10 @@ class AgentDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
         return AgentSerializer
 
     def get_queryset(self):
-        return Agent.objects.filter(is_active=True)
+        # Deliberately not filtered to is_active=True: a deactivated agent
+        # still needs to be viewable/editable by an admin (e.g. to reactivate
+        # them, or to fix their record). CanManageAgent still gates access.
+        return Agent.objects.all()
 
     def perform_destroy(self, instance):
         # Soft-delete: deactivate instead of hard delete
@@ -454,6 +468,61 @@ class AgentDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
             entity_repr=instance.name,
             request=self.request,
         )
+
+
+class AgentReactivateAPIView(APIView):
+    """
+    POST /api/v1/auth/agents/{id}/reactivate/
+    Restores a deactivated agent's access. Blocked with 402 if the tenant is
+    already at its plan's max_agents with currently-active agents — the same
+    limit enforced when creating a brand-new agent, so reactivating can't be
+    used to quietly exceed it.
+    """
+
+    permission_classes = [IsTenantAdmin]
+
+    def post(self, request, pk):
+        agent = get_object_or_404(Agent, pk=pk)
+
+        if agent.is_active:
+            return Response(
+                {"error": "already_active", "message": "This agent is already active."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.plans.models import Subscription
+        from apps.core.constants import SubscriptionStatus
+
+        current_count = Agent.objects.filter(is_active=True).count()
+        try:
+            sub = Subscription.objects.filter(
+                status__in=SubscriptionStatus.ACTIVE_STATUSES
+            ).select_related("plan").first()
+            if sub and current_count >= sub.plan.max_agents:
+                raise PlanLimitExceededException(
+                    limit_type="agents",
+                    current=current_count,
+                    max_allowed=sub.plan.max_agents,
+                )
+        except PlanLimitExceededException:
+            raise
+        except Exception:
+            pass  # If we can't check, allow reactivation
+
+        agent.is_active = True
+        agent.save(update_fields=["is_active"])
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_type="tenant_admin",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            entity_type="Agent",
+            entity_id=agent.pk,
+            entity_repr=agent.name,
+            description=f"Reactivated agent {agent.name}",
+            request=request,
+        )
+        return Response(AgentSerializer(agent).data, status=status.HTTP_200_OK)
 
 
 class AgentSetPasswordAPIView(APIView):

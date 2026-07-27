@@ -156,6 +156,17 @@ class AgentUpdateSerializer(serializers.ModelSerializer):
             return normalized
         return value
 
+    def validate_is_active(self, value):
+        # Deactivating (True -> False) is fine here. Reactivating (False ->
+        # True) must go through AgentReactivateAPIView instead, since that's
+        # the only path that re-checks the plan's max_agents limit — a plain
+        # PATCH would let a tenant silently exceed what they're paying for.
+        if value and self.instance and not self.instance.is_active:
+            raise serializers.ValidationError(
+                "Use the reactivate action to restore this agent's access."
+            )
+        return value
+
 
 class PasswordChangeSerializer(serializers.Serializer):
     """Change agent's own password."""

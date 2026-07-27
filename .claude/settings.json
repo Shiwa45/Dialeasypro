@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f /tmp/test_errors.mjs)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(git push *)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

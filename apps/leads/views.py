@@ -312,6 +312,57 @@ class LeadBulkAssignView(APIView):
         )
 
 
+class LeadUnassignByAgentView(APIView):
+    """
+    POST /api/v1/leads/unassign-by-agent/   {"agent_id": <int>}
+
+    Clears assigned_to (and assigned_at) on every lead currently assigned to
+    one agent — e.g. an agent who's leaving, or whose book needs a clean
+    reset before redistribution. The leads themselves are never touched
+    beyond that FK: no delete, no status change, no note/history removal.
+
+    Admin-only — this can affect an agent's entire book in one click, a wider
+    blast radius than LeadBulkAssignView's hand-picked list, so it sits at the
+    same permission level as LeadFlushView rather than IsManagerOrAdmin.
+    """
+
+    permission_classes = [IsTenantAdmin]
+
+    def post(self, request):
+        from apps.authentication.models import Agent
+
+        agent_id = request.data.get("agent_id")
+        agent = Agent.objects.filter(pk=agent_id).first()
+        if agent is None:
+            return Response(
+                {"error": "not_found", "message": "Agent not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        qs = Lead.objects.filter(assigned_to=agent, is_deleted=False)
+        count = qs.count()
+        qs.update(assigned_to=None, assigned_at=None)
+
+        AuditLog.log(
+            action=AuditAction.BULK_ACTION,
+            actor_type="tenant_admin",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            entity_type="Lead",
+            description=f"Unassigned {count} lead(s) from {agent.name} ({agent.email})",
+            request=request,
+        )
+        logger.info(
+            f"[LeadUnassign] {request.user.email} unassigned {count} lead(s) "
+            f"from {agent.email}."
+        )
+
+        return Response(
+            {"unassigned": count, "agent": agent.name},
+            status=status.HTTP_200_OK,
+        )
+
+
 class LeadDistributeView(APIView):
     """
     POST /api/v1/leads/distribute/

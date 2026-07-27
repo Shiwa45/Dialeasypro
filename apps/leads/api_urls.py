@@ -27,6 +27,7 @@ from apps.leads.views import (
     LeadNoteListCreateView,
     LeadPipelineView,
     LeadStatusUpdateView,
+    LeadUnassignByAgentView,
     QueuePullNextView,
     QueueReleaseView,
 )
@@ -48,6 +49,7 @@ urlpatterns = [
     path("bulk-assign/", LeadBulkAssignView.as_view(), name="api_lead_bulk_assign"),
     path("distribute/", LeadDistributeView.as_view(), name="api_lead_distribute"),
     path("flush/", LeadFlushView.as_view(), name="api_lead_flush"),
+    path("unassign-by-agent/", LeadUnassignByAgentView.as_view(), name="api_lead_unassign_by_agent"),
 
     # ---- Follow-ups ----------------------------------------
     path("<int:lead_id>/followups/", FollowUpListCreateView.as_view(), name="api_followup_list"),

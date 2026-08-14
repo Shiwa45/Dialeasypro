@@ -76,6 +76,8 @@ services:
       --concurrency=4
       -Q default,bulk_ops,notifications,integrations,call_uploads
       --hostname=worker@%h
+    volumes:
+      - ./mediafiles:/app/mediafiles
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

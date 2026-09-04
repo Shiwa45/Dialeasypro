@@ -117,3 +117,9 @@ dialeasypro_flutter/build/
 # ---- Local scratch files (never commit: may hold API keys) ----
 /test.py
 /scratch*.py
+
+# ---- Sibling repo, NOT part of this one --------------------
+# The React frontend lives at github.com/Shiwa45/Dialeasyproreact and merely
+# sits inside this folder. Ignored so a `git add -A` here can never pull it
+# into the backend repo as a stray gitlink.
+Dialeasyproreact/

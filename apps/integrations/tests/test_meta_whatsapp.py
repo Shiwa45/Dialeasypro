@@ -824,3 +824,33 @@ def test_fetch_ad_attribution_raises_a_clean_error():
             fetch_ad_attribution("123", "secret-token", "v25.0")
 
     assert "secret-token" not in str(excinfo.value)
+
+
+# ============================================================
+# Click-to-WhatsApp is not a LeadSourceConfig
+# ============================================================
+
+def test_ctwa_cannot_be_added_as_a_lead_source_config():
+    """
+    Its real configuration lives on WhatsAppConfig.
+
+    A LeadSourceConfig row for it would hand an admin a generic webhook-token
+    URL that the Click-to-WhatsApp handler never reads, and an API-key field
+    nothing uses — a card that looks configured while capturing nothing.
+    """
+    from apps.integrations.serializers import LeadSourceConfigSerializer
+
+    for source in (LeadSource.META_CTWA, LeadSource.WHATSAPP):
+        serializer = LeadSourceConfigSerializer(data={"source": source})
+        assert not serializer.is_valid()
+        assert "source" in serializer.errors
+        # The error has to say where the real screen is, not just "invalid".
+        assert "WhatsApp" in str(serializer.errors["source"][0])
+
+
+def test_other_lead_sources_are_still_configurable():
+    """The guard must not catch the sources that genuinely use this model."""
+    from apps.integrations.serializers import LeadSourceConfigSerializer
+
+    serializer = LeadSourceConfigSerializer(data={"source": LeadSource.INDIAMART})
+    assert serializer.is_valid(), serializer.errors

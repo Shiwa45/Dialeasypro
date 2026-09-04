@@ -393,6 +393,7 @@ class LeadSource:
     INDIAMART = "indiamart"
     META_FACEBOOK = "meta_facebook"
     META_INSTAGRAM = "meta_instagram"
+    META_CTWA = "meta_ctwa"          # Click-to-WhatsApp ads (no lead form)
     NINETYNINEACRES = "99acres"
     HOUSING_COM = "housing_com"
     MAGICBRICKS = "magicbricks"
@@ -412,6 +413,7 @@ class LeadSource:
         (INDIAMART, "IndiaMART"),
         (META_FACEBOOK, "Meta - Facebook Lead Ads"),
         (META_INSTAGRAM, "Meta - Instagram Lead Ads"),
+        (META_CTWA, "Meta - Click to WhatsApp"),
         (NINETYNINEACRES, "99acres"),
         (HOUSING_COM, "Housing.com"),
         (MAGICBRICKS, "MagicBricks"),

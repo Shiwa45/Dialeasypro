@@ -61,6 +61,51 @@ class WhatsAppConfig(TimeStampedModel):
     last_verified_at = models.DateTimeField(null=True, blank=True)
     last_error = models.CharField(max_length=500, blank=True, default="")
 
+    # ---- Inbound (Meta Cloud API webhook) ------------------
+    # Receiving is a separate switch from sending: a tenant can be live on
+    # outbound templates long before anyone points a Meta webhook at them, and
+    # an inbound flood must never start just because sending was configured.
+    inbound_enabled = models.BooleanField(
+        default=False, db_index=True,
+        help_text="Accept inbound WhatsApp webhooks from Meta for this tenant.",
+    )
+    create_leads_from_inbound = models.BooleanField(
+        default=True,
+        help_text="Create a CRM lead when an unknown number messages in.",
+    )
+    ctwa_leads_only = models.BooleanField(
+        default=False,
+        help_text=(
+            "Only open leads for conversations carrying Click-to-WhatsApp ad "
+            "attribution. Organic inbound is still logged against an existing "
+            "lead, but does not create a new one."
+        ),
+    )
+    inbound_assign_to = models.ForeignKey(
+        "authentication.Agent", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="inbound_whatsapp_leads",
+        help_text="Agent new inbound leads are assigned to. Unset = unassigned.",
+    )
+    reopen_lead_on_inbound = models.BooleanField(
+        default=True,
+        help_text=(
+            "When a closed/lost lead messages again, move it back to New so it "
+            "resurfaces in the queue instead of staying buried."
+        ),
+    )
+    graph_api_version = models.CharField(
+        max_length=10, blank=True, default="",
+        help_text="Override the platform Graph API version, e.g. v26.0. Blank = platform default.",
+    )
+
+    # ---- Inbound health (surfaced on the integrations screen) ----
+    last_webhook_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When Meta last delivered any webhook to this tenant.",
+    )
+    last_webhook_error = models.CharField(max_length=500, blank=True, default="")
+    total_inbound_messages = models.PositiveIntegerField(default=0)
+
     class Meta:
         verbose_name = "WhatsApp Configuration"
         verbose_name_plural = "WhatsApp Configuration"
@@ -154,6 +199,160 @@ class WhatsAppTemplate(TimeStampedModel):
         return text
 
 
+class WhatsAppConversation(TimeStampedModel):
+    """
+    One WhatsApp thread between a customer's number and one of the tenant's
+    business numbers.
+
+    Messages were always threaded implicitly by `WhatsAppMessage.lead`; this
+    model exists because a Click-to-WhatsApp conversation carries state a
+    per-message row cannot: which business number it landed on, whether it is
+    still open, and — the point of the whole integration — the Meta ad that
+    started it. Attribution lives here rather than on Lead so a lead that
+    replies to three different ads keeps three honest attributions instead of
+    overwriting one column twice.
+
+    Idempotency: at most one OPEN conversation per (contact, business number),
+    enforced by a partial unique index, so a retried webhook cannot fork a
+    second thread.
+    """
+
+    STATUS_OPEN = "open"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = [(STATUS_OPEN, "Open"), (STATUS_CLOSED, "Closed")]
+
+    SOURCE_TYPE_AD = "ad"
+    SOURCE_TYPE_POST = "post"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    lead = models.ForeignKey(
+        "leads.Lead", on_delete=models.CASCADE, related_name="whatsapp_conversations"
+    )
+
+    # ---- Parties -------------------------------------------
+    contact_wa_id = models.CharField(
+        max_length=25, db_index=True,
+        help_text="Customer's WhatsApp ID exactly as Meta sends it (digits, no +).",
+    )
+    contact_phone = models.CharField(
+        max_length=15, blank=True, default="",
+        help_text="Normalized E.164 form of contact_wa_id.",
+    )
+    whatsapp_profile_name = models.CharField(
+        max_length=200, blank=True, default="",
+        help_text="Display name from the customer's WhatsApp profile.",
+    )
+    business_phone_number_id = models.CharField(
+        max_length=50, db_index=True,
+        help_text="Meta phone_number_id the message was delivered to.",
+    )
+    business_display_phone = models.CharField(max_length=25, blank=True, default="")
+    whatsapp_business_id = models.CharField(
+        max_length=50, blank=True, default="",
+        help_text="WABA id (webhook entry.id).",
+    )
+
+    provider = models.CharField(
+        max_length=30, choices=WhatsAppProvider.CHOICES,
+        default=WhatsAppProvider.META_CLOUD,
+    )
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True,
+    )
+
+    # ---- Activity ------------------------------------------
+    first_message_at = models.DateTimeField(null=True, blank=True)
+    last_message_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_inbound_at = models.DateTimeField(null=True, blank=True)
+    message_count = models.PositiveIntegerField(default=0)
+
+    # ---- Meta ad attribution (Click-to-WhatsApp) -----------
+    # Every field here can legitimately stay empty: Meta sends `referral` only
+    # on the FIRST message of an ad-referred conversation, a user may decline
+    # to share it, and the campaign/ad-set/ad NAMES are never in the webhook at
+    # all — they come from the optional Marketing API enrichment. Absent stays
+    # absent; nothing here is ever guessed.
+    is_ad_referred = models.BooleanField(default=False, db_index=True)
+    referral_source_type = models.CharField(
+        max_length=20, blank=True, default="",
+        help_text='Meta referral.source_type — "ad" or "post".',
+    )
+    referral_source_id = models.CharField(
+        max_length=100, blank=True, default="", db_index=True,
+        help_text="Meta referral.source_id — the ad id (or post id).",
+    )
+    referral_source_url = models.URLField(max_length=800, blank=True, default="")
+    referral_headline = models.CharField(max_length=500, blank=True, default="")
+    referral_body = models.TextField(blank=True, default="")
+    referral_media_type = models.CharField(max_length=20, blank=True, default="")
+    ctwa_clid = models.CharField(
+        max_length=512, blank=True, default="",
+        help_text="Click-to-WhatsApp click id, for Conversions API attribution.",
+    )
+
+    # Marketing API enrichment — stays empty unless the lookup succeeds.
+    meta_ad_id = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    meta_ad_name = models.CharField(max_length=300, blank=True, default="")
+    meta_adset_id = models.CharField(max_length=100, blank=True, default="")
+    meta_adset_name = models.CharField(max_length=300, blank=True, default="")
+    meta_campaign_id = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    meta_campaign_name = models.CharField(max_length=300, blank=True, default="")
+    attribution_enriched_at = models.DateTimeField(null=True, blank=True)
+    attribution_error = models.CharField(max_length=300, blank=True, default="")
+
+    # Untouched copy of Meta's referral object, so a field not modelled yet is
+    # still recoverable without replaying the webhook.
+    referral_payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "WhatsApp Conversation"
+        verbose_name_plural = "WhatsApp Conversations"
+        ordering = ["-last_message_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["contact_wa_id", "business_phone_number_id"],
+                condition=models.Q(status="open"),
+                name="uniq_open_wa_conversation_per_contact",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["lead", "status"]),
+            models.Index(fields=["is_ad_referred", "created_at"]),
+        ]
+
+    def __str__(self):
+        tag = " [ad]" if self.is_ad_referred else ""
+        return f"WhatsApp {self.contact_wa_id} to {self.business_display_phone}{tag}"
+
+    @property
+    def channel(self) -> str:
+        return "whatsapp"
+
+    @property
+    def attribution(self) -> dict:
+        """
+        Only the attribution Meta actually gave us. Keys never populated are
+        omitted rather than returned empty, so a UI can render "Campaign: ..."
+        strictly when a campaign is genuinely known.
+        """
+        fields = {
+            "source_type": self.referral_source_type,
+            "source_id": self.referral_source_id,
+            "source_url": self.referral_source_url,
+            "headline": self.referral_headline,
+            "body": self.referral_body,
+            "media_type": self.referral_media_type,
+            "ctwa_clid": self.ctwa_clid,
+            "ad_id": self.meta_ad_id,
+            "ad_name": self.meta_ad_name,
+            "adset_id": self.meta_adset_id,
+            "adset_name": self.meta_adset_name,
+            "campaign_id": self.meta_campaign_id,
+            "campaign_name": self.meta_campaign_name,
+        }
+        return {k: v for k, v in fields.items() if v}
+
+
 class WhatsAppMessage(TimeStampedModel):
     """
     A single WhatsApp message sent to or received from a lead.
@@ -169,12 +368,26 @@ class WhatsAppMessage(TimeStampedModel):
         ("failed", "Failed"),
         ("received", "Received"),
     ]
+    # Outbound uses text/template. The rest are inbound kinds Meta can deliver;
+    # only text is interpreted today, but an unmodelled kind must still be
+    # storable — a webhook that drops a customer's voice note because the CRM
+    # had no row for it is a lost lead.
     MESSAGE_TYPES = [
         ("text", "Text"),
         ("template", "Template"),
         ("image", "Image"),
         ("document", "Document"),
         ("audio", "Audio"),
+        ("video", "Video"),
+        ("sticker", "Sticker"),
+        ("location", "Location"),
+        ("contacts", "Contact card"),
+        ("button", "Button reply"),
+        ("interactive", "Interactive reply"),
+        ("reaction", "Reaction"),
+        ("order", "Order"),
+        ("system", "System"),
+        ("unsupported", "Unsupported"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -215,6 +428,25 @@ class WhatsAppMessage(TimeStampedModel):
         related_name="whatsapp_messages",
     )
 
+    # ---- Conversation threading (inbound / Meta Cloud) -----
+    # Nullable: every message written before this model existed, and every
+    # outbound send that does not go through the Cloud API, has no
+    # conversation and must keep working exactly as it did.
+    conversation = models.ForeignKey(
+        "WhatsAppConversation", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="messages",
+    )
+    wa_timestamp = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Meta's own message timestamp — authoritative ordering, "
+                  "which created_at (our receive time) is not.",
+    )
+    metadata = models.JSONField(
+        default=dict, blank=True,
+        help_text="Media ids/mime types, reply context, and the normalized "
+                  "inbound envelope. No credentials are ever stored here.",
+    )
+
     class Meta:
         verbose_name = "WhatsApp Message"
         verbose_name_plural = "WhatsApp Messages"
@@ -222,6 +454,7 @@ class WhatsAppMessage(TimeStampedModel):
         indexes = [
             models.Index(fields=["lead", "created_at"]),
             models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["conversation", "wa_timestamp"]),
         ]
 
     def __str__(self):

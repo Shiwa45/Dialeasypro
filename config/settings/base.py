@@ -484,6 +484,49 @@ TEXTLOCAL_API_KEY = config("TEXTLOCAL_API_KEY", default="")
 # Meta (Facebook) Lead Ads
 META_APP_SECRET = config("META_APP_SECRET", default="")
 META_VERIFY_TOKEN = config("META_VERIFY_TOKEN", default="meta_webhook_verify_token")
+META_APP_ID = config("META_APP_ID", default="")
+
+# ---- Meta Graph API version --------------------------------
+# Read by the Click-to-WhatsApp integration for every Graph call it makes, so
+# a version bump is a config change and never a code change. The default
+# matches the newest version already called elsewhere in this codebase;
+# v26.0 is current at the time of writing. Meta retires a version roughly two
+# years after release — check
+# https://developers.facebook.com/docs/graph-api/changelog/versions before
+# raising it, then re-run the integration tests.
+#
+# NOTE: the older Meta Lead Ads fetch and the WhatsApp send provider still pin
+# their own versions inline (v25.0 / v21.0). They are deliberately left alone
+# here so this change cannot alter a working production send path; migrate
+# them to this setting as a separate, tested change.
+META_GRAPH_API_VERSION = config("META_GRAPH_API_VERSION", default="v25.0")
+
+# ============================================================
+# Meta Click-to-WhatsApp → CRM (WhatsApp Business Platform)
+# ============================================================
+# Inbound WhatsApp conversations started from a Click-to-WhatsApp ad become
+# CRM leads. These are FALLBACK credentials for single-tenant/dev use; in
+# production each tenant stores their own (encrypted) on WhatsAppConfig, and
+# the tenant's values always win. Never expose any of these to a client.
+META_ACCESS_TOKEN = config("META_ACCESS_TOKEN", default="")
+META_WABA_ID = config("META_WABA_ID", default="")
+META_PHONE_NUMBER_ID = config("META_PHONE_NUMBER_ID", default="")
+
+# Reject a webhook POST whose X-Hub-Signature-256 cannot be verified. Only
+# ever set False on a local machine that is replaying captured fixtures —
+# production must leave this on, and a signature that is present but WRONG is
+# rejected regardless of this flag.
+META_WHATSAPP_VERIFY_SIGNATURE = config(
+    "META_WHATSAPP_VERIFY_SIGNATURE", default=True, cast=bool
+)
+
+# Look up campaign/ad-set/ad NAMES for a Click-to-WhatsApp referral. Meta's
+# webhook only carries the ad id (`referral.source_id`), so the names need a
+# second Graph call against the Marketing API, which needs `ads_read` on the
+# ad account. Off → the ad id is still stored, the names stay null.
+META_WHATSAPP_ADS_ENRICHMENT = config(
+    "META_WHATSAPP_ADS_ENRICHMENT", default=True, cast=bool
+)
 
 # Google Ads (for Lead Form webhook signature validation)
 GOOGLE_ADS_DEVELOPER_TOKEN = config("GOOGLE_ADS_DEVELOPER_TOKEN", default="")

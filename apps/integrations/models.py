@@ -7,9 +7,12 @@ LeadSourceConfig  : Stores API keys and settings for each lead source integratio
 WebhookLog        : Logs every inbound webhook payload for debugging.
 IntegrationEvent  : Processed integration events (lead created from IndiaMART, etc.)
 
+MetaWhatsAppEvent : Idempotency ledger for Meta WhatsApp webhook deliveries.
+
 Indian lead sources:
   - IndiaMART         → /api/v1/integrations/indiamart/
   - Meta Lead Ads     → /api/v1/integrations/meta/
+  - Meta Click-to-WA  → /api/v1/integrations/meta/whatsapp/
   - Google Ads        → /api/v1/integrations/google/
   - 99acres, Housing  → /api/v1/integrations/portal/{slug}/
   - Generic Webhook   → /api/v1/integrations/webhook/{token}/
@@ -117,3 +120,79 @@ class WebhookLog(TimeStampedModel):
     def __str__(self):
         status = "✅" if self.processed else "⏳" if not self.error else "❌"
         return f"{status} {self.get_source_display()} webhook at {self.created_at:%d %b %H:%M}"
+
+
+class MetaWhatsAppEvent(TimeStampedModel):
+    """
+    One row per Meta WhatsApp webhook event we have already acted on.
+
+    Meta retries a delivery until it gets a 200, and will happily re-send an
+    event it already delivered — so "the same message must never create a
+    second lead" has to be guaranteed by the database, not by hoping the
+    handler runs once. `dedupe_key` is that guarantee: processing claims the
+    key inside the transaction that does the CRM work, so a concurrent retry
+    either loses the insert race or sees a claimed key, and in both cases does
+    nothing.
+
+    The key is scoped per event, not per message: a message id and each of its
+    subsequent delivery statuses (sent/delivered/read) are distinct events on
+    the same wamid, so the key carries the event kind too.
+    """
+
+    STATUS_PENDING = "pending"
+    STATUS_PROCESSED = "processed"
+    STATUS_IGNORED = "ignored"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_PROCESSED, "Processed"),
+        (STATUS_IGNORED, "Ignored (unsupported event)"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    KIND_MESSAGE = "message"
+    KIND_STATUS = "status"
+    KIND_CHOICES = [(KIND_MESSAGE, "Inbound message"), (KIND_STATUS, "Delivery status")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dedupe_key = models.CharField(
+        max_length=255, unique=True,
+        help_text="Stable per-event key, e.g. 'msg:wamid.ABC' or 'status:wamid.ABC:read'.",
+    )
+    message_id = models.CharField(
+        max_length=200, db_index=True, blank=True, default="",
+        help_text="Meta's wamid for the message this event concerns.",
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=KIND_MESSAGE)
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True,
+    )
+
+    # What the event produced, for support ("where did this lead come from?").
+    lead = models.ForeignKey(
+        "leads.Lead", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="meta_whatsapp_events",
+    )
+    conversation_id = models.UUIDField(null=True, blank=True)
+    created_lead = models.BooleanField(default=False)
+    webhook_log = models.ForeignKey(
+        WebhookLog, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="whatsapp_events",
+    )
+    error = models.CharField(max_length=500, blank=True, default="")
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Meta WhatsApp Event"
+        verbose_name_plural = "Meta WhatsApp Events"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status", "created_at"])]
+
+    def __str__(self):
+        return f"{self.kind}:{self.message_id} [{self.status}]"
+
+    def mark(self, status: str, *, error: str = ""):
+        self.status = status
+        self.error = error[:500]
+        self.processed_at = timezone.now()
+        self.save(update_fields=["status", "error", "processed_at", "updated_at"])

@@ -179,6 +179,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     custom_field_values = CustomFieldValueSerializer(many=True, read_only=True)
     followup_overdue = serializers.BooleanField(read_only=True)
     days_since_last_contact = serializers.IntegerField(read_only=True)
+    whatsapp_attribution = serializers.SerializerMethodField()
 
     class Meta:
         model = Lead
@@ -189,7 +190,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "source", "source_display", "score",
             "assigned_to", "assigned_to_name", "assigned_at",
             "budget", "requirement", "deal_value", "expected_close_date",
-            "campaign_name", "ad_name",
+            "campaign_name", "ad_name", "whatsapp_attribution",
             "pipeline_stage", "next_followup_at", "followup_overdue",
             "last_contacted_at", "days_since_last_contact", "contact_count",
             "is_dnd", "tags",
@@ -197,6 +198,39 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at", "assigned_at"]
+
+    def get_whatsapp_attribution(self, obj) -> dict | None:
+        """
+        Where a Click-to-WhatsApp lead actually came from: the ad, its ad set
+        and campaign, the ad copy the customer tapped, and their first message.
+
+        Returns None for a lead with no ad-referred WhatsApp conversation, and
+        inside `attribution` only the keys Meta genuinely supplied — the
+        campaign/ad-set/ad NAMES are absent unless the Marketing API lookup
+        succeeded, so the UI must render what is present rather than assume a
+        fixed shape.
+        """
+        conversation = (
+            obj.whatsapp_conversations.filter(is_ad_referred=True)
+            .order_by("-created_at")
+            .first()
+        )
+        if conversation is None:
+            return None
+
+        first_message = (
+            conversation.messages.filter(direction="inbound")
+            .order_by("wa_timestamp", "created_at")
+            .first()
+        )
+        return {
+            "conversation_id": str(conversation.pk),
+            "channel": conversation.channel,
+            "source": "Meta Click-to-WhatsApp",
+            "attribution": conversation.attribution,
+            "first_message": first_message.content if first_message else "",
+            "first_message_at": conversation.first_message_at,
+        }
 
 
 class LeadCreateSerializer(serializers.ModelSerializer):

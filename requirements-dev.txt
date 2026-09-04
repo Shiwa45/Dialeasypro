@@ -1,0 +1,23 @@
+# ============================================================
+# TeleCRM Backend — requirements-dev.txt
+# Development + test dependencies. Install alongside requirements.txt:
+#   pip install -r requirements.txt -r requirements-dev.txt
+# ============================================================
+
+# --------------- Testing ------------------------------------
+pytest==8.3.4
+pytest-django==4.9.0
+pytest-cov==6.0.0
+pytest-asyncio==0.25.0
+factory-boy==3.3.1
+
+# --------------- Linting / formatting -----------------------
+black==24.10.0
+isort==5.13.2
+flake8==7.1.1
+pre-commit==4.0.1
+
+# --------------- Debugging / tooling ------------------------
+django-debug-toolbar==4.4.6
+flower==2.0.1
+ipython==8.30.0

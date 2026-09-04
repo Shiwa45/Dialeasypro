@@ -64,7 +64,8 @@ Per-Tenant Schema (one PostgreSQL schema per client)
 
 ### Phase 3 — Communications & Integrations
 - `apps/communications` — WhatsApp (single + bulk), Email (bulk), SMS (bulk); pluggable provider architecture; campaign management with Celery fan-out; TRAI DND enforcement; delivery tracking via webhooks
-- `apps/integrations` — IndiaMART, Meta Lead Ads, Google Ads, generic token-based webhook; all with signature validation; `test_webhook` management command
+- `apps/integrations` — IndiaMART, Meta Lead Ads, Meta Click-to-WhatsApp, Google Ads, generic token-based webhook; all with signature validation; `test_webhook` management command
+  - **Meta Click-to-WhatsApp** turns an inbound WhatsApp conversation started from a Meta ad into a lead with its ad attribution — no Lead Form involved. Setup: [META_WHATSAPP_SETUP.md](META_WHATSAPP_SETUP.md) · [client guide](META_WHATSAPP_CLIENT_GUIDE.md) · [troubleshooting](META_WHATSAPP_TROUBLESHOOTING.md)
 - `apps/reports` — Agent performance, lead source breakdown, call analytics, conversion funnel, daily activity ticker — all Redis-cached
 
 ---
@@ -161,7 +162,8 @@ Access at: `http://acme-realty.localhost:8000/crm/`
 /api/v1/comms/whatsapp/send/    → Send WhatsApp
 /api/v1/comms/campaigns/        → Bulk campaigns
 /api/v1/integrations/indiamart/ → IndiaMART webhook
-/api/v1/integrations/meta/      → Meta Lead Ads webhook
+/api/v1/integrations/meta/      → Meta Lead Ads webhook (Lead Forms)
+/api/v1/integrations/meta/whatsapp/  → Meta Click-to-WhatsApp webhook
 /api/v1/integrations/google/    → Google Ads webhook
 /api/v1/integrations/webhook/{token}/ → Generic webhook
 /api/v1/reports/agent-performance/   → Agent stats

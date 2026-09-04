@@ -4,14 +4,20 @@ TeleCRM Backend — apps/communications/serializers.py
 from rest_framework import serializers
 from apps.communications.models import (
     BulkCampaign, CampaignRecipient, EmailLog,
-    SMSLog, WhatsAppConfig, WhatsAppMessage, WhatsAppTemplate,
+    SMSLog, WhatsAppConfig, WhatsAppConversation, WhatsAppMessage, WhatsAppTemplate,
 )
 
 
 # Which credential keys each provider expects. Drives the settings form and
 # lets us mask secrets on read without ever shipping their values to the client.
 PROVIDER_CREDENTIAL_FIELDS = {
-    "meta_cloud": ["access_token", "phone_number_id", "business_account_id"],
+    # verify_token / app_secret are only used by the inbound Click-to-WhatsApp
+    # webhook; ads_access_token is optional and only needed to resolve
+    # campaign/ad names for ad-referred conversations.
+    "meta_cloud": [
+        "access_token", "phone_number_id", "business_account_id",
+        "verify_token", "app_secret", "ads_access_token",
+    ],
     "interakt": ["api_key"],
     "aisensy": ["api_key", "text_campaign"],
     "wati": ["access_token", "api_endpoint"],
@@ -21,7 +27,12 @@ PROVIDER_CREDENTIAL_FIELDS = {
 }
 
 # Keys whose values must never be echoed back to the client.
-_SECRET_KEYS = {"access_token", "api_key", "auth_token", "account_sid"}
+# The verify token is included on purpose: it is what lets anyone claim to be
+# Meta at the verification handshake, so it is set-once and never read back.
+_SECRET_KEYS = {
+    "access_token", "api_key", "auth_token", "account_sid",
+    "app_secret", "verify_token", "ads_access_token",
+}
 
 
 class WhatsAppConfigSerializer(serializers.ModelSerializer):
@@ -36,6 +47,7 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
     credentials = serializers.DictField(write_only=True, required=False)
     configured_fields = serializers.SerializerMethodField()
     required_fields = serializers.SerializerMethodField()
+    webhook = serializers.SerializerMethodField()
 
     class Meta:
         model = WhatsAppConfig
@@ -43,8 +55,46 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
             "provider", "is_active", "default_language",
             "credentials", "configured_fields", "required_fields",
             "last_verified_at", "last_error", "updated_at",
+            # ---- Inbound / Click-to-WhatsApp ----
+            "inbound_enabled", "create_leads_from_inbound", "ctwa_leads_only",
+            "inbound_assign_to", "reopen_lead_on_inbound", "graph_api_version",
+            "last_webhook_at", "last_webhook_error", "total_inbound_messages",
+            "webhook",
         ]
-        read_only_fields = ["is_active", "last_verified_at", "last_error", "updated_at"]
+        read_only_fields = [
+            "is_active", "last_verified_at", "last_error", "updated_at",
+            "last_webhook_at", "last_webhook_error", "total_inbound_messages",
+        ]
+
+    def get_webhook(self, obj) -> dict:
+        """
+        Everything the admin needs to finish the Meta side, and no secret.
+
+        `callback_url` is built from the request host so it is always this
+        tenant's own domain — the value that goes into the Meta app's WhatsApp
+        webhook configuration.
+        """
+        from django.conf import settings
+
+        request = self.context.get("request")
+        path = "/api/v1/integrations/meta/whatsapp/"
+        callback_url = request.build_absolute_uri(path) if request is not None else path
+        creds = obj.credentials or {}
+        return {
+            "callback_url": callback_url,
+            "https": callback_url.startswith("https://"),
+            "verify_token_set": bool(creds.get("verify_token")),
+            "app_secret_set": bool(creds.get("app_secret")),
+            "access_token_set": bool(creds.get("access_token")),
+            "ads_token_set": bool(creds.get("ads_access_token")),
+            "graph_api_version": (
+                obj.graph_api_version or settings.META_GRAPH_API_VERSION
+            ),
+            "subscribe_fields": ["messages"],
+            "signature_enforced": bool(
+                getattr(settings, "META_WHATSAPP_VERIFY_SIGNATURE", True)
+            ),
+        }
 
     def get_configured_fields(self, obj) -> dict:
         """{key: masked_or_value} — secrets shown only as a set/unset flag."""
@@ -60,10 +110,28 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
     def get_required_fields(self, obj) -> list:
         return PROVIDER_CREDENTIAL_FIELDS.get(obj.provider, [])
 
+    #: Plain (non-secret) settings a client may PUT.
+    _WRITABLE = (
+        "provider", "default_language", "inbound_enabled",
+        "create_leads_from_inbound", "ctwa_leads_only", "inbound_assign_to",
+        "reopen_lead_on_inbound", "graph_api_version",
+    )
+
+    def validate_graph_api_version(self, value):
+        """Guard the one field that is interpolated straight into a Graph URL."""
+        import re
+
+        if value and not re.fullmatch(r"v\d{1,3}\.\d{1,2}", value):
+            raise serializers.ValidationError(
+                "Use a Graph API version like v26.0, or leave blank for the default."
+            )
+        return value
+
     def update(self, instance, validated_data):
         new_creds = validated_data.pop("credentials", None)
-        instance.provider = validated_data.get("provider", instance.provider)
-        instance.default_language = validated_data.get("default_language", instance.default_language)
+        for attr in self._WRITABLE:
+            if attr in validated_data:
+                setattr(instance, attr, validated_data[attr])
         if new_creds is not None:
             # Merge, so a client can update one secret without resending all of
             # them — but drop blanks and the mask placeholder so an untouched
@@ -168,3 +236,38 @@ class BulkCampaignCreateSerializer(serializers.ModelSerializer):
         if channel == "sms" and not data.get("sms_text"):
             raise serializers.ValidationError({"sms_text": "Message text required for SMS campaigns."})
         return data
+
+
+class WhatsAppConversationSerializer(serializers.ModelSerializer):
+    """
+    A WhatsApp thread with its Meta ad attribution.
+
+    `attribution` carries only the values Meta actually supplied, so a UI can
+    render "Campaign: ..." strictly when a campaign is genuinely known instead
+    of showing an empty row that looks like missing data.
+    """
+
+    attribution = serializers.DictField(read_only=True)
+    channel = serializers.CharField(read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    first_message = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WhatsAppConversation
+        fields = [
+            "id", "lead", "channel", "status", "status_display",
+            "contact_wa_id", "contact_phone", "whatsapp_profile_name",
+            "business_display_phone", "business_phone_number_id",
+            "is_ad_referred", "attribution", "first_message",
+            "first_message_at", "last_message_at", "message_count",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_first_message(self, obj) -> str:
+        message = (
+            obj.messages.filter(direction="inbound")
+            .order_by("wa_timestamp", "created_at")
+            .first()
+        )
+        return message.content if message else ""

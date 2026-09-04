@@ -12,6 +12,8 @@ BulkCampaignDetailView       GET       /api/v1/comms/campaigns/{id}/
 BulkCampaignLaunchView       POST      /api/v1/comms/campaigns/{id}/launch/
 BulkCampaignPauseView        POST      /api/v1/comms/campaigns/{id}/pause/
 WhatsAppWebhookView          POST      /api/v1/comms/webhook/whatsapp/{provider}/
+WhatsAppVerifyTokenView      POST      /api/v1/comms/whatsapp/webhook-token/
+WhatsAppConversationListView GET       /api/v1/comms/whatsapp/conversations/?lead={id}
 """
 import logging
 
@@ -27,14 +29,16 @@ from apps.authentication.permissions import (
     IsTenantAdmin, feature_required, require_channel_feature,
 )
 from apps.communications.models import (
-    BulkCampaign, WhatsAppConfig, WhatsAppMessage, WhatsAppTemplate,
+    BulkCampaign, WhatsAppConfig, WhatsAppConversation, WhatsAppMessage,
+    WhatsAppTemplate,
 )
 from apps.communications.serializers import (
     BulkCampaignCreateSerializer, BulkCampaignSerializer,
     SendSMSSerializer, SendWhatsAppSerializer,
-    WhatsAppConfigSerializer, WhatsAppMessageSerializer, WhatsAppTemplateSerializer,
+    WhatsAppConfigSerializer, WhatsAppConversationSerializer,
+    WhatsAppMessageSerializer, WhatsAppTemplateSerializer,
 )
-from apps.core.constants import FeatureKey
+from apps.core.constants import AgentRole, FeatureKey
 from apps.core.pagination import StandardResultsSetPagination
 from apps.superadmin.models import AuditLog
 from apps.core.constants import AuditAction
@@ -517,3 +521,94 @@ class WhatsAppWebhookView(APIView):
     def _handle_generic(self, payload: dict, provider: str):
         """Generic handler for other providers."""
         logger.info(f"[WA Webhook] Generic handler for {provider} — implement if needed")
+
+
+# ============================================================
+# Inbound WhatsApp — Click-to-WhatsApp administration
+# ============================================================
+
+class WhatsAppVerifyTokenView(APIView):
+    """
+    POST /api/v1/comms/whatsapp/webhook-token/
+
+    Mint a fresh webhook verify token and return it EXACTLY ONCE.
+
+    The token is what proves a caller is Meta during the webhook handshake, so
+    it is a secret: WhatsAppConfigSerializer masks it like any other, and the
+    only way to read one is to create it here and paste it straight into the
+    Meta app. Rotating invalidates the old one, which will break verification
+    until Meta's webhook configuration is updated with the new value — that is
+    the intended trade and the response says so.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def post(self, request):
+        import secrets
+
+        config = WhatsAppConfig.get_solo()
+        token = secrets.token_urlsafe(32)
+
+        credentials = dict(config.credentials or {})
+        rotated = bool(credentials.get("verify_token"))
+        credentials["verify_token"] = token
+        config.credentials = credentials
+        config.save(update_fields=["credentials", "updated_at"])
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_type="agent",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            tenant_schema=connection.schema_name,
+            entity_type="WhatsAppConfig",
+            description="Rotated the Meta WhatsApp webhook verify token",
+            request=request,
+            is_sensitive=True,
+        )
+        logger.info(
+            "[Meta CTWA] Verify token rotated | schema=%s by=%s",
+            connection.schema_name, request.user.pk,
+        )
+
+        return Response({
+            "verify_token": token,
+            "rotated": rotated,
+            "message": (
+                "Copy this now — it is not shown again. Paste it into the Meta "
+                "app's WhatsApp webhook configuration as the Verify Token, then "
+                "click Verify and Save."
+            ),
+        })
+
+
+class WhatsAppConversationListView(generics.ListAPIView):
+    """
+    GET /api/v1/comms/whatsapp/conversations/?lead={id}&ad_referred=true
+
+    WhatsApp threads with their Meta ad attribution, newest activity first.
+    Powers the "where did this lead come from?" panel on a lead, and a
+    campaign-level view of Click-to-WhatsApp traffic.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, IsActiveAgent]
+    serializer_class = WhatsAppConversationSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        queryset = WhatsAppConversation.objects.select_related("lead")
+
+        # An agent sees the conversations of leads assigned to them; managers
+        # and admins see everything — the same rule the lead list applies.
+        agent = self.request.user
+        if getattr(agent, "role", "") == AgentRole.AGENT:
+            queryset = queryset.filter(lead__assigned_to=agent)
+
+        if lead_id := self.request.query_params.get("lead"):
+            queryset = queryset.filter(lead_id=lead_id)
+        if (ad_only := self.request.query_params.get("ad_referred")) is not None:
+            queryset = queryset.filter(is_ad_referred=ad_only.lower() in ("1", "true", "yes"))
+        if campaign_id := self.request.query_params.get("campaign_id"):
+            queryset = queryset.filter(meta_campaign_id=campaign_id)
+
+        return queryset.order_by("-last_message_at", "-created_at")

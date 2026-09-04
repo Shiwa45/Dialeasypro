@@ -5,6 +5,7 @@ Inbound webhook handlers for all Indian lead sources.
 
 IndiaMART Webhook      POST /api/v1/integrations/indiamart/
 Meta Lead Ads Webhook  POST /api/v1/integrations/meta/
+Meta Click-to-WhatsApp GET/POST /api/v1/integrations/meta/whatsapp/
 Google Ads Webhook     POST /api/v1/integrations/google/
 Generic Webhook        POST /api/v1/integrations/webhook/{token}/
 Portal Webhook         POST /api/v1/integrations/portal/{slug}/
@@ -15,6 +16,7 @@ import hmac
 import json
 import logging
 
+from django.db import connection
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -795,3 +797,119 @@ class WebhookLogListView(generics.ListAPIView):
         if source := self.request.query_params.get("source"):
             qs = qs.filter(source=source)
         return qs[:200]
+
+
+# ============================================================
+# Meta Click-to-WhatsApp Webhook (WhatsApp Business Platform)
+# ============================================================
+
+class MetaWhatsAppWebhookView(View):
+    """
+    GET  /api/v1/integrations/meta/whatsapp/  → Meta webhook verification
+    POST /api/v1/integrations/meta/whatsapp/  → inbound messages + statuses
+
+    Click-to-WhatsApp ads, NOT Lead Ads. The customer taps WhatsApp on an ad
+    and sends a message; there is no Lead Form anywhere in the flow, and the ad
+    attribution rides along on the message itself as `referral`.
+    MetaLeadAdsWebhookView above handles the entirely separate `leadgen` event.
+
+    This deliberately does not extend BaseWebhookView: that base is built
+    around LeadSourceConfig and a lead-per-payload shape, while a WhatsApp
+    delivery is a batch of messages and receipts configured on the tenant's
+    WhatsAppConfig. It reuses WebhookLog, which is the part worth sharing.
+
+    The handler validates and returns; the CRM work runs on the integrations
+    queue, because Meta retries anything it considers slow.
+    """
+
+    source = LeadSource.META_CTWA
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    # ---- Verification (Meta calls this once, on subscribe) ----
+    def get(self, request, *args, **kwargs):
+        from apps.integrations.meta_whatsapp import get_config, verify_token_for
+
+        mode = request.GET.get("hub.mode")
+        token = request.GET.get("hub.verify_token") or ""
+        challenge = request.GET.get("hub.challenge") or ""
+
+        expected = verify_token_for(get_config())
+
+        if mode == "subscribe" and expected and hmac.compare_digest(token, expected):
+            logger.info("[Meta CTWA] Webhook verified for schema=%s", connection.schema_name)
+            return HttpResponse(challenge, content_type="text/plain")
+
+        # Never say WHICH part was wrong — that turns this into a token oracle.
+        logger.warning(
+            "[Meta CTWA] Verification rejected | schema=%s mode=%s token_configured=%s",
+            connection.schema_name, mode, bool(expected),
+        )
+        return HttpResponse("Forbidden", status=403)
+
+    # ---- Deliveries -------------------------------------------
+    def post(self, request, *args, **kwargs):
+        from apps.integrations.meta_whatsapp import (
+            app_secret_for, get_config, signature_required, verify_signature,
+        )
+        from apps.integrations.tasks import process_meta_whatsapp_webhook
+
+        raw_body = request.body
+        config = get_config()
+
+        # 1. Authenticity, before anything is parsed or stored.
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        app_secret = app_secret_for(config)
+        if app_secret or signature or signature_required():
+            if not verify_signature(raw_body, signature, app_secret):
+                logger.warning(
+                    "[Meta CTWA] Invalid signature | schema=%s has_secret=%s has_header=%s",
+                    connection.schema_name, bool(app_secret), bool(signature),
+                )
+                return HttpResponse("Invalid signature", status=401)
+
+        # 2. Parse. A body Meta could not have sent is dropped, not retried.
+        try:
+            payload = json.loads(raw_body)
+        except json.JSONDecodeError:
+            logger.warning("[Meta CTWA] Malformed JSON body | schema=%s", connection.schema_name)
+            return JsonResponse({"status": "ignored", "reason": "malformed"}, status=400)
+
+        if not isinstance(payload, dict):
+            return JsonResponse({"status": "ignored", "reason": "malformed"}, status=400)
+
+        # 3. Is this tenant actually receiving?
+        if config is None or not config.inbound_enabled:
+            logger.info(
+                "[Meta CTWA] Inbound disabled — delivery discarded | schema=%s",
+                connection.schema_name,
+            )
+            # 200: retrying will not turn the integration on, and Meta
+            # disables an endpoint that keeps erroring.
+            return JsonResponse({"status": "disabled"})
+
+        # 4. Store the raw delivery, then hand off. Headers are filtered —
+        #    the signature header is a credential-derived value and there is
+        #    no reason to keep it once it has been checked.
+        log = WebhookLog.objects.create(
+            source=self.source,
+            method="POST",
+            headers=self._safe_headers(request),
+            payload=payload,
+        )
+
+        process_meta_whatsapp_webhook.delay(connection.schema_name, str(log.pk))
+
+        logger.info(
+            "[Meta CTWA] Delivery accepted | schema=%s log=%s",
+            connection.schema_name, log.pk,
+        )
+        return JsonResponse({"status": "ok"})
+
+    @staticmethod
+    def _safe_headers(request) -> dict:
+        """Diagnostic headers only — nothing that authenticates a request."""
+        keep = {"Content-Type", "User-Agent", "X-Forwarded-For", "Content-Length"}
+        return {k: v for k, v in request.headers.items() if k in keep}

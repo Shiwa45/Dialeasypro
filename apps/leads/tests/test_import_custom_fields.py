@@ -373,3 +373,24 @@ def test_failed_rows_and_their_errors_are_recorded():
     assert "Phone" in str(job.row_errors[0])
     # One good row and one bad = partial, not completed.
     assert job.status == "partial"
+
+
+@pytest.mark.django_db
+def test_update_mode_survives_a_repeated_phone(property_type):
+    """
+    phone is not unique. get() raised MultipleObjectsReturned on a number held
+    by two leads, and `except Lead.DoesNotExist` did not catch it — so the row
+    was counted as failed instead of updated. Oldest lead wins.
+    """
+    first = Lead.objects.create(name="Ravi A", phone="+919876500301")
+    Lead.objects.create(name="Ravi B", phone="+919876500301")
+
+    job = _run_import(
+        "Name,Mobile,Type\nRavi,9876500301,Bungalow\n",
+        {"name": "Name", "phone": "Mobile", "custom_property_type": "Type"},
+        duplicate_action="update",
+    )
+
+    assert job.failed_rows == 0
+    assert job.duplicate_rows == 1
+    assert CustomFieldValue.objects.get(lead=first, field=property_type).value == "Bungalow"

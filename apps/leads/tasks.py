@@ -131,14 +131,24 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
                     job.save(update_fields=["processed_rows"])
                     continue
                 elif job.duplicate_action == "update":
-                    # Update existing lead
-                    try:
-                        existing = Lead.objects.get(phone=phone, is_deleted=False)
+                    # Update the existing lead.
+                    #
+                    # filter().first(), not get(): phone is indexed but NOT
+                    # unique, so a number that appears twice — anything
+                    # imported under "Allow duplicates", or the same person
+                    # entered by two agents — made get() raise
+                    # MultipleObjectsReturned, which `except Lead.DoesNotExist`
+                    # does not catch. The row then escaped to the outer handler
+                    # and was recorded as FAILED rather than updated. Oldest
+                    # wins, so repeated runs keep landing on the same lead.
+                    existing = (
+                        Lead.objects.filter(phone=phone, is_deleted=False)
+                        .order_by("id").first()
+                    )
+                    if existing is not None:
                         _update_lead_from_row(existing, row, job)
                         successful += 1
                         duplicates += 1
-                    except Lead.DoesNotExist:
-                        pass
                     job.processed_rows += 1
                     job.save(update_fields=["processed_rows"])
                     continue

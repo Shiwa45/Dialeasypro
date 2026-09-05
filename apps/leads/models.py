@@ -876,10 +876,24 @@ class LeadImportJob(TimeStampedUUIDModel):
         return int((self.processed_rows / self.total_rows) * 100)
 
     def mark_completed(self):
+        """
+        Finish the job, persisting the result counters along with the status.
+
+        The counters must be in the same save: they are always set immediately
+        before this call, and an `update_fields` list covering only status and
+        completed_at silently dropped them — so every finished job reported
+        0 imported / 0 failed / 0 duplicates and an empty error list no matter
+        what the run actually did. That made a skipped-as-duplicate import
+        indistinguishable from one that created nothing.
+        """
         self.status = (
             "completed" if self.failed_rows == 0
             else "partial" if self.successful_rows > 0
             else "failed"
         )
         self.completed_at = timezone.now()
-        self.save(update_fields=["status", "completed_at"])
+        self.save(update_fields=[
+            "status", "completed_at",
+            "processed_rows", "successful_rows", "failed_rows", "duplicate_rows",
+            "row_errors",
+        ])

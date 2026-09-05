@@ -325,3 +325,51 @@ def test_auto_mapped_columns_actually_import(property_type):
 
     lead = Lead.objects.get(phone="+919876500111")
     assert CustomFieldValue.objects.get(lead=lead, field=property_type).value == "Row House"
+
+
+# ============================================================
+# Job result counters
+# ============================================================
+# mark_completed() saved with update_fields=["status", "completed_at"], so the
+# counters assigned immediately before it were discarded. Every finished job
+# reported 0/0/0 with no errors, which is what made a fully-skipped duplicate
+# import look identical to one that silently created nothing.
+
+@pytest.mark.django_db
+def test_successful_rows_are_recorded():
+    job = _run_import(
+        "Name,Mobile\nAsha Rao,9876500201\nBinu Nair,9876500202\n",
+        {"name": "Name", "phone": "Mobile"},
+    )
+    assert job.successful_rows == 2
+    assert job.failed_rows == 0
+    assert job.status == "completed"
+
+
+@pytest.mark.django_db
+def test_skipped_duplicates_are_recorded():
+    """The case that hid the real behaviour: everything skipped, nothing said."""
+    Lead.objects.create(name="Asha Rao", phone="+919876500211")
+
+    job = _run_import(
+        "Name,Mobile\nAsha Rao,9876500211\n",
+        {"name": "Name", "phone": "Mobile"},
+        duplicate_action="skip",
+    )
+    assert job.duplicate_rows == 1
+    assert job.successful_rows == 0
+    assert Lead.objects.filter(phone="+919876500211").count() == 1
+
+
+@pytest.mark.django_db
+def test_failed_rows_and_their_errors_are_recorded():
+    job = _run_import(
+        "Name,Mobile\nNo Phone Person,\nGood Person,9876500221\n",
+        {"name": "Name", "phone": "Mobile"},
+    )
+    assert job.failed_rows == 1
+    assert job.successful_rows == 1
+    assert job.row_errors, "the reason a row failed must survive the save"
+    assert "Phone" in str(job.row_errors[0])
+    # One good row and one bad = partial, not completed.
+    assert job.status == "partial"

@@ -682,6 +682,43 @@ class LeadImportView(APIView):
         )
 
 
+
+def auto_map_custom_fields(headers: list, custom_fields: list) -> dict:
+    """
+    Guess which sheet column belongs to each custom field.
+
+    The mapping screen defaults every field to "Do Not Import". Standard columns
+    arrive with a guess already filled in; custom fields did not, so an admin who
+    clicked straight through step 2 got leads with every custom field blank —
+    which, on the lead detail screen, looks exactly like the import having
+    dropped them.
+
+    Matching is deliberately strict: a header only maps when it equals the
+    field's name or its key once case, spaces, underscores and hyphens are
+    normalised away, so "Loan Amount", "loan_amount" and "LOAN AMOUNT" all hit
+    the same field while "amount" hits nothing. A wrong guess silently writes
+    bad data into a field someone later has to notice and correct, which is a
+    worse outcome than making them pick from the dropdown — so near-misses are
+    deliberately left unmapped.
+
+    Returns {"custom_<field_key>": "<header>"} for the confident matches only.
+    """
+    def norm(text) -> str:
+        return "".join(ch for ch in str(text).lower() if ch.isalnum())
+
+    by_header = {}
+    for header in headers:
+        # First header wins, so a duplicated column name cannot flip the target.
+        by_header.setdefault(norm(header), header)
+
+    mapping = {}
+    for field in custom_fields:
+        for candidate in (field.name, field.field_key):
+            if header := by_header.get(norm(candidate)):
+                mapping[f"custom_{field.field_key}"] = header
+                break
+    return mapping
+
 class LeadImportPreviewView(APIView):
     """
     POST /api/v1/leads/import/preview/
@@ -746,13 +783,15 @@ class LeadImportPreviewView(APIView):
             {"key": "notes", "label": "Notes / Remarks"},
         ]
 
-        # Add custom fields if defined for tenant
-        c_fields = CustomField.objects.filter(is_active=True)
+        # Offer the tenant's custom fields as mapping targets, and pre-fill the
+        # ones whose header is unambiguous — see auto_map_custom_fields.
+        c_fields = list(CustomField.objects.filter(is_active=True))
         for cf in c_fields:
             available_fields.append({
                 "key": f"custom_{cf.field_key}",
                 "label": f"{cf.name} (Custom Field)",
             })
+        auto_mapping.update(auto_map_custom_fields(headers, c_fields))
 
         return Response({
             "headers": headers,

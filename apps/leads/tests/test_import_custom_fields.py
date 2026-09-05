@@ -246,3 +246,82 @@ def test_extractor_skips_unknown_and_blank():
     fields = {"known": Stub()}
     row = {"custom_known": "  ", "custom_gone": "value", "custom_other": None}
     assert _extract_custom_values(row, fields) == {}
+
+
+# ============================================================
+# Auto-detection of custom columns
+# ============================================================
+
+class _Field:
+    """Stand-in for CustomField — auto_map_custom_fields only reads two attrs."""
+
+    def __init__(self, name, field_key):
+        self.name = name
+        self.field_key = field_key
+
+
+def test_header_matching_the_field_name_is_auto_mapped():
+    from apps.leads.views import auto_map_custom_fields
+
+    fields = [_Field("Loan Amount", "loan_amount")]
+    assert auto_map_custom_fields(["Name", "Loan Amount"], fields) == {
+        "custom_loan_amount": "Loan Amount",
+    }
+
+
+def test_matching_ignores_case_spaces_and_separators():
+    from apps.leads.views import auto_map_custom_fields
+
+    fields = [_Field("Rate of Interest", "rate_of_interest")]
+    for header in ("RATE OF INTEREST", "rate_of_interest", "Rate-Of-Interest", "rateofinterest"):
+        assert auto_map_custom_fields(["Name", header], fields) == {
+            "custom_rate_of_interest": header,
+        }, header
+
+
+def test_a_near_miss_is_left_for_the_admin():
+    """
+    "Amount" is not "Loan Amount". Guessing here would silently write the wrong
+    column into a field someone then has to find and correct — worse than making
+    them choose from the dropdown.
+    """
+    from apps.leads.views import auto_map_custom_fields
+
+    fields = [_Field("Loan Amount", "loan_amount")]
+    assert auto_map_custom_fields(["Name", "Amount", "Disbursed"], fields) == {}
+
+
+def test_the_field_key_also_matches():
+    from apps.leads.views import auto_map_custom_fields
+
+    fields = [_Field("Branch Office", "branch")]
+    assert auto_map_custom_fields(["branch"], fields) == {"custom_branch": "branch"}
+
+
+def test_duplicate_headers_do_not_flip_the_target():
+    from apps.leads.views import auto_map_custom_fields
+
+    fields = [_Field("Tenure", "tenure")]
+    assert auto_map_custom_fields(["Tenure", "tenure"], fields) == {"custom_tenure": "Tenure"}
+
+
+def test_no_headers_and_no_fields_are_both_safe():
+    from apps.leads.views import auto_map_custom_fields
+
+    assert auto_map_custom_fields([], [_Field("Tenure", "tenure")]) == {}
+    assert auto_map_custom_fields(["Tenure"], []) == {}
+
+
+@pytest.mark.django_db
+def test_auto_mapped_columns_actually_import(property_type):
+    """The guess has to survive into stored values, not just the preview."""
+    from apps.leads.views import auto_map_custom_fields
+
+    headers = ["Name", "Mobile", "Property Type"]
+    mapping = {"name": "Name", "phone": "Mobile"}
+    mapping.update(auto_map_custom_fields(headers, [property_type]))
+
+    _run_import("Name,Mobile,Property Type\nDeepak Joshi,9876500111,Row House\n", mapping)
+
+    lead = Lead.objects.get(phone="+919876500111")
+    assert CustomFieldValue.objects.get(lead=lead, field=property_type).value == "Row House"

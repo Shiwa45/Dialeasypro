@@ -35,7 +35,9 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
     """
     import csv
     import io
-    from apps.leads.models import Lead, LeadActivity, LeadImportJob
+    from apps.leads.models import (
+        CustomField, CustomFieldValue, Lead, LeadActivity, LeadImportJob, LeadNote,
+    )
     from apps.core.constants import LeadSource
     from apps.core.utils import normalize_indian_phone
 
@@ -88,6 +90,17 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
     successful, failed, duplicates = 0, 0, 0
     row_errors = []
     leads_to_create = []
+    # Per-row extras, index-aligned with leads_to_create. Custom-field values
+    # and notes cannot be written until the leads have primary keys, so they
+    # are parked here and flushed after each bulk insert.
+    pending_extras = []
+
+    # Custom fields keyed the way the import preview offers them
+    # ("custom_<field_key>" — see LeadImportPreviewView.available_fields).
+    # Resolved once: a per-row lookup would be one query per cell.
+    custom_field_by_key = {
+        cf.field_key: cf for cf in CustomField.objects.filter(is_active=True)
+    }
 
     # Build existing phone set for duplicate detection
     existing_phones = set(
@@ -152,6 +165,11 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
                     pass
 
             leads_to_create.append(Lead(**lead_kwargs))
+            pending_extras.append({
+                "phone": phone,
+                "custom": _extract_custom_values(row, custom_field_by_key),
+                "note": (row.get("notes") or "").strip(),
+            })
             existing_phones.add(phone)
 
         except Exception as exc:
@@ -176,6 +194,8 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
     if allowance is not None and len(leads_to_create) > allowance:
         skipped = len(leads_to_create) - allowance
         leads_to_create = leads_to_create[:allowance]
+        # Must be sliced identically — the two lists are matched by index.
+        pending_extras = pending_extras[:allowance]
         failed += skipped
         row_errors.append({
             "row": "-",
@@ -193,19 +213,45 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
             chunk_size = 500
             for i in range(0, len(leads_to_create), chunk_size):
                 chunk = leads_to_create[i:i + chunk_size]
+                extras = pending_extras[i:i + chunk_size]
                 Lead.objects.bulk_create(chunk, ignore_conflicts=True)
-                # Log activity for created leads
-                activities = [
-                    LeadActivity(
+
+                # `ignore_conflicts=True` makes Django skip the RETURNING
+                # clause, so the objects in `chunk` come back with pk=None even
+                # on PostgreSQL. Re-read them by this job's FK to get the real
+                # rows — without this the activity log below silently wrote
+                # nothing, and custom values would have nowhere to attach.
+                saved = {}
+                for lead in Lead.objects.filter(
+                    import_job=job, phone__in=[e["phone"] for e in extras]
+                ).order_by("id"):
+                    # Last wins, so "create duplicates" mode attaches a row's
+                    # values to the most recently created lead for that phone.
+                    saved[lead.phone] = lead
+
+                activities, values, notes = [], [], []
+                for extra in extras:
+                    lead = saved.get(extra["phone"])
+                    if lead is None:
+                        continue
+                    activities.append(LeadActivity(
                         lead=lead,
                         activity_type="imported",
                         description=f"Imported from {job.original_filename}",
-                    )
-                    for lead in chunk
-                    if lead.pk  # pk is set after bulk_create
-                ]
+                    ))
+                    for field, value in extra["custom"].items():
+                        values.append(CustomFieldValue(lead=lead, field=field, value=value))
+                    if extra["note"]:
+                        notes.append(LeadNote(lead=lead, content=extra["note"]))
+
                 if activities:
                     LeadActivity.objects.bulk_create(activities)
+                if values:
+                    # ignore_conflicts covers the unique (lead, field) pair on a
+                    # re-run against leads that already have values.
+                    CustomFieldValue.objects.bulk_create(values, ignore_conflicts=True)
+                if notes:
+                    LeadNote.objects.bulk_create(notes)
             successful += len(leads_to_create)
             note_leads_created(len(leads_to_create))
         except Exception as exc:
@@ -426,6 +472,8 @@ def _apply_mapping(raw_row: dict, column_mapping: dict, default_mapping: dict) -
 
 def _update_lead_from_row(lead: "Lead", row: dict, job: "LeadImportJob"):
     """Update an existing lead from import row data (duplicate update mode)."""
+    from apps.leads.models import CustomField, CustomFieldValue
+
     update_fields = []
     if row.get("email") and not lead.email:
         lead.email = row["email"].strip().lower()
@@ -438,6 +486,38 @@ def _update_lead_from_row(lead: "Lead", row: dict, job: "LeadImportJob"):
         update_fields.append("requirement")
     if update_fields:
         lead.save(update_fields=update_fields)
+
+    # Same rule as the standard columns above: fill a blank, never overwrite a
+    # value someone already entered in the CRM.
+    custom_field_by_key = {
+        cf.field_key: cf for cf in CustomField.objects.filter(is_active=True)
+    }
+    for field, value in _extract_custom_values(row, custom_field_by_key).items():
+        CustomFieldValue.objects.get_or_create(
+            lead=lead, field=field, defaults={"value": value},
+        )
+
+
+def _extract_custom_values(row: dict, custom_field_by_key: dict) -> dict:
+    """
+    Pull the mapped custom-field cells out of one import row.
+
+    The import preview offers custom fields to the mapping UI as
+    "custom_<field_key>", so that prefix is the contract between the two —
+    anything else in the row is a standard Lead column handled by the caller.
+    Returns {CustomField: value}, skipping blanks and keys with no live field
+    (a field deleted between choosing the mapping and running the import).
+    """
+    out = {}
+    for key, raw in row.items():
+        if not key.startswith("custom_"):
+            continue
+        value = str(raw).strip() if raw is not None else ""
+        if not value:
+            continue
+        if field := custom_field_by_key.get(key[len("custom_"):]):
+            out[field] = value
+    return out
 
 
 # ============================================================

@@ -31,6 +31,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   String _waMode = 'native';
   bool _saving = false, _changingPw = false, _savingCloud = false;
   bool _callRecEnabled = false;
+  int _pendingRecordings = 0;
+  bool _scanning = false;
+
+  /// Force the deferred recording sync now.
+  ///
+  /// The sweep also runs automatically on every app resume; this exists so an
+  /// agent hunting one specific missing recording gets a definite answer
+  /// instead of waiting for a trigger they cannot see.
+  Future<void> _scanRecordings() async {
+    setState(() => _scanning = true);
+    var uploaded = 0;
+    try {
+      uploaded = await CallRecordingService.instance.sweepPending();
+    } catch (_) {
+      // Reason is recorded on the service and rendered below.
+    }
+    final pending = await CallRecordingService.instance.pendingCount();
+    if (!mounted) return;
+    setState(() {
+      _scanning = false;
+      _pendingRecordings = pending;
+    });
+    AppToast.show(
+      context,
+      uploaded > 0
+          ? '$uploaded recording(s) uploaded'
+          : 'No new recordings found',
+      isSuccess: uploaded > 0,
+    );
+  }
 
   @override
   void initState() {
@@ -45,11 +75,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final m = await UserPrefs.getWhatsAppMode();
     final prefs = await SharedPreferences.getInstance();
     final recEnabled = await CallRecordingService.instance.isEnabled();
+    final pending = await CallRecordingService.instance.pendingCount();
     if (mounted) setState(() {
       _waMode = m;
       _cloudName.text = prefs.getString('cloudinary_name') ?? '';
       _uploadPreset.text = prefs.getString('cloudinary_preset') ?? '';
       _callRecEnabled = recEnabled;
+      _pendingRecordings = pending;
     });
   }
 
@@ -297,6 +329,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   style: TextStyle(fontFamily: 'DMSans', fontSize: 11.5, color: AppColors.dark, height: 1.4),
                 ),
               ),
+              const SizedBox(height: 10),
+              // Manual trigger for the deferred sync. The automatic sweep runs
+              // whenever the app resumes, but an agent chasing a specific
+              // missing recording should not have to guess when that happened.
+              Row(children: [
+                Expanded(child: Text(
+                  _pendingRecordings > 0
+                      ? '$_pendingRecordings call(s) waiting for a recording file'
+                      : 'No calls waiting',
+                  style: AppTextStyles.caption,
+                )),
+                TextButton(
+                  onPressed: _scanning ? null : _scanRecordings,
+                  child: Text(_scanning ? 'Scanning…' : 'Scan now'),
+                ),
+              ]),
               // Recording happens with the app in the background, so a failure
               // is otherwise completely invisible: the agent finishes a call
               // and no recording ever appears, with nothing to explain it.

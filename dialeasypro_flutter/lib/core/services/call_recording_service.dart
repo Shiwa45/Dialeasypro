@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -36,6 +37,19 @@ class CallRecordingService {
 
   static const _enabledKey = 'call_recording_enabled';
   static const _processedKey = 'call_recording_processed_paths';
+
+  /// Calls still waiting for their recording file to appear.
+  ///
+  /// OEM recorders do not finalise the file when the call ends. Xiaomi and
+  /// Vivo can take a minute or more, and some write nothing until their own
+  /// recorder app is next opened. The post-call scan gives up after ~30s, so
+  /// without this queue a recording sitting on the phone was simply never
+  /// collected — the one-shot attempt was the only attempt ever made.
+  static const _pendingKey = 'call_recording_pending';
+
+  /// How long to keep looking. Past this the file is almost certainly never
+  /// coming, and an unbounded queue would rescan forever.
+  static const _pendingTtl = Duration(days: 3);
 
   // Known OEM call-recording directories (relative to external storage root).
   // The list is intentionally broad; we scan every path that exists.
@@ -273,13 +287,151 @@ class CallRecordingService {
       return;
     }
 
+    // Nothing yet — remember the call so a later sweep can pick the file up
+    // once the OEM recorder finishes writing it.
+    await _enqueuePending(
+      callId: callId,
+      phoneNumber: phoneNumber,
+      startedAt: startedAt,
+      durationSec: durationSec,
+    );
+
     if (!await hasStorageAccess()) {
       _note('No "All files access" — cannot read your phone\'s call-recorder '
           'folder, and no fallback recording was captured.');
     } else {
-      _note('No recording found for this call. Check that call recording is '
-          'enabled in your phone\'s Dialer app.');
+      _note('No recording yet; will keep checking in the background. Make sure '
+          'call recording is enabled in your phone\'s Dialer app.');
     }
+  }
+
+  // ---- Deferred sync -------------------------------------------
+
+  Future<List<Map<String, dynamic>>> _readPending() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_pendingKey) ?? const <String>[];
+    final out = <Map<String, dynamic>>[];
+    for (final item in raw) {
+      try {
+        final decoded = jsonDecode(item);
+        if (decoded is Map<String, dynamic>) out.add(decoded);
+      } catch (_) {
+        // Corrupt entry — drop it rather than poisoning every future sweep.
+      }
+    }
+    return out;
+  }
+
+  Future<void> _writePending(List<Map<String, dynamic>> items) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _pendingKey,
+      items.map((e) => jsonEncode(e)).toList(),
+    );
+  }
+
+  Future<void> _enqueuePending({
+    required String callId,
+    required String phoneNumber,
+    required DateTime startedAt,
+    required int durationSec,
+  }) async {
+    final items = await _readPending();
+    if (items.any((e) => e['callId'] == callId)) return;
+    items.add({
+      'callId': callId,
+      'phone': phoneNumber,
+      'startedAt': startedAt.toIso8601String(),
+      'durationSec': durationSec,
+      'queuedAt': DateTime.now().toIso8601String(),
+    });
+    // Bound the queue; oldest go first.
+    if (items.length > 200) items.removeRange(0, items.length - 200);
+    await _writePending(items);
+  }
+
+  /// How many calls are still waiting for a recording file.
+  Future<int> pendingCount() async => (await _readPending()).length;
+
+  /// Re-scan the OEM folders for recordings belonging to earlier calls.
+  ///
+  /// This is what makes native-recorder capture actually reliable: the file
+  /// usually is not there yet when the call ends, so one attempt at that
+  /// moment loses it. Safe to call often — it does nothing when the queue is
+  /// empty, and each upload is deduplicated by callId+path.
+  ///
+  /// Returns the number of recordings uploaded.
+  Future<int> sweepPending() async {
+    if (!await isEnabled()) return 0;
+    final items = await _readPending();
+    if (items.isEmpty) return 0;
+    if (!await hasStorageAccess()) {
+      _note('No "All files access" — ${items.length} call(s) still waiting for '
+          'their recording.');
+      return 0;
+    }
+
+    final now = DateTime.now();
+    final remaining = <Map<String, dynamic>>[];
+    var uploaded = 0;
+
+    for (final item in items) {
+      final callId = item['callId'] as String?;
+      final phone = item['phone'] as String? ?? '';
+      final startedAt = DateTime.tryParse(item['startedAt'] as String? ?? '');
+      final queuedAt = DateTime.tryParse(item['queuedAt'] as String? ?? '');
+      final durationSec = (item['durationSec'] as num?)?.toInt() ?? 0;
+
+      if (callId == null || startedAt == null) continue; // unusable entry
+      if (queuedAt != null && now.difference(queuedAt) > _pendingTtl) {
+        continue; // expired — stop looking
+      }
+
+      final match = await _findRecordingFile(
+        phoneNumber: phone,
+        startedAt: startedAt,
+        durationSec: durationSec,
+      );
+      if (match == null) {
+        remaining.add(item);
+        continue;
+      }
+
+      if (await _uploadIfNew(callId, match.file, match.matchedBy)) {
+        uploaded++;
+      } else {
+        remaining.add(item); // upload failed (offline?) — try again later
+      }
+    }
+
+    await _writePending(remaining);
+    if (uploaded > 0) lastError = null;
+    return uploaded;
+  }
+
+  /// Every audio file under [dir], following dated subfolders a few levels
+  /// deep. Returns [] rather than throwing on an unreadable directory — a
+  /// permission-denied folder must not abort the whole scan.
+  List<File> _listAudioFiles(Directory dir, {required int maxDepth}) {
+    final found = <File>[];
+    void walk(Directory d, int depth) {
+      List<FileSystemEntity> entries;
+      try {
+        entries = d.listSync(recursive: false, followLinks: false);
+      } catch (_) {
+        return;
+      }
+      for (final e in entries) {
+        if (e is File) {
+          if (_audioExts.contains(_ext(e.path.split('/').last))) found.add(e);
+        } else if (e is Directory && depth < maxDepth) {
+          walk(e, depth + 1);
+        }
+      }
+    }
+
+    walk(dir, 0);
+    return found;
   }
 
   void _deleteQuietly(File? f) {
@@ -310,18 +462,13 @@ class CallRecordingService {
         final dir = Directory('${root.path}/$rel');
         if (!dir.existsSync()) continue;
 
-        List<FileSystemEntity> entries;
-        try {
-          entries = dir.listSync(recursive: false, followLinks: false);
-        } catch (_) {
-          continue;
-        }
+        // Recursive: several OEMs bucket recordings into dated subfolders
+        // (Recordings/Call/2026-09/...), which a flat listing never saw.
+        // Depth-limited so a mis-detected root cannot walk the whole card.
+        final entries = _listAudioFiles(dir, maxDepth: 2);
 
         for (final e in entries) {
-          if (e is! File) continue;
           final name = e.path.split('/').last;
-          final ext = _ext(name);
-          if (!_audioExts.contains(ext)) continue;
 
           FileStat stat;
           try {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'core/services/call_recording_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/colors.dart';
 import 'data/models/addon_models.dart';
@@ -110,8 +111,49 @@ class _MainShell extends ConsumerStatefulWidget {
   ConsumerState<_MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends ConsumerState<_MainShell> {
+class _MainShellState extends ConsumerState<_MainShell>
+    with WidgetsBindingObserver {
   int _idx = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Catch anything left over from a previous session.
+    _sweepRecordings();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back from the dialer is exactly when a native call recording has
+    // just finished being written. The post-call scan runs seconds after the
+    // call and usually looks too early — OEM recorders finalise the file
+    // later, and some not until their own app next runs — so this resume hook
+    // is what actually collects most recordings.
+    if (state == AppLifecycleState.resumed) _sweepRecordings();
+  }
+
+  void _sweepRecordings() {
+    CallRecordingService.instance.sweepPending().then((count) {
+      if (count > 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$count call recording(s) uploaded'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }).catchError((_) {
+      // Best-effort background work; never surface a failure here. The reason
+      // is recorded on the service and shown in Profile.
+    });
+  }
 
   static const _coreTabs = [
     _Tab(path: '/dashboard', icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Home'),

@@ -28,6 +28,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
 
+    <!-- Lets setup offer a one-tap battery-optimisation exemption. Xiaomi,
+         Vivo, Oppo/Realme and Transsion ROMs freeze backgrounded apps, which
+         stalls the post-call recording sweep. Play restricts this permission:
+         justify it under the app's call-management use, or drop this line and
+         the wizard falls back to opening the general battery settings list. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+
     <!-- ═══ DEVICE ═══ -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>

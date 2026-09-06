@@ -345,6 +345,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   child: Text(_scanning ? 'Scanning…' : 'Scan now'),
                 ),
               ]),
+              const SizedBox(height: 4),
+              // A permission can be revoked, or the agent may have skipped the
+              // walkthrough on first run. Re-running it is the one place that
+              // checks everything at once and says what is still missing.
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => context.push('/setup'),
+                  child: const Text('Re-run phone setup'),
+                ),
+              ),
               // Recording happens with the app in the background, so a failure
               // is otherwise completely invisible: the agent finishes a call
               // and no recording ever appears, with nothing to explain it.

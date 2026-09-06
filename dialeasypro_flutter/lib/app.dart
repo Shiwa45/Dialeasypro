@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'core/services/call_recording_service.dart';
+import 'core/services/setup_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/colors.dart';
 import 'data/models/addon_models.dart';
@@ -21,6 +22,7 @@ import 'features/leads/lead_import_screen.dart';
 import 'features/leads/leads_list_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/reports/reports_screen.dart';
+import 'features/setup/setup_wizard_screen.dart';
 
 final _rootKey = GlobalKey<NavigatorState>();
 final _shellKey = GlobalKey<NavigatorState>();
@@ -38,11 +40,21 @@ final _routerProvider = Provider<GoRouter>((ref) {
       final isLoginPath = state.matchedLocation == '/login';
       if (!isAuth && !isLoginPath) return '/login';
       if (isAuth && isLoginPath) return '/';
+      // First run: send the agent through permissions and call-recording setup
+      // before they start dialling, rather than letting them discover later
+      // that nothing was recorded.
+      final isSetupPath = state.matchedLocation == '/setup';
+      if (isAuth && !SetupService.instance.isCompleteSync && !isSetupPath) {
+        return '/setup';
+      }
       return null;
     },
     routes: [
       // Login (outside shell)
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+
+      // First-run setup (outside the shell — no bottom nav during setup)
+      GoRoute(path: '/setup', builder: (_, __) => const SetupWizardScreen()),
 
       // Bottom-nav shell
       ShellRoute(

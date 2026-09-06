@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/services/phone_service.dart';
+import 'core/services/setup_service.dart';
 import 'core/services/recording_service.dart';
 import 'core/services/tenant_config.dart';
 import 'app.dart';
@@ -33,6 +34,9 @@ void main() async {
 
   // Phone service — listens to system call state
   await PhoneService.instance.init();
+
+  // First-run flag, read before the router builds its first route.
+  await SetupService.instance.preload();
 
   // Cloudinary — load saved config (if user has set it in Profile)
   try {

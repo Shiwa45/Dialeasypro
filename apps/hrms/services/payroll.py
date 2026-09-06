@@ -110,15 +110,31 @@ def build_payslip(employee: Employee, period_month: date, *, recompute: bool = F
     gross = (gross_full * ratio).quantize(TWO_PLACES)
     deductions = structure.total_deductions.quantize(TWO_PLACES)
 
+    # "Not yet paid, OR already linked to THIS slip."
+    #
+    # Filtering on reimbursed_in__isnull=True alone was correct on the first
+    # build and wrong on every rebuild: the first pass links the claims to the
+    # slip, so a recompute found none and silently dropped them from net pay
+    # while leaving them attached to the slip — money owed, marked reimbursed,
+    # and absent from the payslip. Incentives are scoped the same way so an
+    # earning belonging to a different slip can never be counted here.
+    from django.db.models import Q
+
+    linked_here = Q(paid_in__isnull=True)
+    if slip is not None:
+        linked_here |= Q(paid_in=slip)
     incentives = IncentiveEarning.objects.filter(
-        employee=employee, period_month=period_month
+        linked_here, employee=employee, period_month=period_month,
     )
     incentives_amount = sum((e.amount for e in incentives), Decimal("0.00"))
 
+    claimed_here = Q(reimbursed_in__isnull=True)
+    if slip is not None:
+        claimed_here |= Q(reimbursed_in=slip)
     reimbursements = ExpenseClaim.objects.filter(
+        claimed_here,
         employee=employee,
         status=ApprovalStatus.APPROVED,
-        reimbursed_in__isnull=True,
         date__gte=period_month,
         date__lt=month_bounds(period_month)[1],
     )
@@ -162,8 +178,14 @@ def build_payslip(employee: Employee, period_month: date, *, recompute: bool = F
     )
 
     # Link the components so they can't be paid twice in another month.
-    incentives.filter(paid_in__isnull=True).update(paid_in=slip)
-    reimbursements.update(reimbursed_in=slip)
+    # Re-read by pk: `incentives`/`reimbursements` are lazy querysets whose Q
+    # references the slip that may not have existed when they were built.
+    IncentiveEarning.objects.filter(
+        pk__in=[e.pk for e in incentives], paid_in__isnull=True
+    ).update(paid_in=slip)
+    ExpenseClaim.objects.filter(
+        pk__in=[e.pk for e in reimbursements], reimbursed_in__isnull=True
+    ).update(reimbursed_in=slip)
 
     return slip
 

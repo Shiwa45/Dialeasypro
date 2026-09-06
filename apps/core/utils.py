@@ -313,6 +313,59 @@ def get_cached_or_compute(cache_key: str, compute_fn, timeout: int = 300):
 from decimal import ROUND_HALF_UP, Decimal
 
 
+def gst_from_inclusive(total_amount, customer_state: str) -> dict:
+    """
+    Split an amount the customer has ALREADY paid into base + GST.
+
+    calculate_gst() goes the other way: it adds tax on top of a pre-tax figure.
+    Feeding it a Razorpay charge — which is the gross the card was debited —
+    produced an invoice 18% larger than the payment it documents, which is a
+    GST filing problem, not a display bug.
+
+    The base is back-computed and the components are then derived from it, with
+    any rounding remainder pushed into the base so base + GST equals the amount
+    charged to the rupee. An invoice that does not reconcile with its payment
+    is worse than one that is a paisa off on the split.
+    """
+    from apps.core.constants import GSTState
+
+    gross = Decimal(str(total_amount))
+    info = GSTState.get_gst_components(customer_state)
+    rate = Decimal(str(info["igst_rate"] if info["is_interstate"] else
+                       info["cgst_rate"] + info["sgst_rate"]))
+
+    two = Decimal("0.01")
+    base = (gross / (1 + rate / 100)).quantize(two, rounding=ROUND_HALF_UP)
+
+    if info["is_interstate"]:
+        igst = (gross - base).quantize(two, rounding=ROUND_HALF_UP)
+        return {
+            "base_amount": base,
+            "cgst_rate": 0, "sgst_rate": 0, "igst_rate": info["igst_rate"],
+            "cgst_amount": Decimal("0.00"),
+            "sgst_amount": Decimal("0.00"),
+            "igst_amount": igst,
+            "total_gst": igst,
+            "total_amount": gross,
+            "is_interstate": True,
+        }
+
+    total_gst = (gross - base).quantize(two, rounding=ROUND_HALF_UP)
+    # Halve the tax, giving any odd paisa to CGST so the two still sum exactly.
+    cgst = (total_gst / 2).quantize(two, rounding=ROUND_HALF_UP)
+    sgst = (total_gst - cgst).quantize(two, rounding=ROUND_HALF_UP)
+    return {
+        "base_amount": base,
+        "cgst_rate": info["cgst_rate"], "sgst_rate": info["sgst_rate"], "igst_rate": 0,
+        "cgst_amount": cgst,
+        "sgst_amount": sgst,
+        "igst_amount": Decimal("0.00"),
+        "total_gst": total_gst,
+        "total_amount": gross,
+        "is_interstate": False,
+    }
+
+
 def calculate_gst(base_amount: Decimal, customer_state: str) -> dict:
     """
     Calculate GST components for an invoice.

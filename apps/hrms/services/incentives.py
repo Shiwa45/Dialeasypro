@@ -48,14 +48,25 @@ def _converted_lead_ids(agent, start: date, end: date) -> list:
     """Distinct leads this agent moved to `converted` within [start, end)."""
     from apps.leads.models import LeadActivity
 
+    # LeadActivity records its time in `timestamp`; it is a plain Model with
+    # no created_at. Filtering on created_at raised FieldError on every call —
+    # and compute_all_earnings catches per-employee exceptions so payroll could
+    # continue, so the engine reported success while paying nobody anything.
     return list(
         LeadActivity.objects.filter(
             activity_type="status_change",
             performed_by=agent,
             meta__new_status=LeadStatus.CONVERTED,
-            created_at__date__gte=start,
-            created_at__date__lt=end,
+            timestamp__date__gte=start,
+            timestamp__date__lt=end,
         )
+        # order_by() with no arguments is load-bearing. LeadActivity.Meta sets
+        # ordering = ["-timestamp"], and Postgres requires every ORDER BY column
+        # to appear in the SELECT of a DISTINCT query — so Django adds timestamp
+        # to the row, each conversion event becomes a distinct tuple, and a lead
+        # converted twice in a month was counted twice. Incentives were paid on
+        # the inflated figure, contradicting this function's own docstring.
+        .order_by()
         .values_list("lead_id", flat=True)
         .distinct()
     )

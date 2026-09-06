@@ -69,7 +69,13 @@ def send_bulk_whatsapp_campaign(self, schema_name: str, campaign_id: str):
         ]
         CampaignRecipient.objects.bulk_create(recipients, ignore_conflicts=True)
 
-        campaign.total_recipients = len(recipients)
+        # Count the rows that exist, not the list we tried to insert:
+        # ignore_conflicts silently drops duplicates (unique campaign+lead), so
+        # len(recipients) over-reports on a relaunch and the progress bar never
+        # reaches 100%.
+        campaign.total_recipients = CampaignRecipient.objects.filter(
+            campaign=campaign
+        ).count()
         campaign.save(update_fields=["total_recipients"])
 
         # Dispatch chunks
@@ -110,17 +116,28 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
 
     try:
         campaign = BulkCampaign.objects.select_related("template").get(pk=campaign_id)
-        recipients = CampaignRecipient.objects.filter(
-            id__in=recipient_ids
-        ).select_related("lead")
     except Exception as exc:
         logger.error(f"[WA Chunk] Setup failed: {exc}")
         return
+
+    if _campaign_halted(campaign, "WA Chunk"):
+        return
+
+    # status="pending" is load-bearing, not a tidy-up. Without it a chunk that
+    # is retried or redelivered re-sends to recipients already marked sent —
+    # a real message to a real customer, twice.
+    recipients = CampaignRecipient.objects.filter(
+        id__in=recipient_ids, status="pending"
+    ).select_related("lead")
 
     provider_service, provider_slug = _get_whatsapp_provider()
 
     sent, failed = 0, 0
     for recipient in recipients:
+        # Re-checked inside the loop: a chunk of 50 takes a while, and an
+        # admin hitting Pause expects it to stop now, not after this chunk.
+        if _campaign_halted(campaign_id, "WA Chunk"):
+            break
         try:
             # Render template with lead variables
             rendered_body = (
@@ -201,12 +218,18 @@ def send_bulk_email_campaign(self, schema_name: str, campaign_id: str):
 
     try:
         leads = _resolve_campaign_audience(campaign)
+        eligible = [lead for lead in leads if lead.email]
+        # Email had no cap check at all, so Plan.max_email_bulk_per_day was
+        # decorative.
+        _enforce_daily_limit("email", len(eligible))
         recipients = [
             CampaignRecipient(campaign=campaign, lead=lead, phone=lead.phone, status="pending")
-            for lead in leads if lead.email
+            for lead in eligible
         ]
         CampaignRecipient.objects.bulk_create(recipients, ignore_conflicts=True)
-        campaign.total_recipients = len(recipients)
+        campaign.total_recipients = CampaignRecipient.objects.filter(
+            campaign=campaign
+        ).count()
         campaign.save(update_fields=["total_recipients"])
 
         recipient_ids = list(
@@ -235,15 +258,42 @@ def send_email_chunk(self, schema_name: str, campaign_id: str, recipient_ids: li
 
     try:
         campaign = BulkCampaign.objects.get(pk=campaign_id)
-        recipients = CampaignRecipient.objects.filter(
-            id__in=recipient_ids
-        ).select_related("lead")
     except Exception as exc:
         logger.error(f"[Email Chunk] Setup failed: {exc}")
         return
 
+    if _campaign_halted(campaign, "Email Chunk"):
+        return
+
+    recipients = CampaignRecipient.objects.filter(
+        id__in=recipient_ids, status="pending"
+    ).select_related("lead")
+
+    # One SMTP connection for the whole chunk. send_mail() opens and tears down
+    # a connection per message, which is both slow and a good way to trip an
+    # SMTP provider's connection-rate limit halfway through a campaign.
+    from django.core.mail import get_connection
+    mail_connection = get_connection(fail_silently=False)
+    try:
+        mail_connection.open()
+    except Exception as exc:
+        # The mail server being down is not 50 individual failures to
+        # diagnose; mark the chunk and let the reason show once per recipient.
+        logger.error(f"[Email Chunk] Could not open SMTP connection: {exc}")
+        marked = CampaignRecipient.objects.filter(
+            id__in=recipient_ids, status="pending"
+        ).update(status="failed", error_message=f"Mail server unreachable: {exc}"[:500])
+        if marked:
+            BulkCampaign.objects.filter(pk=campaign_id).update(
+                failed_count=F("failed_count") + marked
+            )
+        _check_campaign_completion(campaign_id)
+        return
+
     sent, failed = 0, 0
     for recipient in recipients:
+        if _campaign_halted(campaign_id, "Email Chunk"):
+            break
         lead = recipient.lead
         if not lead.email:
             recipient.status = "skipped"
@@ -264,6 +314,7 @@ def send_email_chunk(self, schema_name: str, campaign_id: str, recipient_ids: li
                 from_email=None,  # Uses DEFAULT_FROM_EMAIL
                 recipient_list=[lead.email],
                 fail_silently=False,
+                connection=mail_connection,
             )
             EmailLog.objects.create(
                 lead=lead, campaign=campaign, to_email=lead.email,
@@ -279,6 +330,11 @@ def send_email_chunk(self, schema_name: str, campaign_id: str, recipient_ids: li
             recipient.error_message = str(exc)[:500]
             recipient.save(update_fields=["status", "error_message"])
             failed += 1
+
+    try:
+        mail_connection.close()
+    except Exception:  # noqa: BLE001 — closing must not fail a sent chunk
+        pass
 
     BulkCampaign.objects.filter(pk=campaign_id).update(
         sent_count=F("sent_count") + sent,
@@ -313,12 +369,17 @@ def send_bulk_sms_campaign(self, schema_name: str, campaign_id: str):
         if skipped_dnd:
             logger.info(f"[SMS Campaign] Skipped {skipped_dnd} DND-registered leads")
 
+        # Same omission as email: Plan.max_sms_per_day was never consulted.
+        _enforce_daily_limit("sms", len(eligible))
+
         recipients = [
             CampaignRecipient(campaign=campaign, lead=lead, phone=lead.phone, status="pending")
             for lead in eligible
         ]
         CampaignRecipient.objects.bulk_create(recipients, ignore_conflicts=True)
-        campaign.total_recipients = len(recipients)
+        campaign.total_recipients = CampaignRecipient.objects.filter(
+            campaign=campaign
+        ).count()
         campaign.save(update_fields=["total_recipients"])
 
         recipient_ids = list(
@@ -346,17 +407,23 @@ def send_sms_chunk(self, schema_name: str, campaign_id: str, recipient_ids: list
 
     try:
         campaign = BulkCampaign.objects.get(pk=campaign_id)
-        recipients = CampaignRecipient.objects.filter(
-            id__in=recipient_ids
-        ).select_related("lead")
     except Exception as exc:
         logger.error(f"[SMS Chunk] Setup failed: {exc}")
         return
+
+    if _campaign_halted(campaign, "SMS Chunk"):
+        return
+
+    recipients = CampaignRecipient.objects.filter(
+        id__in=recipient_ids, status="pending"
+    ).select_related("lead")
 
     sms_service = _get_sms_provider()
     sent, failed = 0, 0
 
     for recipient in recipients:
+        if _campaign_halted(campaign_id, "SMS Chunk"):
+            break
         lead = recipient.lead
         try:
             from apps.core.utils import render_template_with_variables
@@ -506,42 +573,127 @@ def _resolve_campaign_audience(campaign):
     return list(qs)
 
 
-def _check_daily_whatsapp_limit(schema_name: str, count: int):
-    """Verify tenant hasn't exceeded daily WhatsApp limit."""
-    from apps.plans.models import Subscription
+# Campaign states in which a chunk must stop sending. "paused" and
+# "cancelled" are the point of the Pause button; "failed" and "completed"
+# mean something already finished this campaign.
+HALTED_STATUSES = {"paused", "cancelled", "failed", "completed"}
+
+
+def _campaign_halted(campaign_or_id, tag: str) -> bool:
+    """
+    Whether this campaign should stop sending right now.
+
+    Pausing a campaign revokes the coordinator task, but by then the
+    coordinator has usually finished and the per-chunk tasks are already
+    queued with their countdowns — revoking it stops nothing. The chunks have
+    to check for themselves, which is why this is consulted before a chunk
+    starts AND between recipients: a 50-message chunk takes long enough that
+    "stops after this chunk" is not what an admin pressing Pause means.
+
+    Always re-read from the database; the campaign object a chunk loaded at
+    start-up cannot know about a pause that happened since.
+    """
+    from apps.communications.models import BulkCampaign
+
+    campaign_id = getattr(campaign_or_id, "pk", campaign_or_id)
+    status = (
+        BulkCampaign.objects.filter(pk=campaign_id)
+        .values_list("status", flat=True)
+        .first()
+    )
+    if status in HALTED_STATUSES:
+        logger.info(f"[{tag}] Campaign {campaign_id} is {status} — stopping.")
+        return True
+    return False
+
+
+def _current_plan():
     from apps.core.constants import SubscriptionStatus
+    from apps.plans.models import Subscription
+
+    return (
+        Subscription.objects.filter(status__in=SubscriptionStatus.ACTIVE_STATUSES)
+        .select_related("plan")
+        .first()
+    )
+
+
+def _enforce_daily_limit(channel: str, count: int):
+    """
+    Refuse a campaign that would breach the plan's daily cap for its channel.
+
+    Counts what has actually been sent today rather than assuming zero — the
+    previous version compared `0 + count`, so a tenant could run twenty
+    campaigns of just under the cap and never trip it. Only bulk sends are
+    counted, matching what the plan field is named after.
+
+    A missing subscription or an unreadable counter is not a reason to block a
+    send, so both fall through permissively; the cap is a billing guardrail,
+    not a security control.
+    """
+    from apps.communications.models import EmailLog, SMSLog, WhatsAppMessage
     from apps.core.exceptions import PlanLimitExceededException
 
-    try:
-        sub = Subscription.objects.filter(
-            status__in=SubscriptionStatus.ACTIVE_STATUSES
-        ).select_related("plan").first()
-        if not sub:
-            return
-        today_sent = 0  # TODO: count from WhatsAppMessage sent today
-        limit = sub.plan.max_whatsapp_bulk_per_day
-        if today_sent + count > limit:
-            raise PlanLimitExceededException(
-                limit_type="whatsapp_bulk_per_day",
-                current=today_sent,
-                max_allowed=limit,
-            )
-    except PlanLimitExceededException:
-        raise
-    except Exception:
-        pass
+    sub = _current_plan()
+    if not sub:
+        return
+
+    today = timezone.localdate()
+    plan = sub.plan
+
+    if channel == "whatsapp":
+        limit = plan.max_whatsapp_bulk_per_day
+        used = WhatsAppMessage.objects.filter(
+            direction="outbound", campaign__isnull=False, created_at__date=today,
+        ).count()
+    elif channel == "email":
+        limit = plan.max_email_bulk_per_day
+        used = EmailLog.objects.filter(
+            campaign__isnull=False, created_at__date=today,
+        ).count()
+    elif channel == "sms":
+        limit = plan.max_sms_per_day
+        used = SMSLog.objects.filter(
+            campaign__isnull=False, created_at__date=today,
+        ).count()
+    else:
+        return
+
+    if not limit:
+        return  # 0/None on the plan means unlimited
+
+    if used + count > limit:
+        raise PlanLimitExceededException(
+            limit_type=f"{channel}_per_day",
+            current=used,
+            max_allowed=limit,
+        )
+
+
+def _check_daily_whatsapp_limit(schema_name: str, count: int):
+    """Back-compat shim for the WhatsApp coordinator."""
+    _enforce_daily_limit("whatsapp", count)
 
 
 def _check_campaign_completion(campaign_id: str):
-    """Mark campaign complete when all recipients have been processed."""
+    """
+    Mark the campaign complete once every recipient has been processed.
+
+    Scoped to status="running": the previous version updated unconditionally,
+    so the last chunk of a campaign an admin had just PAUSED would flip it to
+    "completed" — the pause silently undone, and the remaining recipients
+    stranded as pending under a campaign that claims it finished.
+    """
     from apps.communications.models import BulkCampaign, CampaignRecipient
+
     pending = CampaignRecipient.objects.filter(
         campaign_id=campaign_id, status="pending"
     ).count()
-    if pending == 0:
-        BulkCampaign.objects.filter(pk=campaign_id).update(
-            status="completed", completed_at=timezone.now()
-        )
+    if pending:
+        return
+    BulkCampaign.objects.filter(pk=campaign_id, status="running").update(
+        status="completed", completed_at=timezone.now()
+    )
 
 
 def _get_whatsapp_provider():
@@ -564,8 +716,28 @@ def _get_whatsapp_provider():
 
 
 def _get_sms_provider():
-    """Return the configured SMS provider service."""
-    from apps.communications.providers.sms import MockSMSProvider
+    """
+    The tenant's SMS provider, or the mock when none is configured.
+
+    This used to return MockSMSProvider() unconditionally — so every bulk SMS
+    campaign logged a fake message id, marked every recipient "sent", and
+    delivered nothing. The campaign reported 100% success and no SMS existed.
+
+    Credentials are platform-level (settings) because there is no per-tenant
+    SMS config model yet, unlike WhatsApp. Add one before selling SMS to
+    tenants who need their own sender ID and billing.
+    """
+    from django.conf import settings
+
+    from apps.communications.providers.sms import MockSMSProvider, MSG91Provider
+
+    if getattr(settings, "MSG91_AUTH_KEY", ""):
+        return MSG91Provider()
+
+    logger.warning(
+        "[SMS] No provider configured (MSG91_AUTH_KEY unset) — messages are "
+        "logged, not sent."
+    )
     return MockSMSProvider()
 
 
@@ -612,9 +784,26 @@ def launch_scheduled_campaigns(self, schema_name: str = None):
 
     for campaign in due_campaigns:
         task_fn = TASK_MAP.get(campaign.channel)
-        if task_fn:
-            task_fn.apply_async(
-                args=[schema_name, str(campaign.id)],
-                queue="bulk_ops",
+        if not task_fn:
+            logger.warning(
+                f"[Task] Scheduled campaign {campaign.name} has unknown channel "
+                f"'{campaign.channel}' — skipping."
             )
-            logger.info(f"[Task] Launched scheduled campaign: {campaign.name}")
+            continue
+
+        # Claim it first, conditionally. Beat ticks every few minutes and the
+        # coordinator only marks the campaign "running" once it actually
+        # starts — so a backed-up queue let the next tick dispatch the same
+        # campaign again, sending the whole audience twice. Whoever wins this
+        # UPDATE owns the launch.
+        claimed = BulkCampaign.objects.filter(
+            pk=campaign.pk, status="scheduled"
+        ).update(status="running", started_at=timezone.now())
+        if not claimed:
+            continue
+
+        task_fn.apply_async(
+            args=[schema_name, str(campaign.id)],
+            queue="bulk_ops",
+        )
+        logger.info(f"[Task] Launched scheduled campaign: {campaign.name}")

@@ -1,6 +1,7 @@
 """
 TeleCRM Backend — apps/communications/serializers.py
 """
+from django.utils import timezone
 from rest_framework import serializers
 from apps.communications.models import (
     BulkCampaign, CampaignRecipient, EmailLog,
@@ -231,11 +232,30 @@ class BulkCampaignCreateSerializer(serializers.ModelSerializer):
         channel = data.get("channel")
         if channel == "whatsapp" and not data.get("template"):
             raise serializers.ValidationError({"template": "Template required for WhatsApp campaigns."})
-        if channel == "email" and not data.get("email_subject"):
-            raise serializers.ValidationError({"email_subject": "Subject required for email campaigns."})
+        if channel == "email":
+            if not data.get("email_subject"):
+                raise serializers.ValidationError({"email_subject": "Subject required for email campaigns."})
+            # A subject with no body sends blank emails to the whole audience.
+            if not (data.get("email_body") or "").strip():
+                raise serializers.ValidationError({"email_body": "Body required for email campaigns."})
         if channel == "sms" and not data.get("sms_text"):
             raise serializers.ValidationError({"sms_text": "Message text required for SMS campaigns."})
+
+        scheduled_at = data.get("scheduled_at")
+        if scheduled_at and scheduled_at <= timezone.now():
+            raise serializers.ValidationError(
+                {"scheduled_at": "Pick a time in the future, or launch the campaign now."}
+            )
         return data
+
+    def create(self, validated_data):
+        # Without this a campaign with scheduled_at stayed "draft", and
+        # launch_scheduled_campaigns only ever looks for status="scheduled" —
+        # so every scheduled campaign sat there and never sent. The status is
+        # read-only on the serializer, hence setting it here.
+        if validated_data.get("scheduled_at"):
+            validated_data["status"] = "scheduled"
+        return super().create(validated_data)
 
 
 class WhatsAppConversationSerializer(serializers.ModelSerializer):

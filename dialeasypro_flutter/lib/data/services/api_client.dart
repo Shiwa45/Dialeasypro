@@ -165,11 +165,37 @@ class ApiClient {
     }
   }
 
+  /// A message worth showing the user.
+  ///
+  /// DRF reports a rejected save as {"field": ["reason"]} — not as `message`
+  /// or `detail`. Reading only those two keys turned every validation failure
+  /// into a blank "An error occurred", which is how a mobile form that sent an
+  /// invalid choice on EVERY submit went unexplained: the server said exactly
+  /// what was wrong and the app threw it away. Field errors are named here so
+  /// the next mismatch is legible instead of mysterious.
   static String errorMessage(dynamic error) {
     if (error is DioException) {
       final data = error.response?.data;
       if (data is Map) {
-        return data['message'] as String? ?? data['detail'] as String? ?? 'An error occurred.';
+        final direct = data['message'] as String? ?? data['detail'] as String?;
+        if (direct != null && direct.isNotEmpty) return direct;
+
+        final fieldErrors = <String>[];
+        data.forEach((key, value) {
+          if (key == 'message' || key == 'detail') return;
+          final text = value is List
+              ? value.map((v) => v.toString()).join(' ')
+              : value.toString();
+          if (text.isEmpty) return;
+          // non_field_errors has no useful label to show.
+          fieldErrors.add(key == 'non_field_errors' ? text : '$key: $text');
+        });
+        if (fieldErrors.isNotEmpty) {
+          // Two at most — a toast is not a form, and the first error is
+          // almost always the actionable one.
+          return fieldErrors.take(2).join('\n');
+        }
+        return 'An error occurred.';
       }
       if (error.type == DioExceptionType.connectionTimeout) return 'Connection timeout. Check your internet.';
       if (error.type == DioExceptionType.connectionError) return 'Cannot connect to server. Check workspace URL.';

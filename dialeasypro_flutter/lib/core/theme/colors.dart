@@ -58,11 +58,13 @@ class AppColors {
   static const Color yellowBg = Color(0xFFFEF9C3);
 
   // ---- Priority Colors -------------------------------------
+  // Keys are the backend's LeadPriority values (hot/warm/cold). A colour for
+  // a priority the API cannot store would only ever render for data that
+  // failed to save.
   static const Map<String, Color> priorityColors = {
-    'hot':    error,
-    'high':   orange,
-    'medium': yellow,
-    'low':    grey,
+    'hot':  error,
+    'warm': yellow,
+    'cold': grey,
   };
 
   // ---- Gradients (used sparingly for emphasis) -------------

@@ -290,12 +290,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 padding: const EdgeInsets.all(10),
                 color: AppColors.infoBg,
                 child: const Text(
-                  'Tip: enable call recording in your phone Dialer settings. '
-                  'On stock Android / Pixel without a built-in recorder, there is no '
-                  'file to capture — use a supported device.',
+                  'Best quality comes from your phone's own call recorder — turn it '
+                  'on in the Dialer app settings and grant "All files access" here. '
+                  'Without one, the app records through the microphone; put the call '
+                  'on speaker so both sides are captured.',
                   style: TextStyle(fontFamily: 'DMSans', fontSize: 11.5, color: AppColors.dark, height: 1.4),
                 ),
               ),
+              // Recording happens with the app in the background, so a failure
+              // is otherwise completely invisible: the agent finishes a call
+              // and no recording ever appears, with nothing to explain it.
+              if (CallRecordingService.instance.lastError != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    border: Border.all(color: AppColors.error, width: 2),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('LAST RECORDING ISSUE', style: AppTextStyles.label),
+                    const SizedBox(height: 4),
+                    Text(
+                      CallRecordingService.instance.lastError!,
+                      style: const TextStyle(
+                          fontFamily: 'DMSans', fontSize: 11.5,
+                          color: AppColors.dark, height: 1.4),
+                    ),
+                  ]),
+                ),
+              ],
             ],
           ])).animate().fadeIn(delay: 180.ms),
 

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 import 'package:cloudinary_public/cloudinary_public.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -109,13 +111,57 @@ class CallRecordingService {
   String? _micPath;
   bool _micActive = false;
 
-  /// Start recording the microphone for the current call. Fire-and-forget;
-  /// self-guards on the enabled flag and mic permission.
+  /// Native bridge to the microphone foreground service (see
+  /// android/.../CallAudioService.kt).
+  static const _audioChannel = MethodChannel('dialeasypro/call_audio');
+
+  /// Last thing that went wrong, for the Profile diagnostics panel. Recording
+  /// runs entirely in the background, so without this a failure is invisible:
+  /// the agent finishes a call and simply never sees a recording, with nothing
+  /// anywhere to say why.
+  String? lastError;
+  DateTime? lastAttemptAt;
+
+  void _note(String message) {
+    lastError = message;
+    lastAttemptAt = DateTime.now();
+  }
+
+  /// Start recording the microphone for the current call.
+  ///
+  /// MUST be called while the app is still in the foreground — i.e. at dial
+  /// time, not when the call connects. RECORD_AUDIO is a "while in use"
+  /// permission: once the system dialer takes the screen this app is
+  /// backgrounded, where Android 11+ hands out silence and 12+ refuses to
+  /// start the foreground service at all. Starting here, before the dialer
+  /// appears, is what makes the fallback work on a modern device.
   Future<void> startMicCapture() async {
     if (_micActive) return;
     if (!await isEnabled()) return;
     try {
-      if (!await _micRecorder.hasPermission()) return;
+      if (!await _micRecorder.hasPermission()) {
+        _note('Microphone permission not granted — no fallback recording.');
+        return;
+      }
+
+      // Hold mic access across the app going to the background.
+      var serviceStarted = false;
+      if (Platform.isAndroid) {
+        try {
+          serviceStarted = await _audioChannel.invokeMethod<bool>('start') ?? false;
+        } on PlatformException catch (e) {
+          serviceStarted = false;
+          _note('Audio service error: ${e.code}');
+        } on MissingPluginException {
+          // Older build of the app shell without the native service.
+          serviceStarted = false;
+        }
+        if (!serviceStarted) {
+          _note('Could not hold the microphone in the background; '
+              'the fallback recording may be silent.');
+        }
+      }
+
       final dir = await getTemporaryDirectory();
       _micPath = '${dir.path}/mic_call_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _micRecorder.start(
@@ -128,9 +174,20 @@ class CallRecordingService {
         path: _micPath!,
       );
       _micActive = true;
-    } catch (_) {
+    } catch (e) {
       _micActive = false;
       _micPath = null;
+      _note('Could not start recording: $e');
+      await _stopAudioService();
+    }
+  }
+
+  Future<void> _stopAudioService() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _audioChannel.invokeMethod('stop');
+    } catch (_) {
+      // Nothing useful to do; the service stops with the task regardless.
     }
   }
 
@@ -141,10 +198,25 @@ class CallRecordingService {
     try {
       final path = await _micRecorder.stop();
       final f = File(path ?? _micPath ?? '');
-      // Ignore tiny files (mic was silenced by the OS or call never connected).
-      if (f.existsSync() && f.statSync().size > 4096) return f;
-    } catch (_) {}
-    return null;
+      if (!f.existsSync()) {
+        _note('Recording produced no file.');
+        return null;
+      }
+      final size = f.statSync().size;
+      // A silenced mic still yields a valid, tiny container. Treat that as no
+      // recording rather than uploading a file of nothing.
+      if (size <= 4096) {
+        _note('Recording was empty (${size}B) — Android muted the microphone.');
+        _deleteQuietly(f);
+        return null;
+      }
+      return f;
+    } catch (e) {
+      _note('Could not stop recording: $e');
+      return null;
+    } finally {
+      await _stopAudioService();
+    }
   }
 
   // ---- Capture --------------------------------------------------
@@ -163,9 +235,13 @@ class CallRecordingService {
     File? fallbackFile,
   }) async {
     if (!await isEnabled()) {
+      // Off in Profile → Call Recording. The single most common reason no
+      // recording ever appears, and previously indistinguishable from failure.
+      _note('Call recording is turned off in Profile.');
       _deleteQuietly(fallbackFile);
       return;
     }
+    lastAttemptAt = DateTime.now();
 
     // OEM folder scan needs storage access; the mic fallback does not.
     if (await hasStorageAccess()) {
@@ -190,7 +266,19 @@ class CallRecordingService {
     // No OEM recording found — upload the in-app mic recording if we have one.
     if (fallbackFile != null && fallbackFile.existsSync()) {
       final ok = await _uploadIfNew(callId, fallbackFile, 'mic_fallback');
-      if (ok) _deleteQuietly(fallbackFile); // keep the file when upload failed
+      if (ok) {
+        lastError = null;
+        _deleteQuietly(fallbackFile); // keep the file when upload failed
+      }
+      return;
+    }
+
+    if (!await hasStorageAccess()) {
+      _note('No "All files access" — cannot read your phone\'s call-recorder '
+          'folder, and no fallback recording was captured.');
+    } else {
+      _note('No recording found for this call. Check that call recording is '
+          'enabled in your phone\'s Dialer app.');
     }
   }
 
@@ -324,9 +412,15 @@ class CallRecordingService {
         processed.removeRange(0, processed.length - 500);
       }
       await prefs.setStringList(_processedKey, processed);
+      lastError = null;
       return true;
-    } catch (_) {
-      // Leave unmarked so a later sync can retry.
+    } on DioException catch (e) {
+      // The upload is the step most likely to fail in the field (no signal,
+      // expired token, Cloudinary preset wrong) and it used to fail mute.
+      _note('Upload failed: ${ApiClient.errorMessage(e)}');
+      return false;
+    } catch (e) {
+      _note('Upload failed: $e');
       return false;
     }
   }

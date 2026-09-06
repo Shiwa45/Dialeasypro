@@ -73,11 +73,32 @@ class Fmt {
     'converted': 'Converted', 'lost': 'Lost', 'duplicate': 'Duplicate',
   };
 
+  // Must mirror LeadSource.CHOICES in apps/core/constants.py. The backend
+  // validates these as a ChoiceField, so a key that does not exist there is a
+  // 400 on save, not a cosmetic mismatch. 'other' used to be listed here and
+  // is NOT a backend source — picking it made the form unsubmittable.
   static const sourceLabels = {
-    'manual': 'Manual', 'indiamart': 'IndiaMART', 'meta_facebook': 'Meta Ads',
+    'manual': 'Manual', 'indiamart': 'IndiaMART',
+    'meta_facebook': 'Meta - Facebook Lead Ads',
+    'meta_instagram': 'Meta - Instagram Lead Ads',
+    'meta_ctwa': 'Meta - Click to WhatsApp',
+    'whatsapp': 'WhatsApp Inbound',
     'google_ads': 'Google Ads', 'website': 'Website', 'referral': 'Referral',
-    'csv_import': 'CSV', 'webhook': 'Webhook', 'other': 'Other',
+    'csv_import': 'CSV Import', 'webhook': 'Webhook', 'api': 'API',
   };
+
+  /// Lead priority. Mirrors LeadPriority.CHOICES on the backend, which accepts
+  /// ONLY hot / warm / cold. The app previously used a high/medium/low scale
+  /// that exists nowhere in the API: every lead created from mobile defaulted
+  /// to 'medium' and was rejected with "not a valid choice", which surfaced as
+  /// a bare "Failed" toast. Keep this list and the backend in lockstep.
+  static const priorityLabels = {
+    'hot': '🔥 Hot',
+    'warm': '🌤 Warm',
+    'cold': '❄️ Cold',
+  };
+
+  static const defaultPriority = 'warm';
 }
 
 class Validators {

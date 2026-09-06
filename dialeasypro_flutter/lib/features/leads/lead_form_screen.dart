@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
 
 class LeadFormScreen extends ConsumerStatefulWidget {
@@ -26,7 +27,7 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
   final _deal = TextEditingController();
   String _source = 'manual';
   String _status = 'new';
-  String _priority = 'medium';
+  String _priority = Fmt.defaultPriority;
   bool _loading = false;
   bool _initial = false;
 
@@ -81,7 +82,11 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
       }
     } catch (e) {
       setState(() => _loading = false);
-      if (mounted) AppToast.show(context, 'Failed', isError: true);
+      // Show what the server actually objected to. A bare "Failed" here hid an
+      // invalid-choice rejection on every single submit.
+      if (mounted) {
+        AppToast.show(context, ApiClient.errorMessage(e), isError: true);
+      }
     }
   }
 
@@ -121,10 +126,8 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
                   const SizedBox(height: 12),
                   const Text('PRIORITY', style: AppTextStyles.label),
                   const SizedBox(height: 6),
-                  Row(children: [
-                    {'hot': '🔥 Hot'}, {'high': 'High'}, {'medium': 'Medium'}, {'low': 'Low'},
-                  ].map((m) {
-                    final k = m.keys.first;
+                  Row(children: Fmt.priorityLabels.entries.map((m) {
+                    final k = m.key;
                     final sel = _priority == k;
                     return Expanded(child: GestureDetector(
                       onTap: () => setState(() => _priority = k),
@@ -135,8 +138,8 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
                           color: sel ? AppColors.priorityColors[k] : AppColors.white,
                           border: Border.all(color: AppColors.black, width: sel ? 2 : 1.5),
                         ),
-                        child: Text(m.values.first, textAlign: TextAlign.center,
-                            style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 11, color: sel && (k == 'hot' || k == 'high') ? AppColors.white : AppColors.black)),
+                        child: Text(m.value, textAlign: TextAlign.center,
+                            style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 11, color: sel && k == 'hot' ? AppColors.white : AppColors.black)),
                       ),
                     ));
                   }).toList()),

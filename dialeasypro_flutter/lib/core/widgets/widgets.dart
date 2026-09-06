@@ -385,7 +385,7 @@ class PriorityBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = AppColors.priorityColors[priority.toLowerCase()] ?? AppColors.grey;
-    final isLight = priority == 'medium' || priority == 'low';
+    final isLight = priority == 'warm' || priority == 'cold';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
       decoration: BoxDecoration(

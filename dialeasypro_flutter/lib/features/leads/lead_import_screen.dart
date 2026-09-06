@@ -24,7 +24,7 @@ class LeadImportScreen extends ConsumerStatefulWidget {
 class _LeadImportScreenState extends ConsumerState<LeadImportScreen> {
   final _csvCtrl = TextEditingController();
   String _source = 'manual';
-  String _priority = 'medium';
+  String _priority = Fmt.defaultPriority;
   List<_ParsedRow> _rows = [];
   bool _importing = false;
   int _imported = 0, _failed = 0;
@@ -136,7 +136,7 @@ class _LeadImportScreenState extends ConsumerState<LeadImportScreen> {
               Expanded(child: _DropField(
                 label: 'Priority',
                 value: _priority,
-                options: const {'hot': 'Hot', 'high': 'High', 'medium': 'Medium', 'low': 'Low'},
+                options: Fmt.priorityLabels,
                 onChange: (v) => setState(() => _priority = v),
               )),
             ]),

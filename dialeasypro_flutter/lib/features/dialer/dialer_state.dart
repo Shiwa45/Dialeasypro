@@ -215,7 +215,19 @@ class DialerNotifier extends StateNotifier<DialerState> {
       currentCall: record,
     );
 
+    // Start the fallback recording BEFORE handing the screen to the dialer.
+    // RECORD_AUDIO is "while in use": started here the mic stays live behind
+    // the dialer via the foreground service, whereas starting it once the call
+    // connects (as this used to) means asking a backgrounded app for the
+    // microphone — silence on Android 11+, refused on 12+.
+    await CallRecordingService.instance.startMicCapture();
+
     final success = await PhoneService.instance.directDial(lead.phone);
+    if (!success) {
+      // Never leave the mic and its notification running for a call that was
+      // never placed.
+      await CallRecordingService.instance.stopMicCapture();
+    }
     if (!success) {
       // Permission denied or dial failed — mark and let user retry
       state = state.copyWith(phase: DialerPhase.postCall);
@@ -230,9 +242,9 @@ class DialerNotifier extends StateNotifier<DialerState> {
         state = state.copyWith(phase: DialerPhase.inCall);
         state.currentCall!.wasConnected = true;
         _presence(AgentStatus.onCall);
-        // Universal fallback recording: capture the mic for the duration of
-        // the call (used only if no OEM recording is found afterwards).
-        CallRecordingService.instance.startMicCapture();
+        // Recording already started at dial time — see dialCurrent(). It
+        // cannot be started here: by now the dialer owns the screen and this
+        // app is in the background, where the microphone is unavailable.
         break;
       case CallStatus.ringing:
       case CallStatus.dialing:

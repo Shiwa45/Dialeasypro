@@ -17,6 +17,17 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
 
+    <!-- ═══ FOREGROUND SERVICE (mic access during a call) ═══
+         RECORD_AUDIO is a "while in use" permission. Once the agent taps Call
+         the system dialer comes forward and this app is backgrounded, and a
+         backgrounded app gets silence from the mic on Android 11+ and is
+         refused outright on 12+. A foreground service with the `microphone`
+         type is the documented way to keep that access across the transition.
+         FOREGROUND_SERVICE_MICROPHONE is required from Android 14 (targetSdk
+         34) and is ignored on older releases. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+
     <!-- ═══ DEVICE ═══ -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
@@ -79,6 +90,16 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>
+
+        <!-- Holds the microphone while a call is in progress. Started at dial
+             time, while the app is still visible: Android 12+ forbids starting
+             a foreground service from the background, so starting it when the
+             call CONNECTS (the app is behind the dialer by then) throws. -->
+        <service
+            android:name=".CallAudioService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="microphone"/>
     </application>
 
     <!-- ═══ INTENT QUERIES (Android 11+ package visibility) ═══ -->

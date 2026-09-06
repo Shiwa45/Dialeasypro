@@ -428,9 +428,9 @@ class _FilterSheetState extends State<_FilterSheet> {
         const SizedBox(height: 8),
         Wrap(spacing: 6, children: [
           _option('🔥 Hot', 'hot', _f.priority, (v) => _f = _f.copyWith(priority: v)),
-          _option('High', 'high', _f.priority, (v) => _f = _f.copyWith(priority: v)),
-          _option('Medium', 'medium', _f.priority, (v) => _f = _f.copyWith(priority: v)),
-          _option('Low', 'low', _f.priority, (v) => _f = _f.copyWith(priority: v)),
+          _option('Hot', 'hot', _f.priority, (v) => _f = _f.copyWith(priority: v)),
+          _option('Warm', 'warm', _f.priority, (v) => _f = _f.copyWith(priority: v)),
+          _option('Cold', 'cold', _f.priority, (v) => _f = _f.copyWith(priority: v)),
         ]),
         const SizedBox(height: 16),
         GestureDetector(

@@ -393,3 +393,60 @@ def test_total_recipients_counts_rows_that_exist(leads):
     campaign.refresh_from_db()
     assert campaign.total_recipients == 3
     assert CampaignRecipient.objects.filter(campaign=campaign).count() == 3
+
+
+# ============================================================
+# Why a campaign stopped
+# ============================================================
+# Now that the daily caps actually enforce, "failed" is a state real tenants
+# hit on an ordinary day. A red badge with no reason is not a usable answer.
+
+@pytest.mark.django_db
+def test_a_cap_breach_records_a_readable_reason(leads):
+    from apps.communications.tasks import send_bulk_sms_campaign
+
+    campaign = _campaign("sms", status="draft")
+
+    class _Plan:
+        max_sms_per_day = 1
+
+    class _Sub:
+        plan = _Plan()
+
+    with patch("apps.communications.tasks._resolve_campaign_audience", return_value=leads):
+        with patch("apps.communications.tasks._current_plan", return_value=_Sub()):
+            with pytest.raises(Exception):
+                send_bulk_sms_campaign(TEST_SCHEMA, str(campaign.pk))
+
+    campaign.refresh_from_db()
+    assert campaign.status == "failed"
+    assert campaign.failure_reason, "a failed campaign must say why"
+    assert "limit" in campaign.failure_reason.lower()
+
+
+@pytest.mark.django_db
+def test_relaunching_clears_the_previous_failure(leads):
+    from apps.communications.tasks import send_bulk_sms_campaign
+
+    campaign = _campaign("sms", status="draft", failure_reason="Daily SMS limit reached")
+
+    with patch("apps.communications.tasks._resolve_campaign_audience", return_value=leads):
+        with patch("apps.communications.tasks.send_sms_chunk"):
+            send_bulk_sms_campaign(TEST_SCHEMA, str(campaign.pk))
+
+    campaign.refresh_from_db()
+    assert campaign.failure_reason == ""
+
+
+@pytest.mark.django_db
+def test_pending_count_is_what_resuming_would_send(leads):
+    """The question an admin has when looking at a paused campaign."""
+    from apps.communications.serializers import BulkCampaignSerializer
+
+    campaign = _campaign("sms", status="paused")
+    recipients = _recipients(campaign, leads)
+    CampaignRecipient.objects.filter(pk=recipients[0].pk).update(status="sent")
+
+    data = BulkCampaignSerializer(campaign).data
+    assert data["pending_count"] == 2
+    assert data["failure_reason"] == ""

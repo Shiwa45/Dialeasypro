@@ -536,6 +536,15 @@ class BulkCampaign(TimeStampedUUIDModel):
     # Celery task
     celery_task_id = models.CharField(max_length=100, blank=True, default="")
 
+    # Why the campaign stopped, when it stopped badly.
+    #
+    # A coordinator that raises leaves status="failed" and nothing else, so an
+    # admin saw a red badge and no reason — and now that the daily plan caps
+    # actually enforce (they previously compared against a hard-coded zero),
+    # "failed" is a state real tenants will hit on an ordinary day. The cause
+    # has to be readable without a log search.
+    failure_reason = models.CharField(max_length=500, blank=True, default="")
+
     class Meta:
         verbose_name = "Bulk Campaign"
         verbose_name_plural = "Bulk Campaigns"

@@ -200,6 +200,15 @@ class BulkCampaignSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source="created_by.name", read_only=True)
     delivery_rate = serializers.FloatField(read_only=True)
     progress_percent = serializers.IntegerField(read_only=True)
+    pending_count = serializers.SerializerMethodField()
+
+    def get_pending_count(self, obj) -> int:
+        """
+        Recipients not yet attempted. Only meaningful now that Pause actually
+        stops a run: it is the number of people who will be messaged if the
+        campaign is resumed, which is the question an admin has at that point.
+        """
+        return obj.recipients.filter(status="pending").count()
 
     class Meta:
         model = BulkCampaign
@@ -207,13 +216,13 @@ class BulkCampaignSerializer(serializers.ModelSerializer):
             "id", "name", "channel", "created_by", "created_by_name",
             "audience_filters", "estimated_recipients",
             "template", "email_subject", "email_body", "sms_text", "sms_sender_id",
-            "status", "scheduled_at", "started_at", "completed_at",
+            "status", "failure_reason", "scheduled_at", "started_at", "completed_at",
             "total_recipients", "sent_count", "delivered_count",
             "failed_count", "replied_count", "delivery_rate", "progress_percent",
-            "created_at",
+            "pending_count", "created_at",
         ]
         read_only_fields = [
-            "id", "status", "started_at", "completed_at",
+            "id", "status", "failure_reason", "started_at", "completed_at",
             "total_recipients", "sent_count", "delivered_count",
             "failed_count", "replied_count", "created_at",
         ]

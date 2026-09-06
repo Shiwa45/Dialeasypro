@@ -47,7 +47,8 @@ def send_bulk_whatsapp_campaign(self, schema_name: str, campaign_id: str):
     # Mark as running
     campaign.status = "running"
     campaign.started_at = timezone.now()
-    campaign.save(update_fields=["status", "started_at"])
+    campaign.failure_reason = ""  # a relaunch must not show the last failure
+    campaign.save(update_fields=["status", "started_at", "failure_reason"])
 
     try:
         # Resolve audience
@@ -100,8 +101,7 @@ def send_bulk_whatsapp_campaign(self, schema_name: str, campaign_id: str):
 
     except Exception as exc:
         logger.error(f"[WA Campaign] Failed: {exc}", exc_info=True)
-        campaign.status = "failed"
-        campaign.save(update_fields=["status"])
+        _fail_campaign(campaign, exc)
         raise
 
 
@@ -214,7 +214,8 @@ def send_bulk_email_campaign(self, schema_name: str, campaign_id: str):
 
     campaign.status = "running"
     campaign.started_at = timezone.now()
-    campaign.save(update_fields=["status", "started_at"])
+    campaign.failure_reason = ""  # a relaunch must not show the last failure
+    campaign.save(update_fields=["status", "started_at", "failure_reason"])
 
     try:
         leads = _resolve_campaign_audience(campaign)
@@ -244,8 +245,8 @@ def send_bulk_email_campaign(self, schema_name: str, campaign_id: str):
                 queue="bulk_ops",
             )
     except Exception as exc:
-        campaign.status = "failed"
-        campaign.save(update_fields=["status"])
+        logger.error(f"[Email Campaign] Failed: {exc}", exc_info=True)
+        _fail_campaign(campaign, exc)
         raise
 
 
@@ -359,7 +360,8 @@ def send_bulk_sms_campaign(self, schema_name: str, campaign_id: str):
 
     campaign.status = "running"
     campaign.started_at = timezone.now()
-    campaign.save(update_fields=["status", "started_at"])
+    campaign.failure_reason = ""  # a relaunch must not show the last failure
+    campaign.save(update_fields=["status", "started_at", "failure_reason"])
 
     try:
         leads = _resolve_campaign_audience(campaign)
@@ -394,8 +396,8 @@ def send_bulk_sms_campaign(self, schema_name: str, campaign_id: str):
                 queue="bulk_ops",
             )
     except Exception as exc:
-        campaign.status = "failed"
-        campaign.save(update_fields=["status"])
+        logger.error(f"[SMS Campaign] Failed: {exc}", exc_info=True)
+        _fail_campaign(campaign, exc)
         raise
 
 
@@ -577,6 +579,27 @@ def _resolve_campaign_audience(campaign):
 # "cancelled" are the point of the Pause button; "failed" and "completed"
 # mean something already finished this campaign.
 HALTED_STATUSES = {"paused", "cancelled", "failed", "completed"}
+
+
+def _fail_campaign(campaign, exc: Exception):
+    """
+    Mark a campaign failed with a reason an admin can act on.
+
+    PlanLimitExceededException carries a sentence written for a person
+    ("Daily SMS limit reached: 4000/4000"); anything else falls back to the
+    exception text, which is at least a starting point. Never let this bury
+    the original error — the caller re-raises.
+    """
+    from apps.core.exceptions import PlanLimitExceededException
+
+    if isinstance(exc, PlanLimitExceededException):
+        reason = str(getattr(exc, "detail", exc))
+    else:
+        reason = f"{exc.__class__.__name__}: {exc}"
+
+    type(campaign).objects.filter(pk=campaign.pk).update(
+        status="failed", failure_reason=reason[:500],
+    )
 
 
 def _campaign_halted(campaign_or_id, tag: str) -> bool:

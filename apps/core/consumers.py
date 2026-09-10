@@ -190,7 +190,16 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
 
     async def connect(self):
         """Validate JWT token and connect agent to their notification channel."""
+        from urllib.parse import parse_qs
+
+        # The token may arrive either way. The original route put it in the
+        # path, which is the form most likely to be written verbatim into an
+        # access log or a proxy trace; the query form matches the agent-monitor
+        # socket. Both are accepted so existing clients keep working.
         token = self.scope["url_route"]["kwargs"].get("token")
+        if not token:
+            query = parse_qs(self.scope.get("query_string", b"").decode())
+            token = (query.get("token") or [None])[0]
         if not token:
             await self.close(code=4001)
             return
@@ -243,6 +252,17 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
 
     async def new_lead(self, event):
         """New lead assigned to this agent."""
+        await self.send_json(event)
+
+    async def notification(self, event):
+        """
+        A stored notification for this agent.
+
+        The handlers below predate the Notification model and each carried one
+        bespoke event shape. This one sends the same payload the REST endpoint
+        returns, so a live frame and a page refresh produce identical objects
+        and the client needs one code path rather than five.
+        """
         await self.send_json(event)
 
     async def followup_reminder(self, event):

@@ -112,6 +112,52 @@ class TenantInfoAPIView(APIView):
 from rest_framework.throttling import ScopedRateThrottle
 
 
+class CompanyProfileAPIView(APIView):
+    """
+    GET /api/v1/auth/company/
+
+    The tenant's own billing identity, for the letterhead on invoices,
+    quotations and payslips. tenant-info/ exposes only the name and is
+    deliberately unauthenticated (the workspace picker calls it before login);
+    an address, GSTIN and phone number are not something to hand out to
+    unauthenticated callers, so they live here behind a token instead.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def get(self, request):
+        from django.db import connection
+
+        from apps.tenants.models import Tenant
+
+        tenant = Tenant.objects.filter(schema_name=connection.schema_name).first()
+        if tenant is None:
+            return Response(
+                {"error": "workspace_not_found", "message": "Workspace not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        logo = ""
+        if tenant.logo:
+            try:
+                logo = request.build_absolute_uri(tenant.logo.url)
+            except Exception:  # noqa: BLE001 — a missing file must not 500 an invoice
+                logo = ""
+
+        return Response({
+            "company_name": tenant.company_name,
+            "gstin": tenant.gstin,
+            "billing_address": tenant.billing_address,
+            "city": tenant.city,
+            "state": tenant.state,
+            "pincode": tenant.pincode,
+            "email": tenant.primary_contact_email,
+            "phone": tenant.primary_contact_phone,
+            "logo": logo,
+            "primary_color": tenant.primary_color,
+        })
+
+
 class AgentLoginAPIView(APIView):
     """
     POST /api/v1/auth/login/
@@ -633,7 +679,39 @@ class TenantFeaturesAPIView(APIView):
             for module, keys in ModuleKey.FEATURES.items()
         }
 
-        return Response({"features": full_map, "modules": modules, "plan": plan_data})
+        # Role capabilities travel with the feature map so the client makes a
+        # single call on boot. Same source of truth the API gates on, so a
+        # hidden button and a 403 always have the same cause.
+        from apps.core.capabilities import capabilities_for
+
+        return Response({
+            "features": full_map,
+            "modules": modules,
+            "plan": plan_data,
+            "role": getattr(request.user, "role", None),
+            "capabilities": capabilities_for(request.user),
+        })
+
+
+class CapabilitiesAPIView(APIView):
+    """
+    GET /api/v1/auth/capabilities/
+    Just the role-capability map for the calling agent.
+
+    /auth/features/ already embeds this; this endpoint exists for clients that
+    want to refresh permissions after a role change without re-fetching the
+    whole (heavily cached) plan payload.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def get(self, request):
+        from apps.core.capabilities import capabilities_for
+
+        return Response({
+            "role": getattr(request.user, "role", None),
+            "capabilities": capabilities_for(request.user),
+        })
 
 
 # ============================================================

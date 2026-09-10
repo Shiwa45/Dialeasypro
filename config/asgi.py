@@ -35,7 +35,10 @@ websocket_urlpatterns = [
     # Real-time agent monitoring (tenant admin → sees all agents)
     re_path(r"ws/agent-monitor/$", AgentMonitorConsumer.as_asgi()),
 
-    # Per-agent notification stream (agent → receives their notifications)
+    # Per-agent notification stream (agent → receives their notifications).
+    # Two forms: the original token-in-path, and ?token= like every other
+    # socket here. The consumer reads whichever is present.
+    re_path(r"ws/notifications/$", NotificationConsumer.as_asgi()),
     re_path(r"ws/notifications/(?P<token>[\w.-]+)/$", NotificationConsumer.as_asgi()),
 ]
 

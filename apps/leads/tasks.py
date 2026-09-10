@@ -606,47 +606,52 @@ def send_followup_reminders_for_tenant(self, schema_name: str):
     Called from apps.authentication.tasks.dispatch_followup_reminders.
     """
     from datetime import timedelta
+    from apps.authentication.notifications import followup_due
     from apps.leads.models import FollowUp
-    from apps.core.consumers import send_agent_notification
 
     now = timezone.now()
     window_end = now + timedelta(minutes=30)
+    # How far back to look for follow-ups whose moment passed unannounced.
+    # The old filter was `scheduled_at >= now`, so anything that came due
+    # while the worker was down, or between two runs, was never mentioned
+    # again — reminder_sent stayed False and the window had moved past it.
+    # A day is long enough to cover an outage and short enough that nobody is
+    # woken by last week's backlog.
+    lookback = now - timedelta(hours=24)
 
     due_followups = FollowUp.objects.filter(
         is_completed=False,
         reminder_sent=False,
-        scheduled_at__gte=now,
+        scheduled_at__gte=lookback,
         scheduled_at__lte=window_end,
     ).select_related("lead", "assigned_to")
 
     notified = 0
+    skipped = 0
     for fu in due_followups:
+        if not fu.assigned_to_id:
+            # Nobody to tell. Leave reminder_sent alone so it is picked up if
+            # the lead is assigned later.
+            skipped += 1
+            continue
         try:
-            # WebSocket push notification
-            send_agent_notification(
-                schema_name=schema_name,
-                agent_id=fu.assigned_to_id,
-                event_type="followup_reminder",
-                data={
-                    "followup_id": fu.pk,
-                    "lead_id": fu.lead_id,
-                    "lead_name": fu.lead.name,
-                    "followup_type": fu.followup_type,
-                    "scheduled_at": fu.scheduled_at.isoformat(),
-                    "notes": fu.notes,
-                },
-            )
+            # notify() stores the row first, then pushes. The previous version
+            # only pushed down a WebSocket, so a reminder for an agent who was
+            # not connected at that second was lost with nothing recorded.
+            followup_due(fu, overdue=fu.scheduled_at < now)
             fu.reminder_sent = True
             fu.reminder_sent_at = now
             fu.save(update_fields=["reminder_sent", "reminder_sent_at"])
             notified += 1
         except Exception as exc:
+            # Deliberately leave reminder_sent False so the next run retries.
             logger.warning(f"[Task] Reminder failed for follow-up {fu.pk}: {exc}")
 
     logger.info(
-        f"[Task] Follow-up reminders sent: {notified} in {schema_name}"
+        f"[Task] Follow-up reminders sent: {notified} "
+        f"({skipped} unassigned) in {schema_name}"
     )
-    return {"notified": notified}
+    return {"notified": notified, "skipped_unassigned": skipped}
 
 
 # ============================================================

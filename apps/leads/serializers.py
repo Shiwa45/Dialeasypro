@@ -55,11 +55,17 @@ class FollowUpSerializer(serializers.ModelSerializer):
     followup_type_display = serializers.CharField(source="get_followup_type_display", read_only=True)
     assigned_to_name = serializers.CharField(source="assigned_to.name", read_only=True)
     is_overdue = serializers.SerializerMethodField()
+    # Who the follow-up is with. A reminder that says "follow up with lead 54"
+    # is useless on a phone's lock screen, and the mobile app had no way to
+    # resolve the name without a request per follow-up.
+    lead_name = serializers.CharField(source="lead.name", read_only=True)
+    lead_phone = serializers.CharField(source="lead.phone", read_only=True)
 
     class Meta:
         model = FollowUp
         fields = [
-            "id", "lead", "assigned_to", "assigned_to_name",
+            "id", "lead", "lead_name", "lead_phone",
+            "assigned_to", "assigned_to_name",
             "followup_type", "followup_type_display",
             "scheduled_at", "notes", "is_completed",
             "completed_at", "completion_notes", "is_overdue",

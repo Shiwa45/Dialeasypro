@@ -537,6 +537,55 @@ class FollowUpListCreateView(generics.ListCreateAPIView):
             performed_by=agent,
         )
 
+        # Tell the agent it landed on. A manager scheduling a follow-up on
+        # someone else's lead was previously silent: the row appeared in the
+        # database and the agent found out only if they happened to open that
+        # lead. Scheduling your own is not worth a notification — you just did
+        # it, and it would arrive before the dialog closed.
+        if followup.assigned_to_id and followup.assigned_to_id != agent.pk:
+            from apps.authentication.notifications import followup_scheduled
+
+            followup_scheduled(followup)
+
+
+class MyFollowUpsView(generics.ListAPIView):
+    """
+    GET /api/v1/leads/followups/mine/?days=14
+
+    Every follow-up assigned to the caller that is still open, soonest first.
+
+    Follow-ups could previously only be listed one lead at a time, so nothing
+    could answer "what is coming up for me" — which is exactly what a phone
+    needs in order to hand the reminders to Android and have them fire whether
+    or not the app is running.
+
+    Overdue ones are included deliberately. They are the ones that most need
+    to be on the list.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+    serializer_class = FollowUpSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        from datetime import timedelta
+
+        try:
+            days = max(1, min(int(self.request.query_params.get("days", 14)), 90))
+        except (TypeError, ValueError):
+            days = 14
+
+        horizon = timezone.now() + timedelta(days=days)
+        return (
+            FollowUp.objects.filter(
+                assigned_to=self.request.user,
+                is_completed=False,
+                scheduled_at__lte=horizon,
+            )
+            .select_related("lead", "assigned_to")
+            .order_by("scheduled_at")[:200]
+        )
+
 
 class FollowUpCompleteView(APIView):
     """POST /api/v1/followups/{id}/complete/ — Mark follow-up as done."""

@@ -14,6 +14,7 @@ from apps.leads.views import (
     CustomFieldListView,
     FollowUpCompleteView,
     FollowUpListCreateView,
+    MyFollowUpsView,
     LeadActivityListView,
     LeadBulkAssignView,
     LeadDistributeView,
@@ -52,6 +53,10 @@ urlpatterns = [
     path("unassign-by-agent/", LeadUnassignByAgentView.as_view(), name="api_lead_unassign_by_agent"),
 
     # ---- Follow-ups ----------------------------------------
+    # Before the <int:lead_id> routes: "followups" is not an integer, so it
+    # would not actually collide, but keeping the literal first makes the
+    # ordering obvious to the next person adding a route here.
+    path("followups/mine/", MyFollowUpsView.as_view(), name="api_my_followups"),
     path("<int:lead_id>/followups/", FollowUpListCreateView.as_view(), name="api_followup_list"),
     path("followups/<int:pk>/complete/", FollowUpCompleteView.as_view(), name="api_followup_complete"),
 

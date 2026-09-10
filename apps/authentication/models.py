@@ -407,3 +407,100 @@ class AgentStatusLog(models.Model):
         self.ended_at = at
         self.duration_seconds = max(0, int((at - self.started_at).total_seconds()))
         self.save(update_fields=["ended_at", "duration_seconds"])
+
+
+# ============================================================
+# Notifications
+# ============================================================
+
+class NotificationKind:
+    """
+    What a notification is about. Kept as plain strings rather than a Django
+    TextChoices so a client can render an unknown kind without crashing when
+    the server learns a new one before the app is updated.
+    """
+
+    FOLLOWUP_SCHEDULED = "followup_scheduled"
+    FOLLOWUP_DUE = "followup_due"
+    FOLLOWUP_OVERDUE = "followup_overdue"
+    LEAD_ASSIGNED = "lead_assigned"
+    SYSTEM = "system"
+
+    CHOICES = [
+        (FOLLOWUP_SCHEDULED, "Follow-up scheduled"),
+        (FOLLOWUP_DUE, "Follow-up due"),
+        (FOLLOWUP_OVERDUE, "Follow-up overdue"),
+        (LEAD_ASSIGNED, "Lead assigned"),
+        (SYSTEM, "System"),
+    ]
+
+
+class Notification(models.Model):
+    """
+    One thing an agent should know about, kept until they have seen it.
+
+    Everything before this was fire-and-forget: a follow-up reminder was
+    pushed down a WebSocket and, if the agent was not connected at that exact
+    second — which is most of the time, since a reminder fires precisely when
+    they are not looking at the CRM — it was gone. Nothing was stored, so
+    there was no bell to open, no unread count, and no way for the mobile app
+    to ask what it had missed.
+
+    `lead` and `followup` are plain integers rather than foreign keys on
+    purpose. apps.leads already points at Agent, and pointing back would put a
+    circular dependency between two tenant apps' migrations in a schema-per-
+    tenant deployment that is already live. The cost is that a notification
+    can outlive its lead; clients treat a dead link as a dead link.
+    """
+
+    recipient = models.ForeignKey(
+        Agent, on_delete=models.CASCADE, related_name="notifications", db_index=True
+    )
+    kind = models.CharField(
+        max_length=32, choices=NotificationKind.CHOICES,
+        default=NotificationKind.SYSTEM, db_index=True,
+    )
+
+    title = models.CharField(max_length=160)
+    body = models.TextField(blank=True, default="")
+
+    lead_id_ref = models.PositiveIntegerField(
+        null=True, blank=True, db_index=True,
+        help_text="leads.Lead id this concerns, if any.",
+    )
+    followup_id_ref = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="leads.FollowUp id this concerns, if any.",
+    )
+    url = models.CharField(
+        max_length=200, blank=True, default="",
+        help_text="Client route to open, e.g. /leads/42.",
+    )
+
+    is_read = models.BooleanField(default=False, db_index=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        verbose_name = "Notification"
+        verbose_name_plural = "Notifications"
+        ordering = ["-created_at"]
+        indexes = [
+            # The bell's only two queries: this agent's unread count, and
+            # this agent's most recent, both scoped to one recipient.
+            models.Index(
+                fields=["recipient", "is_read", "-created_at"],
+                name="notif_recipient_unread_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.recipient_id}: {self.title}"
+
+    def mark_read(self, at=None):
+        if self.is_read:
+            return self
+        self.is_read = True
+        self.read_at = at or timezone.now()
+        self.save(update_fields=["is_read", "read_at"])
+        return self

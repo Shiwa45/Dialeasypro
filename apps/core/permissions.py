@@ -10,7 +10,12 @@ Permission hierarchy (least → most access):
   IsTenantAdmin             → Admin role only
   IsManagerOrAdmin          → Manager or Admin role
   HasFeatureAccess          → Tenant plan has specific feature enabled
+  HasCapability             → Agent's ROLE is allowed this business action
   IsSuperAdmin              → Django superuser (public schema only)
+
+Two independent axes gate a module endpoint, and both must pass:
+  HasFeatureAccess → "did this tenant buy the module?"   (402 when not)
+  HasCapability    → "may this user perform the action?" (403 when not)
 """
 import logging
 
@@ -139,6 +144,88 @@ class HasFeatureAccess(permissions.BasePermission):
         # structured upsell payload instead of an opaque 403.
         from apps.core.exceptions import FeatureNotEnabledException
         raise FeatureNotEnabledException(feature_key=feature_key)
+
+
+class HasCapability(permissions.BasePermission):
+    """
+    Check the agent's ROLE against the capability table in
+    apps/core/capabilities.py.
+
+    Usage in a view:
+        class PayrollRunView(APIView):
+            permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+            required_feature = FeatureKey.HRMS_PAYROLL
+            required_capability = Cap.HRMS_PAYROLL
+
+    A per-method map is supported for views where reading and writing have
+    different bars — far more common than a whole extra view class:
+
+        required_capability = Cap.HRMS_VIEW
+        capability_by_method = {"POST": Cap.HRMS_MANAGE,
+                                "PATCH": Cap.HRMS_MANAGE,
+                                "DELETE": Cap.HRMS_MANAGE}
+
+    Like HasFeatureAccess, a view that forgets to declare one fails closed.
+    """
+
+    required_capability = None
+    message = "Your role doesn't allow this action."
+
+    def has_permission(self, request, view):
+        from apps.core.capabilities import has_capability
+
+        by_method = getattr(view, "capability_by_method", None) or {}
+        capability = by_method.get(request.method) or getattr(
+            view, "required_capability", self.required_capability
+        )
+
+        if not capability:
+            logger.warning(
+                "HasCapability used on %s without required_capability set — "
+                "denying access", view.__class__.__name__,
+            )
+            return False
+
+        if has_capability(request.user, capability):
+            return True
+
+        self.message = (
+            f"Your role ({getattr(request.user, 'role', 'unknown')}) doesn't "
+            f"allow this action."
+        )
+        return False
+
+
+def capability_required(capability):
+    """
+    Factory, for the cases where declaring a class attribute is awkward
+    (generic views composed inline, or two capabilities on one view).
+
+        permission_classes = [IsAuthenticatedAgent, capability_required(Cap.ATS_MANAGE)]
+    """
+    return type(
+        f"Requires_{capability.replace('.', '_')}",
+        (HasCapability,),
+        {"required_capability": capability},
+    )
+
+
+def require_capability(request, capability: str):
+    """
+    Imperative gate, for when the required capability depends on the request
+    body (e.g. an invoice action name arriving as a path segment).
+
+    Raises DRF PermissionDenied (403) when the role isn't allowed.
+    """
+    from rest_framework.exceptions import PermissionDenied
+
+    from apps.core.capabilities import has_capability
+
+    if not has_capability(request.user, capability):
+        raise PermissionDenied(
+            f"Your role ({getattr(request.user, 'role', 'unknown')}) doesn't "
+            f"allow this action."
+        )
 
 
 def feature_required(feature_key):

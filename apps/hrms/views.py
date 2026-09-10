@@ -16,13 +16,10 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.permissions import (
-    HasFeatureAccess,
-    IsAuthenticatedAgent,
-    IsManagerOrAdmin,
-    IsTenantAdmin,
-)
+from apps.authentication.permissions import HasFeatureAccess, IsAuthenticatedAgent
+from apps.core.capabilities import Cap
 from apps.core.constants import FeatureKey
+from apps.core.permissions import HasCapability
 from apps.core.pagination import StandardResultsSetPagination
 from apps.hrms.constants import ApprovalStatus
 from apps.hrms.models import (
@@ -85,12 +82,10 @@ class EmployeeListCreateView(generics.ListCreateAPIView):
 
     serializer_class = EmployeeSerializer
     pagination_class = StandardResultsSetPagination
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
-
-    def get_permissions(self):
-        if self.request.method == "POST":
-            return [IsTenantAdmin(), HasFeatureAccess()]
-        return [IsAuthenticatedAgent(), HasFeatureAccess()]
+    required_capability = Cap.HRMS_VIEW
+    capability_by_method = {"POST": Cap.HRMS_MANAGE}
 
     def get_queryset(self):
         qs = Employee.objects.select_related("agent", "reporting_to__agent")
@@ -103,18 +98,34 @@ class EmployeeListCreateView(generics.ListCreateAPIView):
 
 class EmployeeDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = EmployeeSerializer
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_MANAGE
 
     def get_queryset(self):
         return Employee.objects.select_related("agent")
+
+    def perform_destroy(self, instance):
+        """
+        Exit an employee rather than deleting the row.
+
+        A hard delete would cascade through Attendance, LeaveRequest,
+        ExpenseClaim, IncentiveEarning and Payslip — taking finalized payslips
+        and approved claims with it. Those are records a company has to be able
+        to produce years later, so leaving is a state change, not a deletion.
+        """
+        instance.is_active = False
+        if instance.date_of_exit is None:
+            instance.date_of_exit = timezone.localdate()
+        instance.save(update_fields=["is_active", "date_of_exit"])
 
 
 class MyEmployeeView(APIView):
     """GET /api/v1/hrms/me/ — the caller's own employment record."""
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_VIEW
 
     def get(self, request):
         employee = employee_for(request.user)
@@ -129,8 +140,9 @@ class MyEmployeeView(APIView):
 
 class AttendanceListView(generics.ListAPIView):
     serializer_class = AttendanceSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_VIEW
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -151,8 +163,9 @@ class AttendanceListView(generics.ListAPIView):
 class CheckInView(APIView):
     """POST /api/v1/hrms/attendance/check-in/"""
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_VIEW
 
     def post(self, request):
         from apps.hrms.services.attendance import mark_check_in
@@ -167,8 +180,9 @@ class CheckInView(APIView):
 class CheckOutView(APIView):
     """POST /api/v1/hrms/attendance/check-out/"""
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_VIEW
 
     def post(self, request):
         from apps.hrms.services.attendance import mark_check_out
@@ -186,8 +200,9 @@ class AttendanceSyncView(APIView):
     Recompute attendance from dialer session logs for a date (admin).
     """
 
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_MANAGE
 
     def post(self, request):
         from apps.hrms.services.attendance import sync_attendance_for_date
@@ -206,19 +221,18 @@ class HolidayListCreateView(generics.ListCreateAPIView):
     serializer_class = HolidaySerializer
     queryset = Holiday.objects.all()
     pagination_class = None
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
-
-    def get_permissions(self):
-        if self.request.method == "POST":
-            return [IsTenantAdmin(), HasFeatureAccess()]
-        return [IsAuthenticatedAgent(), HasFeatureAccess()]
+    required_capability = Cap.HRMS_VIEW
+    capability_by_method = {"POST": Cap.HRMS_MANAGE}
 
 
 class HolidayDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = HolidaySerializer
     queryset = Holiday.objects.all()
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_MANAGE
 
 
 # ============================================================
@@ -229,12 +243,10 @@ class LeaveTypeListCreateView(generics.ListCreateAPIView):
     serializer_class = LeaveTypeSerializer
     queryset = LeaveType.objects.filter(is_active=True)
     pagination_class = None
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_LEAVE
-
-    def get_permissions(self):
-        if self.request.method == "POST":
-            return [IsTenantAdmin(), HasFeatureAccess()]
-        return [IsAuthenticatedAgent(), HasFeatureAccess()]
+    required_capability = Cap.HRMS_VIEW
+    capability_by_method = {"POST": Cap.HRMS_MANAGE}
 
 
 class LeaveTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -247,8 +259,9 @@ class LeaveTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     serializer_class = LeaveTypeSerializer
     queryset = LeaveType.objects.all()
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_LEAVE
+    required_capability = Cap.HRMS_MANAGE
 
     def perform_destroy(self, instance):
         instance.is_active = False
@@ -257,8 +270,9 @@ class LeaveTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class LeaveBalanceListView(generics.ListAPIView):
     serializer_class = LeaveBalanceSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_LEAVE
+    required_capability = Cap.HRMS_VIEW
     pagination_class = None
 
     def get_queryset(self):
@@ -270,8 +284,9 @@ class LeaveBalanceListView(generics.ListAPIView):
 
 class LeaveRequestListCreateView(generics.ListCreateAPIView):
     serializer_class = LeaveRequestSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_LEAVE
+    required_capability = Cap.HRMS_VIEW
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -303,8 +318,9 @@ class LeaveRequestListCreateView(generics.ListCreateAPIView):
 class LeaveDecisionView(APIView):
     """POST /api/v1/hrms/leave/{id}/{approve|reject|cancel}/"""
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_LEAVE
+    required_capability = Cap.HRMS_VIEW
 
     def post(self, request, pk, action):
         leave = LeaveRequest.objects.filter(pk=pk).select_related("employee__agent", "leave_type").first()
@@ -343,8 +359,9 @@ class LeaveDecisionView(APIView):
 
 class ExpenseClaimListCreateView(generics.ListCreateAPIView):
     serializer_class = ExpenseClaimSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_EXPENSES
+    required_capability = Cap.HRMS_VIEW
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -361,8 +378,9 @@ class ExpenseClaimListCreateView(generics.ListCreateAPIView):
 class ExpenseDecisionView(APIView):
     """POST /api/v1/hrms/expenses/{id}/{approve|reject}/ — manager only."""
 
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_EXPENSES
+    required_capability = Cap.HRMS_APPROVE
 
     def post(self, request, pk, action):
         claim = ExpenseClaim.objects.filter(pk=pk).first()
@@ -389,8 +407,9 @@ class ExpenseDecisionView(APIView):
 class IncentiveRuleListCreateView(generics.ListCreateAPIView):
     serializer_class = IncentiveRuleSerializer
     queryset = IncentiveRule.objects.all()
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.INCENTIVE_ENGINE
+    required_capability = Cap.HRMS_INCENTIVES
     pagination_class = None
 
 
@@ -405,8 +424,9 @@ class IncentiveRuleDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     serializer_class = IncentiveRuleSerializer
     queryset = IncentiveRule.objects.all()
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.INCENTIVE_ENGINE
+    required_capability = Cap.HRMS_INCENTIVES
 
     def perform_destroy(self, instance):
         instance.is_active = False
@@ -415,8 +435,9 @@ class IncentiveRuleDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class IncentiveEarningListView(generics.ListAPIView):
     serializer_class = IncentiveEarningSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.INCENTIVE_ENGINE
+    required_capability = Cap.HRMS_VIEW
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -433,8 +454,9 @@ class IncentiveEarningListView(generics.ListAPIView):
 class IncentiveComputeView(APIView):
     """POST /api/v1/hrms/incentives/compute/ {"month": "YYYY-MM"} — admin."""
 
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.INCENTIVE_ENGINE
+    required_capability = Cap.HRMS_INCENTIVES
 
     def post(self, request):
         from apps.hrms.services.incentives import compute_all_earnings
@@ -452,8 +474,9 @@ class IncentiveComputeView(APIView):
 
 class SalaryStructureListCreateView(generics.ListCreateAPIView):
     serializer_class = SalaryStructureSerializer
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_PAYROLL
+    required_capability = Cap.HRMS_PAYROLL
     pagination_class = None
 
     def get_queryset(self):
@@ -465,8 +488,9 @@ class SalaryStructureListCreateView(generics.ListCreateAPIView):
 
 class PayslipListView(generics.ListAPIView):
     serializer_class = PayslipSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_PAYROLL
+    required_capability = Cap.HRMS_VIEW
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -486,8 +510,9 @@ class PayslipListView(generics.ListAPIView):
 class PayrollRunView(APIView):
     """POST /api/v1/hrms/payroll/run/ {"month": "YYYY-MM"} — builds draft payslips."""
 
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_PAYROLL
+    required_capability = Cap.HRMS_PAYROLL
 
     def post(self, request):
         from apps.hrms.services.payroll import run_payroll
@@ -504,8 +529,9 @@ class PayrollRunView(APIView):
 class PayslipFinalizeView(APIView):
     """POST /api/v1/hrms/payslips/{id}/finalize/"""
 
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_PAYROLL
+    required_capability = Cap.HRMS_PAYROLL
 
     def post(self, request, pk):
         slip = Payslip.objects.filter(pk=pk).first()
@@ -513,3 +539,246 @@ class PayslipFinalizeView(APIView):
             return Response({"error": "not_found"}, status=404)
         slip.finalize()
         return Response(PayslipSerializer(slip).data)
+
+
+class PayslipMarkPaidView(APIView):
+    """
+    POST /api/v1/hrms/payslips/{id}/mark-paid/
+
+    Separate from finalize deliberately: finalizing freezes the numbers,
+    marking paid records that money actually left. A slip can sit finalized for
+    days while a bank transfer clears, and conflating the two loses that.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_PAYROLL
+    required_capability = Cap.HRMS_PAYROLL
+
+    def post(self, request, pk):
+        from apps.hrms.constants import PayslipStatus
+
+        slip = Payslip.objects.filter(pk=pk).first()
+        if slip is None:
+            return Response({"error": "not_found"}, status=404)
+        if slip.status == PayslipStatus.DRAFT:
+            return Response(
+                {"error": "not_finalized",
+                 "message": "Finalize the payslip before marking it paid."},
+                status=400,
+            )
+        slip.status = PayslipStatus.PAID
+        slip.paid_at = timezone.now()
+        slip.save(update_fields=["status", "paid_at"])
+        return Response(PayslipSerializer(slip).data)
+
+
+class PayslipDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/v1/hrms/payslips/{id}/ — one slip including its `breakdown` JSON.
+
+    Scoped like the list: an employee may open their own slip, never a peer's.
+    """
+
+    serializer_class = PayslipSerializer
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_PAYROLL
+    required_capability = Cap.HRMS_VIEW
+
+    def get_queryset(self):
+        qs = Payslip.objects.select_related("employee__agent")
+        if not is_hr_manager(self.request.user):
+            employee = employee_for(self.request.user)
+            qs = qs.filter(employee=employee) if employee else qs.none()
+        return qs
+
+
+# ============================================================
+# Attendance correction
+# ============================================================
+
+class AttendanceDetailView(generics.RetrieveUpdateAPIView):
+    """
+    GET/PATCH /api/v1/hrms/attendance/{id}/
+
+    The admin correction path. AttendanceSource.ADMIN existed in constants from
+    the start but nothing could ever set it — the nightly dialer sync wrote
+    AUTO and check-in wrote MANUAL, so a wrong row could only be fixed in the
+    Django admin. Any edit here stamps source=ADMIN so a corrected row is
+    always distinguishable from a derived one, and the next sync knows to leave
+    it alone.
+    """
+
+    serializer_class = AttendanceSerializer
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_VIEW
+    capability_by_method = {"PATCH": Cap.HRMS_MANAGE, "PUT": Cap.HRMS_MANAGE}
+
+    def get_queryset(self):
+        return scope_to_visible(
+            Attendance.objects.select_related("employee__agent"), self.request.user
+        )
+
+    def perform_update(self, serializer):
+        from apps.hrms.constants import AttendanceSource
+
+        serializer.save(source=AttendanceSource.ADMIN)
+
+
+# ============================================================
+# Leave balance allocation
+# ============================================================
+
+class LeaveBalanceManageView(APIView):
+    """
+    POST /api/v1/hrms/leave-balances/
+        {"employee": 1, "leave_type": 2, "year": 2026, "allocated_days": "12.0"}
+
+    Upserts one allocation. Without this, balances only ever appeared through
+    whatever the leave service happened to create on first use, so an admin had
+    no way to grant someone their annual quota.
+
+    PATCH /api/v1/hrms/leave-balances/{id}/ adjusts an existing row.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_LEAVE
+    required_capability = Cap.HRMS_MANAGE
+
+    def post(self, request):
+        serializer = LeaveBalanceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        obj, _created = LeaveBalance.objects.update_or_create(
+            employee=data["employee"],
+            leave_type=data["leave_type"],
+            year=data["year"],
+            defaults={"allocated_days": data.get("allocated_days", 0)},
+        )
+        return Response(LeaveBalanceSerializer(obj).data, status=201)
+
+    def patch(self, request, pk):
+        obj = LeaveBalance.objects.filter(pk=pk).first()
+        if obj is None:
+            return Response({"error": "not_found"}, status=404)
+        serializer = LeaveBalanceSerializer(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, pk):
+        deleted, _ = LeaveBalance.objects.filter(pk=pk).delete()
+        return Response(status=204 if deleted else 404)
+
+
+class BulkAllocateLeaveView(APIView):
+    """
+    POST /api/v1/hrms/leave-balances/bulk-allocate/ {"year": 2026}
+
+    Grants every active employee each active leave type's annual quota for the
+    year. This is the January-1st chore; doing it employee-by-employee through
+    the single endpoint is what makes people skip it.
+
+    Idempotent: re-running tops an existing row UP to the quota but never
+    reduces one that was manually raised, and never touches used_days.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_LEAVE
+    required_capability = Cap.HRMS_MANAGE
+
+    def post(self, request):
+        year = int(request.data.get("year") or timezone.localdate().year)
+        employees = Employee.objects.filter(is_active=True)
+        types = LeaveType.objects.filter(is_active=True)
+
+        created = updated = 0
+        for employee in employees:
+            for leave_type in types:
+                obj, was_created = LeaveBalance.objects.get_or_create(
+                    employee=employee, leave_type=leave_type, year=year,
+                    defaults={"allocated_days": leave_type.annual_quota_days},
+                )
+                if was_created:
+                    created += 1
+                elif obj.allocated_days < leave_type.annual_quota_days:
+                    obj.allocated_days = leave_type.annual_quota_days
+                    obj.save(update_fields=["allocated_days"])
+                    updated += 1
+
+        return Response({
+            "year": year,
+            "employees": employees.count(),
+            "leave_types": types.count(),
+            "created": created,
+            "topped_up": updated,
+        })
+
+
+# ============================================================
+# Dashboard
+# ============================================================
+
+class HRMSDashboardView(APIView):
+    """
+    GET /api/v1/hrms/dashboard/?month=YYYY-MM
+
+    The numbers an HR lead opens the module to see. Computed in one place so
+    the web app doesn't fan out into six list calls and add them up client-side
+    (which it would otherwise have to, and would get wrong on page 2).
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_VIEW_ALL
+
+    def get(self, request):
+        from django.db.models import Count, Sum
+
+        from apps.hrms.constants import AttendanceStatus
+
+        today = timezone.localdate()
+        try:
+            month = _parse_month(request.query_params.get("month"))
+        except ValueError as exc:
+            return Response({"error": "invalid_month", "message": str(exc)}, status=400)
+
+        employees = Employee.objects.filter(is_active=True)
+        headcount = employees.count()
+
+        today_rows = Attendance.objects.filter(date=today)
+        by_status = dict(
+            today_rows.values_list("status").annotate(n=Count("id")).values_list("status", "n")
+        )
+
+        payroll = Payslip.objects.filter(period_month=month).aggregate(
+            gross=Sum("gross_earnings"),
+            net=Sum("net_pay"),
+            incentives=Sum("incentives_amount"),
+            n=Count("id"),
+        )
+
+        return Response({
+            "month": month.isoformat(),
+            "headcount": headcount,
+            "attendance_today": {
+                "present": by_status.get(AttendanceStatus.PRESENT, 0),
+                "absent": by_status.get(AttendanceStatus.ABSENT, 0),
+                "half_day": by_status.get(AttendanceStatus.HALF_DAY, 0),
+                "on_leave": by_status.get(AttendanceStatus.ON_LEAVE, 0),
+                # Nobody has a row until the nightly sync runs, so "not marked"
+                # is a real state and worth showing rather than folding into absent.
+                "not_marked": max(0, headcount - today_rows.count()),
+            },
+            "pending": {
+                "leave": LeaveRequest.objects.filter(status=ApprovalStatus.PENDING).count(),
+                "expenses": ExpenseClaim.objects.filter(status=ApprovalStatus.PENDING).count(),
+            },
+            "payroll": {
+                "payslips": payroll["n"] or 0,
+                "gross": str(payroll["gross"] or 0),
+                "net": str(payroll["net"] or 0),
+                "incentives": str(payroll["incentives"] or 0),
+            },
+            "birthdays_this_month": [],  # reserved: Agent has no DOB field yet
+        })

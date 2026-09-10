@@ -102,13 +102,28 @@ class QuotationSerializer(serializers.ModelSerializer):
     items = QuotationItemSerializer(many=True, read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
 
+    # A quotation is sent to the customer, so it has to name them properly.
+    # An invoice freezes the address into billing_address_snapshot because it
+    # is a legal record; a quotation carries no such snapshot, so these read
+    # live off the customer. The view already select_related("customer").
+    customer_gstin = serializers.CharField(source="customer.gstin", read_only=True)
+    customer_billing_address = serializers.CharField(
+        source="customer.billing_address", read_only=True
+    )
+    customer_email = serializers.CharField(source="customer.email", read_only=True)
+    customer_phone = serializers.CharField(source="customer.phone", read_only=True)
+
     class Meta:
         model = Quotation
         fields = [
             "id", "number", "customer", "customer_name", "quotation_date", "valid_until",
             "status", "notes", "items", "created_by",
+            "customer_gstin", "customer_billing_address", "customer_email", "customer_phone",
         ] + COMPUTED_DOC_FIELDS[1:]
-        read_only_fields = COMPUTED_DOC_FIELDS + ["status", "created_by"]
+        read_only_fields = COMPUTED_DOC_FIELDS + [
+            "status", "created_by",
+            "customer_gstin", "customer_billing_address", "customer_email", "customer_phone",
+        ]
 
 
 class SalesOrderSerializer(serializers.ModelSerializer):
@@ -146,7 +161,17 @@ class CustomerInvoiceSerializer(serializers.ModelSerializer):
 
 
 class PaymentSerializer(serializers.ModelSerializer):
+    # A payments ledger is unreadable without knowing which invoice and which
+    # customer each row belongs to, and the client should not have to fetch
+    # every invoice to find out.
+    invoice_number = serializers.CharField(source="invoice.number", read_only=True)
+    customer_name = serializers.CharField(source="invoice.customer.name", read_only=True)
+    recorded_by_name = serializers.CharField(source="recorded_by.name", read_only=True, default=None)
+
     class Meta:
         model = Payment
-        fields = ["id", "invoice", "amount", "paid_on", "mode", "reference", "recorded_by"]
-        read_only_fields = ["id", "recorded_by"]
+        fields = [
+            "id", "invoice", "invoice_number", "customer_name", "amount", "paid_on",
+            "mode", "reference", "recorded_by", "recorded_by_name", "created_at",
+        ]
+        read_only_fields = ["id", "recorded_by", "created_at"]

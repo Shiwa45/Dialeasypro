@@ -13,19 +13,17 @@ import logging
 
 from django.db import transaction
 from django.http import StreamingHttpResponse
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.permissions import (
-    HasFeatureAccess,
-    IsAuthenticatedAgent,
-    IsManagerOrAdmin,
-    IsTenantAdmin,
-)
+from apps.authentication.permissions import HasFeatureAccess, IsAuthenticatedAgent
+from apps.core.capabilities import Cap
 from apps.core.constants import FeatureKey
 from apps.core.pagination import StandardResultsSetPagination
+from apps.core.permissions import HasCapability
 from apps.erp.constants import InvoiceStatus, QuotationStatus
 from apps.erp.models import (
     Customer,
@@ -64,8 +62,10 @@ def _bad(message, code="invalid", http=400):
 
 class CustomerListCreateView(generics.ListCreateAPIView):
     serializer_class = CustomerSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_PRODUCTS
+    required_capability = Cap.ERP_VIEW
+    capability_by_method = {"POST": Cap.ERP_MANAGE}
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -78,14 +78,17 @@ class CustomerListCreateView(generics.ListCreateAPIView):
 class CustomerDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = CustomerSerializer
     queryset = Customer.objects.all()
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_PRODUCTS
+    required_capability = Cap.ERP_MANAGE
 
 
 class ProductListCreateView(generics.ListCreateAPIView):
     serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_PRODUCTS
+    required_capability = Cap.ERP_VIEW
+    capability_by_method = {"POST": Cap.ERP_MANAGE}
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -96,17 +99,13 @@ class ProductListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(name__icontains=search)
         return qs
 
-    def get_permissions(self):
-        if self.request.method == "POST":
-            return [IsManagerOrAdmin(), HasFeatureAccess()]
-        return [IsAuthenticatedAgent(), HasFeatureAccess()]
-
 
 class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ProductSerializer
     queryset = Product.objects.all()
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_PRODUCTS
+    required_capability = Cap.ERP_MANAGE
 
 
 # ============================================================
@@ -115,8 +114,10 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class QuotationListCreateView(generics.ListCreateAPIView):
     serializer_class = QuotationSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_QUOTATIONS
+    required_capability = Cap.ERP_VIEW
+    capability_by_method = {"POST": Cap.ERP_MANAGE}
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -147,8 +148,10 @@ class QuotationDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
 
     serializer_class = QuotationSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_QUOTATIONS
+    required_capability = Cap.ERP_VIEW
+    capability_by_method = {"PATCH": Cap.ERP_MANAGE, "PUT": Cap.ERP_MANAGE, "DELETE": Cap.ERP_MANAGE}
     http_method_names = ["get", "patch", "delete", "options"]
 
     def get_queryset(self):
@@ -187,8 +190,9 @@ class QuotationStatusView(APIView):
     for tracking the customer-facing negotiation, not gating the pipeline.
     """
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_QUOTATIONS
+    required_capability = Cap.ERP_MANAGE
 
     # From -> allowed to
     TRANSITIONS = {
@@ -217,8 +221,9 @@ class QuotationStatusView(APIView):
 class QuotationItemView(APIView):
     """POST add a line, PATCH edit one, DELETE remove one. Totals recompute on all three."""
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_QUOTATIONS
+    required_capability = Cap.ERP_MANAGE
 
     @transaction.atomic
     def post(self, request, pk):
@@ -269,8 +274,9 @@ class QuotationItemView(APIView):
 class QuotationConvertView(APIView):
     """POST /quotations/{id}/convert/ → creates a sales order."""
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_SALES_ORDERS
+    required_capability = Cap.ERP_MANAGE
 
     def post(self, request, pk):
         quotation = Quotation.objects.filter(pk=pk).prefetch_related("items").first()
@@ -289,8 +295,9 @@ class QuotationConvertView(APIView):
 
 class SalesOrderListView(generics.ListAPIView):
     serializer_class = SalesOrderSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_SALES_ORDERS
+    required_capability = Cap.ERP_VIEW
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -302,8 +309,9 @@ class SalesOrderListView(generics.ListAPIView):
 
 class SalesOrderDetailView(generics.RetrieveAPIView):
     serializer_class = SalesOrderSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_SALES_ORDERS
+    required_capability = Cap.ERP_VIEW
 
     def get_queryset(self):
         return SalesOrder.objects.select_related("customer").prefetch_related("items")
@@ -312,8 +320,9 @@ class SalesOrderDetailView(generics.RetrieveAPIView):
 class SalesOrderInvoiceView(APIView):
     """POST /orders/{id}/invoice/ → raises a DRAFT invoice."""
 
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_MANAGE
 
     def post(self, request, pk):
         order = SalesOrder.objects.filter(pk=pk).prefetch_related("items").first()
@@ -334,8 +343,9 @@ class SalesOrderInvoiceView(APIView):
 
 class InvoiceListView(generics.ListAPIView):
     serializer_class = CustomerInvoiceSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_VIEW
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
@@ -352,20 +362,54 @@ class InvoiceListView(generics.ListAPIView):
         return qs
 
 
-class InvoiceDetailView(generics.RetrieveAPIView):
+class InvoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE one invoice.
+
+    PATCH and DELETE apply to DRAFTS ONLY. An issued invoice carries a GST
+    number from a locked sequence and has been sent to a customer — deleting it
+    would leave a hole in that sequence, which is exactly what a tax audit asks
+    about. Cancel it instead (/invoices/{id}/cancel/): that keeps the number
+    and records why.
+    """
+
     serializer_class = CustomerInvoiceSerializer
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_VIEW
+    capability_by_method = {
+        "PATCH": Cap.ERP_MANAGE, "PUT": Cap.ERP_MANAGE, "DELETE": Cap.ERP_MANAGE,
+    }
 
     def get_queryset(self):
         return CustomerInvoice.objects.select_related("customer").prefetch_related("items")
+
+    def update(self, request, *args, **kwargs):
+        invoice = self.get_object()
+        if not invoice.is_editable:
+            return _bad(
+                f"An {invoice.status} invoice is a legal record and cannot be edited.",
+                "not_editable",
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        invoice = self.get_object()
+        if not invoice.is_editable:
+            return _bad(
+                f"An {invoice.status} invoice cannot be deleted — cancel it instead, "
+                f"which keeps its number in the GST sequence.",
+                "not_editable",
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class InvoiceItemView(APIView):
     """Edit lines on a DRAFT invoice only."""
 
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_MANAGE
 
     @transaction.atomic
     def post(self, request, pk):
@@ -385,6 +429,32 @@ class InvoiceItemView(APIView):
         return Response(CustomerInvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
 
     @transaction.atomic
+    def patch(self, request, pk, item_id):
+        """
+        Edit one line on a draft. Without this, fixing a typo in a quantity
+        meant deleting the line and retyping it — which is fine until the line
+        is the tenth on a long invoice and reappears at the bottom.
+        """
+        invoice = CustomerInvoice.objects.filter(pk=pk).first()
+        if invoice is None:
+            return _bad("Invoice not found.", "not_found", 404)
+        if not invoice.is_editable:
+            return _bad(
+                f"An {invoice.status} invoice is a legal record and cannot be edited.",
+                "not_editable",
+            )
+        item = CustomerInvoiceItem.objects.filter(pk=item_id, invoice=invoice).first()
+        if item is None:
+            return _bad("Line item not found on this invoice.", "not_found", 404)
+
+        serializer = CustomerInvoiceItemSerializer(item, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        doc_svc.recalculate(invoice, invoice.items.all())
+        invoice.refresh_from_db()
+        return Response(CustomerInvoiceSerializer(invoice).data)
+
+    @transaction.atomic
     def delete(self, request, pk, item_id):
         invoice = CustomerInvoice.objects.filter(pk=pk).first()
         if invoice is None:
@@ -401,8 +471,9 @@ class InvoiceItemView(APIView):
 
 
 class InvoiceIssueView(APIView):
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_INVOICE_ISSUE
 
     def post(self, request, pk):
         invoice = CustomerInvoice.objects.filter(pk=pk).prefetch_related("items").first()
@@ -417,8 +488,9 @@ class InvoiceIssueView(APIView):
 
 
 class InvoiceCancelView(APIView):
-    permission_classes = [IsTenantAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_INVOICE_CANCEL
 
     def post(self, request, pk):
         invoice = CustomerInvoice.objects.filter(pk=pk).first()
@@ -433,8 +505,9 @@ class InvoiceCancelView(APIView):
 
 
 class PaymentCreateView(APIView):
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_PAYMENTS
 
     def post(self, request, pk):
         invoice = CustomerInvoice.objects.filter(pk=pk).first()
@@ -474,8 +547,9 @@ class TallyExportView(APIView):
     Only ISSUED/PAID invoices are exported — drafts are not accounting records.
     """
 
-    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.TALLY_INTEGRATION
+    required_capability = Cap.ERP_EXPORT
 
     COLUMNS = [
         "Invoice Number", "Invoice Date", "Customer Name", "Customer GSTIN",
@@ -514,3 +588,225 @@ class TallyExportView(APIView):
         response = StreamingHttpResponse(rows(), content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="tally_invoices.csv"'
         return response
+
+
+# ============================================================
+# Payments ledger
+# ============================================================
+
+class PaymentListView(generics.ListAPIView):
+    """
+    GET /api/v1/erp/payments/
+
+    Payments could be recorded from the day the module shipped but never read
+    back anywhere — the only way to see what a customer had paid was to open
+    each of their invoices in turn and add up the differences.
+    """
+
+    serializer_class = PaymentSerializer
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_VIEW
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        qs = Payment.objects.select_related("invoice", "invoice__customer", "recorded_by")
+        p = self.request.query_params
+        if customer := p.get("customer"):
+            qs = qs.filter(invoice__customer_id=customer)
+        if invoice := p.get("invoice"):
+            qs = qs.filter(invoice_id=invoice)
+        if mode := p.get("mode"):
+            qs = qs.filter(mode=mode)
+        if date_from := p.get("date_from"):
+            qs = qs.filter(paid_on__gte=date_from)
+        if date_to := p.get("date_to"):
+            qs = qs.filter(paid_on__lte=date_to)
+        return qs
+
+
+# ============================================================
+# Dashboard & reports
+# ============================================================
+
+class ErpDashboardView(APIView):
+    """
+    GET /api/v1/erp/dashboard/?month=YYYY-MM
+
+    Revenue, outstanding, receivables ageing and top customers in one call.
+
+    Ageing buckets are counted from the DUE date where one is set, falling back
+    to the invoice date. An invoice with no due date is not overdue on the day
+    it is raised, and bucketing it from the invoice date would report it as
+    31-60 days overdue a month later while the customer is still inside
+    perfectly normal payment terms.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_VIEW
+
+    def get(self, request):
+        from datetime import datetime
+
+        from django.db.models import Count, F, Sum
+
+        raw = request.query_params.get("month")
+        today = timezone.localdate()
+        try:
+            month_start = (
+                datetime.strptime(raw, "%Y-%m").date() if raw else today
+            ).replace(day=1)
+        except ValueError:
+            return _bad("Invalid month. Use YYYY-MM.", "invalid_month")
+
+        next_month = (month_start.replace(day=28) + timezone.timedelta(days=4)).replace(day=1)
+
+        issued = CustomerInvoice.objects.exclude(status=InvoiceStatus.DRAFT).exclude(
+            status=InvoiceStatus.CANCELLED
+        )
+
+        month_invoices = issued.filter(
+            invoice_date__gte=month_start, invoice_date__lt=next_month
+        )
+        month_totals = month_invoices.aggregate(
+            revenue=Sum("total_amount"), taxable=Sum("subtotal"),
+            tax=Sum("total_tax"), n=Count("id"),
+        )
+
+        collected = Payment.objects.filter(
+            paid_on__gte=month_start, paid_on__lt=next_month
+        ).aggregate(total=Sum("amount"))["total"] or 0
+
+        # Ageing over every open invoice, not just this month's.
+        open_invoices = issued.filter(status__in=InvoiceStatus.OPEN)
+        buckets = {"current": 0, "1_30": 0, "31_60": 0, "61_90": 0, "90_plus": 0}
+        outstanding = 0
+        for inv in open_invoices.only(
+            "total_amount", "amount_paid", "due_date", "invoice_date"
+        ):
+            due = inv.amount_due
+            if due <= 0:
+                continue
+            outstanding += due
+            reference = inv.due_date or inv.invoice_date
+            overdue_days = (today - reference).days
+            if overdue_days <= 0:
+                buckets["current"] += due
+            elif overdue_days <= 30:
+                buckets["1_30"] += due
+            elif overdue_days <= 60:
+                buckets["31_60"] += due
+            elif overdue_days <= 90:
+                buckets["61_90"] += due
+            else:
+                buckets["90_plus"] += due
+
+        top_customers = list(
+            month_invoices.values("customer_id", name=F("customer__name"))
+            .annotate(total=Sum("total_amount"), invoices=Count("id"))
+            .order_by("-total")[:5]
+        )
+
+        return Response({
+            "month": month_start.isoformat(),
+            "revenue": {
+                "total": str(month_totals["revenue"] or 0),
+                "taxable": str(month_totals["taxable"] or 0),
+                "tax": str(month_totals["tax"] or 0),
+                "invoices": month_totals["n"] or 0,
+            },
+            "collected_this_month": str(collected),
+            "outstanding": str(outstanding),
+            "ageing": {k: str(v) for k, v in buckets.items()},
+            "open_invoices": open_invoices.count(),
+            "top_customers": [
+                {"id": c["customer_id"], "name": c["name"],
+                 "total": str(c["total"]), "invoices": c["invoices"]}
+                for c in top_customers
+            ],
+            "counts": {
+                "customers": Customer.objects.filter(is_active=True).count(),
+                "products": Product.objects.filter(is_active=True).count(),
+                "draft_invoices": CustomerInvoice.objects.filter(status=InvoiceStatus.DRAFT).count(),
+                "open_quotations": Quotation.objects.filter(
+                    status__in=[QuotationStatus.DRAFT, QuotationStatus.SENT]
+                ).count(),
+            },
+        })
+
+
+class GstSummaryView(APIView):
+    """
+    GET /api/v1/erp/reports/gst-summary/?month=YYYY-MM
+
+    A GSTR-1-shaped summary of the month's issued invoices: B2B (buyer has a
+    GSTIN) versus B2C, split by rate, with CGST/SGST/IGST separated.
+
+    This is a filing AID, not a return. It reports what was invoiced in the
+    system; it does not know about credit notes raised outside it, advances,
+    or reverse charge. Cross-check before filing.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.TALLY_INTEGRATION
+    required_capability = Cap.ERP_EXPORT
+
+    def get(self, request):
+        from collections import defaultdict
+        from datetime import datetime
+        from decimal import Decimal
+
+        raw = request.query_params.get("month")
+        try:
+            month_start = (
+                datetime.strptime(raw, "%Y-%m").date() if raw else timezone.localdate()
+            ).replace(day=1)
+        except ValueError:
+            return _bad("Invalid month. Use YYYY-MM.", "invalid_month")
+        next_month = (month_start.replace(day=28) + timezone.timedelta(days=4)).replace(day=1)
+
+        invoices = (
+            CustomerInvoice.objects
+            .exclude(status__in=[InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED])
+            .filter(invoice_date__gte=month_start, invoice_date__lt=next_month)
+            .select_related("customer").prefetch_related("items")
+        )
+
+        def bucket():
+            return {"taxable": Decimal("0"), "cgst": Decimal("0"),
+                    "sgst": Decimal("0"), "igst": Decimal("0"), "invoices": set()}
+
+        b2b, b2c = defaultdict(bucket), defaultdict(bucket)
+        for inv in invoices:
+            target = b2b if inv.buyer_gstin else b2c
+            for item in inv.items.all():
+                row = target[str(item.gst_rate)]
+                row["taxable"] += item.taxable_value
+                row["cgst"] += item.cgst_amount
+                row["sgst"] += item.sgst_amount
+                row["igst"] += item.igst_amount
+                row["invoices"].add(inv.id)
+
+        def render(data):
+            return [
+                {
+                    "gst_rate": rate,
+                    "taxable": str(v["taxable"]),
+                    "cgst": str(v["cgst"]), "sgst": str(v["sgst"]), "igst": str(v["igst"]),
+                    "total_tax": str(v["cgst"] + v["sgst"] + v["igst"]),
+                    "invoices": len(v["invoices"]),
+                }
+                for rate, v in sorted(data.items(), key=lambda kv: float(kv[0]))
+            ]
+
+        return Response({
+            "month": month_start.isoformat(),
+            "b2b": render(b2b),
+            "b2c": render(b2c),
+            "invoice_count": invoices.count(),
+            "note": (
+                "Filing aid only. Credit notes raised outside this system, advances "
+                "and reverse-charge supplies are not included — reconcile before filing."
+            ),
+        })

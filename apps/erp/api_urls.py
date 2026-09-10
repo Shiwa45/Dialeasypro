@@ -6,6 +6,8 @@ from django.urls import path
 
 from apps.erp.views import (
     CustomerDetailView,
+    ErpDashboardView,
+    GstSummaryView,
     CustomerListCreateView,
     InvoiceCancelView,
     InvoiceDetailView,
@@ -13,6 +15,7 @@ from apps.erp.views import (
     InvoiceItemView,
     InvoiceListView,
     PaymentCreateView,
+    PaymentListView,
     ProductDetailView,
     ProductListCreateView,
     QuotationConvertView,
@@ -27,6 +30,9 @@ from apps.erp.views import (
 )
 
 urlpatterns = [
+    # Dashboard
+    path("dashboard/", ErpDashboardView.as_view(), name="api_erp_dashboard"),
+
     # Masters
     path("customers/", CustomerListCreateView.as_view(), name="api_erp_customers"),
     path("customers/<int:pk>/", CustomerDetailView.as_view(), name="api_erp_customer_detail"),
@@ -55,6 +61,10 @@ urlpatterns = [
     path("invoices/<int:pk>/cancel/", InvoiceCancelView.as_view(), name="api_erp_invoice_cancel"),
     path("invoices/<int:pk>/payments/", PaymentCreateView.as_view(), name="api_erp_invoice_payment"),
 
-    # Accounting export
+    # Payments ledger
+    path("payments/", PaymentListView.as_view(), name="api_erp_payments"),
+
+    # Accounting export & reports
     path("export/tally/", TallyExportView.as_view(), name="api_erp_tally_export"),
+    path("reports/gst-summary/", GstSummaryView.as_view(), name="api_erp_gst_summary"),
 ]

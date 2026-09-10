@@ -161,6 +161,17 @@ class PayslipSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source="employee.agent.name", read_only=True)
     employee_code = serializers.CharField(source="employee.employee_code", read_only=True)
 
+    # A payslip is a document an employee keeps and hands to a bank or a
+    # landlord. Designation, department, joining date and PAN are what makes
+    # it one; without them the UI could only print a name and a number.
+    designation = serializers.CharField(source="employee.designation", read_only=True)
+    department = serializers.CharField(source="employee.department", read_only=True)
+    date_of_joining = serializers.DateField(source="employee.date_of_joining", read_only=True)
+    pan = serializers.CharField(source="employee.pan", read_only=True)
+    uan = serializers.CharField(source="employee.uan", read_only=True)
+    bank_account_masked = serializers.SerializerMethodField()
+    bank_ifsc = serializers.CharField(source="employee.bank_ifsc", read_only=True)
+
     class Meta:
         model = Payslip
         fields = [
@@ -168,5 +179,16 @@ class PayslipSerializer(serializers.ModelSerializer):
             "payable_days", "total_days", "gross_earnings", "incentives_amount",
             "reimbursements_amount", "total_deductions", "net_pay", "breakdown",
             "status", "finalized_at", "paid_at",
+            "designation", "department", "date_of_joining", "pan", "uan",
+            "bank_account_masked", "bank_ifsc",
         ]
         read_only_fields = fields
+
+    def get_bank_account_masked(self, obj) -> str:
+        """Last four digits only. Payroll staff read this list too, and the
+        full account number is not needed to recognise which account was
+        paid."""
+        number = (obj.employee.bank_account_number or "").strip()
+        if not number:
+            return ""
+        return "XXXX" + number[-4:] if len(number) > 4 else number

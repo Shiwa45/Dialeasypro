@@ -102,6 +102,12 @@ class FeatureKey:
     ERP_CUSTOMER_INVOICING = "erp_customer_invoicing"
     TALLY_INTEGRATION = "tally_integration"
 
+    # ---- Recruitment / ATS (add-on module) -----------------
+    ATS_JOB_OPENINGS = "ats_job_openings"
+    ATS_CANDIDATES = "ats_candidates"
+    ATS_INTERVIEWS = "ats_interviews"
+    ATS_OFFERS = "ats_offers"
+
     # All feature keys as a list (for validation)
     ALL = [
         INDIAMART, META_LEAD_ADS, NINETYNINEACRES, HOUSING_COM, MAGICBRICKS,
@@ -121,6 +127,7 @@ class FeatureKey:
         HRMS_ATTENDANCE, HRMS_LEAVE, HRMS_PAYROLL, HRMS_EXPENSES, INCENTIVE_ENGINE,
         ERP_PRODUCTS, ERP_QUOTATIONS, ERP_SALES_ORDERS, ERP_CUSTOMER_INVOICING,
         TALLY_INTEGRATION,
+        ATS_JOB_OPENINGS, ATS_CANDIDATES, ATS_INTERVIEWS, ATS_OFFERS,
     ]
 
     # Human-readable labels
@@ -184,6 +191,10 @@ class FeatureKey:
         ERP_SALES_ORDERS: "ERP — Sales Orders",
         ERP_CUSTOMER_INVOICING: "ERP — GST Customer Invoicing",
         TALLY_INTEGRATION: "Tally / Zoho Books Integration",
+        ATS_JOB_OPENINGS: "Recruitment — Job Openings",
+        ATS_CANDIDATES: "Recruitment — Candidate Database",
+        ATS_INTERVIEWS: "Recruitment — Interview Scheduling & Scorecards",
+        ATS_OFFERS: "Recruitment — Offers & Onboarding Handover",
     }
 
     # Feature choices for Django model field
@@ -204,14 +215,16 @@ class ModuleKey:
     AI_SUITE = "ai_suite"
     HRMS = "hrms"
     ERP_SALES = "erp_sales"
+    RECRUITMENT = "recruitment"
 
     CHOICES = [
         (AI_SUITE, "AI Suite"),
         (HRMS, "HRMS"),
         (ERP_SALES, "ERP — Sales Ops"),
+        (RECRUITMENT, "Recruitment (ATS)"),
     ]
 
-    ALL = [AI_SUITE, HRMS, ERP_SALES]
+    ALL = [AI_SUITE, HRMS, ERP_SALES, RECRUITMENT]
 
     # module → the feature keys it unlocks
     FEATURES = {
@@ -232,6 +245,12 @@ class ModuleKey:
             FeatureKey.ERP_SALES_ORDERS,
             FeatureKey.ERP_CUSTOMER_INVOICING,
             FeatureKey.TALLY_INTEGRATION,
+        ],
+        RECRUITMENT: [
+            FeatureKey.ATS_JOB_OPENINGS,
+            FeatureKey.ATS_CANDIDATES,
+            FeatureKey.ATS_INTERVIEWS,
+            FeatureKey.ATS_OFFERS,
         ],
     }
 
@@ -326,6 +345,8 @@ class Industry:
 class AgentRole:
     ADMIN = "admin"          # Full tenant access (same as tenant admin)
     MANAGER = "manager"      # Manage team, view team reports
+    HR = "hr"                # HRMS + Recruitment owner; NOT a CRM admin
+    ACCOUNTS = "accounts"    # Sales & Billing owner; NOT a CRM admin
     SENIOR_AGENT = "senior_agent"  # Own leads + junior agents' leads
     AGENT = "agent"          # Own leads only
     READONLY = "readonly"    # View only access
@@ -333,6 +354,8 @@ class AgentRole:
     CHOICES = [
         (ADMIN, "Tenant Admin"),
         (MANAGER, "Manager"),
+        (HR, "HR"),
+        (ACCOUNTS, "Accounts"),
         (SENIOR_AGENT, "Senior Agent"),
         (AGENT, "Agent"),
         (READONLY, "Read Only"),
@@ -344,11 +367,21 @@ class AgentRole:
     # Roles that can access all leads in their team
     TEAM_ACCESS_ROLES = [ADMIN, MANAGER, SENIOR_AGENT]
 
-    # Role hierarchy for permission checks (higher number = more access)
+    # Back-office roles. They own a business module end-to-end but deliberately
+    # sit OUTSIDE the CRM hierarchy: an HR user must be able to run payroll
+    # without also being handed every lead and every agent password. Module
+    # access for these is decided by apps/core/capabilities.py, not by
+    # HIERARCHY — see the module docstring there.
+    BACK_OFFICE_ROLES = [HR, ACCOUNTS]
+
+    # Role hierarchy for permission checks (higher number = more access).
+    # HR/Accounts rank alongside a senior agent for *CRM* purposes only.
     HIERARCHY = {
         READONLY: 1,
         AGENT: 2,
         SENIOR_AGENT: 3,
+        HR: 3,
+        ACCOUNTS: 3,
         MANAGER: 4,
         ADMIN: 5,
     }

@@ -137,6 +137,34 @@ def create_quotation(*, customer, created_by=None, **fields) -> Quotation:
     )
 
 
+def create_invoice(*, customer, created_by=None, **fields) -> CustomerInvoice:
+    """
+    Open a DRAFT invoice with no sales order behind it.
+
+    Not every sale walks the quotation → order → invoice path: an over-the-
+    counter sale, a one-off service charge or a correction invoice starts here.
+    Until this existed, an invoice could ONLY be born from an order, so those
+    cases had to be faked by raising a throwaway quotation and converting it
+    twice — which left two bogus documents in the numbering sequence.
+
+    GSTIN and the billing address are snapshotted the same way order_to_invoice
+    does it, so a reissued PDF still matches what the customer received even if
+    the customer master is edited later.
+    """
+    seller_state, seller_gstin = seller_state_for_tenant()
+    return CustomerInvoice.objects.create(
+        number=next_number(DocumentType.INVOICE),
+        customer=customer,
+        created_by=created_by,
+        seller_state=seller_state,
+        buyer_state=(customer.state_code or "").upper(),
+        seller_gstin=seller_gstin,
+        buyer_gstin=customer.gstin,
+        billing_address_snapshot=customer.billing_address,
+        **fields,
+    )
+
+
 # ============================================================
 # Conversions
 # ============================================================

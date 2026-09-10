@@ -171,7 +171,7 @@ class _BrutalButtonState extends State<BrutalButton> {
         decoration: BoxDecoration(
           color: widget.gradient == null ? (disabled ? AppColors.greyLight : bg) : null,
           gradient: widget.gradient,
-          border: Border.all(color: AppColors.black, width: 2),
+          border: Border.all(color: AppColors.black, width: 1),
           boxShadow: disabled ? [] : [BoxShadow(
             color: AppColors.black,
             offset: Offset(
@@ -204,7 +204,7 @@ class _BrutalButtonState extends State<BrutalButton> {
                     child: Text(
                       widget.label,
                       style: TextStyle(
-                        fontFamily: 'SpaceGrotesk',
+                        fontFamily: 'Archivo',
                         fontWeight: FontWeight.w700,
                         fontSize: widget.fontSize ?? 14,
                         color: disabled ? AppColors.grey : fg,
@@ -316,10 +316,10 @@ class _BrutalTextFieldState extends State<BrutalTextField> {
             focusNode: _node,
             autofocus: widget.autofocus,
             validator: widget.validator,
-            style: const TextStyle(fontFamily: 'DMSans', fontSize: 14, color: AppColors.black),
+            style: const TextStyle(fontFamily: 'Archivo', fontSize: 14, color: AppColors.black),
             decoration: InputDecoration(
               hintText: widget.hint,
-              hintStyle: const TextStyle(fontFamily: 'DMSans', color: AppColors.grey, fontSize: 14),
+              hintStyle: const TextStyle(fontFamily: 'Archivo', color: AppColors.grey, fontSize: 14),
               suffixIcon: widget.suffix,
               prefixIcon: widget.prefix ?? (widget.prefixIcon != null
                   ? Icon(widget.prefixIcon, size: 18, color: AppColors.grey)
@@ -338,7 +338,7 @@ class _BrutalTextFieldState extends State<BrutalTextField> {
           Row(children: [
             const Icon(Icons.error_outline, size: 12, color: AppColors.error),
             const SizedBox(width: 4),
-            Text(widget.errorText!, style: const TextStyle(fontFamily: 'DMSans', fontSize: 11, color: AppColors.error)),
+            Text(widget.errorText!, style: const TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.error)),
           ]),
         ],
       ],
@@ -366,7 +366,7 @@ class StatusBadge extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
-          fontFamily: 'SpaceGrotesk',
+          fontFamily: 'Archivo',
           fontWeight: FontWeight.w700,
           fontSize: large ? 11 : 9.5,
           letterSpacing: 0.5,
@@ -390,7 +390,7 @@ class PriorityBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
       decoration: BoxDecoration(
         color: color,
-        border: Border.all(color: AppColors.black, width: 1.5),
+        border: Border.all(color: AppColors.black, width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -402,7 +402,7 @@ class PriorityBadge extends StatelessWidget {
           Text(
             priority.toUpperCase(),
             style: TextStyle(
-              fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 9.5,
+              fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9.5,
               letterSpacing: 0.4, color: isLight ? AppColors.black : AppColors.white,
             ),
           ),
@@ -427,7 +427,7 @@ class ScoreBar extends StatelessWidget {
         width: 56, height: 8,
         decoration: BoxDecoration(
           color: AppColors.greyLight,
-          border: Border.all(color: AppColors.black, width: 1.5),
+          border: Border.all(color: AppColors.black, width: 1),
         ),
         child: FractionallySizedBox(
           alignment: Alignment.centerLeft,
@@ -438,7 +438,7 @@ class ScoreBar extends StatelessWidget {
       if (showLabel) ...[
         const SizedBox(width: 4),
         Text('$score', style: const TextStyle(
-          fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.greyDark,
+          fontFamily: 'IBMPlexMono', fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.greyDark,
         )),
       ],
     ]);
@@ -464,7 +464,7 @@ class TagChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: backgroundColor ?? AppColors.yellow,
-        border: Border.all(color: AppColors.black, width: 1.5),
+        border: Border.all(color: AppColors.black, width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -476,7 +476,7 @@ class TagChip extends StatelessWidget {
           Text(
             label.toUpperCase(),
             style: TextStyle(
-              fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 9,
+              fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9,
               letterSpacing: 0.4, color: textColor ?? AppColors.black,
             ),
           ),
@@ -561,16 +561,16 @@ class CompactKpi extends StatelessWidget {
         // color.withOpacity(0.12) is translucent and lets a dark surface behind
         // it bleed through, making the card look black and hiding the text.
         color: Color.alphaBlend(color.withOpacity(0.12), AppColors.white),
-        border: Border.all(color: color, width: 2),
-        boxShadow: const [BoxShadow(color: AppColors.black, offset: Offset(3, 3))],
+        border: Border.all(color: color, width: 1),
+        boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(height: 6),
-          Text(value, style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.black)),
-          Text(label, style: const TextStyle(fontFamily: 'DMSans', fontSize: 10, color: AppColors.grey)),
+          Text(value, style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.black)),
+          Text(label, style: const TextStyle(fontFamily: 'Archivo', fontSize: 10, color: AppColors.grey)),
         ],
       ),
     );
@@ -642,8 +642,8 @@ class EmptyStateView extends StatelessWidget {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: (iconColor ?? AppColors.yellow).withOpacity(0.18),
-                border: Border.all(color: iconColor ?? AppColors.black, width: 2),
-                boxShadow: const [BoxShadow(color: AppColors.black, offset: Offset(4, 4))],
+                border: Border.all(color: iconColor ?? AppColors.line, width: 1),
+                boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
               ),
               child: Icon(icon, size: 40, color: iconColor ?? AppColors.dark),
             ).animate().scale(begin: const Offset(0.7, 0.7), duration: 400.ms, curve: Curves.easeOutBack),
@@ -677,8 +677,8 @@ class ShimmerCard extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: AppColors.greyLight,
-        border: Border.all(color: AppColors.black, width: 2),
-        boxShadow: const [BoxShadow(color: AppColors.black, offset: Offset(4, 4))],
+        border: Border.all(color: AppColors.black, width: 1),
+        boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
       ),
     ).animate(onPlay: (c) => c.repeat(reverse: true)).fade(begin: 1, end: 0.6, duration: 800.ms);
   }
@@ -713,7 +713,7 @@ class AppToast {
       content: Row(children: [
         Icon(icon, color: color, size: 18),
         const SizedBox(width: 10),
-        Expanded(child: Text(message, style: const TextStyle(fontFamily: 'DMSans', color: AppColors.white, fontSize: 13))),
+        Expanded(child: Text(message, style: const TextStyle(fontFamily: 'Archivo', color: AppColors.white, fontSize: 13))),
       ]),
       backgroundColor: AppColors.dark,
       behavior: SnackBarBehavior.floating,
@@ -721,7 +721,7 @@ class AppToast {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.zero,
-        side: BorderSide(color: AppColors.black, width: 2),
+        side: BorderSide(color: AppColors.black, width: 1),
       ),
       duration: const Duration(seconds: 3),
     ));
@@ -740,7 +740,7 @@ Future<T?> showBrutalBottomSheet<T>({
   backgroundColor: backgroundColor ?? AppColors.white,
   shape: const RoundedRectangleBorder(
     borderRadius: BorderRadius.zero,
-    side: BorderSide(color: AppColors.black, width: 2),
+    side: BorderSide(color: AppColors.black, width: 1),
   ),
   builder: (ctx) => Padding(
     padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -761,7 +761,7 @@ Future<bool?> showBrutalConfirm({
     insetPadding: const EdgeInsets.all(20),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.zero,
-      side: BorderSide(color: AppColors.black, width: 2),
+      side: BorderSide(color: AppColors.black, width: 1),
     ),
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -771,11 +771,11 @@ Future<bool?> showBrutalConfirm({
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: danger ? AppColors.error : AppColors.dark,
-            border: const Border(bottom: BorderSide(color: AppColors.black, width: 2)),
+            border: const Border(bottom: BorderSide(color: AppColors.black, width: 1)),
           ),
           child: Text(
             title,
-            style: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.white),
+            style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.white),
           ),
         ),
         Padding(
@@ -818,7 +818,7 @@ class SectionHeader extends StatelessWidget {
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               color: AppColors.yellow,
-              border: Border.all(color: AppColors.black, width: 1.5),
+              border: Border.all(color: AppColors.black, width: 1),
             ),
             child: Icon(icon, size: 14, color: AppColors.black),
           ),
@@ -870,14 +870,14 @@ class BrutalAvatar extends StatelessWidget {
       width: size, height: size,
       decoration: BoxDecoration(
         color: _generatedColor,
-        border: Border.all(color: AppColors.black, width: 2),
-        boxShadow: const [BoxShadow(color: AppColors.black, offset: Offset(2, 2))],
+        border: Border.all(color: AppColors.black, width: 1),
+        boxShadow: const [BoxShadow(color: Color(0x14111A16), offset: Offset(0, 2), blurRadius: 8, spreadRadius: -4)],
       ),
       child: Center(
         child: Text(
           initials,
           style: TextStyle(
-            fontFamily: 'SpaceGrotesk',
+            fontFamily: 'Archivo',
             fontWeight: FontWeight.w700,
             fontSize: size * 0.36,
             color: AppColors.black,
@@ -928,14 +928,14 @@ class _ActionButtonState extends State<ActionButton> {
           transform: Matrix4.translationValues(_pressed ? 2 : 0, _pressed ? 2 : 0, 0),
           decoration: BoxDecoration(
             color: widget.color,
-            border: Border.all(color: AppColors.black, width: 2),
+            border: Border.all(color: AppColors.black, width: 1),
             boxShadow: [BoxShadow(color: AppColors.black, offset: Offset(_pressed ? 1 : 4, _pressed ? 1 : 4))],
           ),
           child: Icon(widget.icon, size: widget.size * 0.4, color: widget.iconColor),
         ),
       ),
       const SizedBox(height: 6),
-      Text(widget.label, style: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.dark)),
+      Text(widget.label, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.dark)),
     ]);
   }
 }

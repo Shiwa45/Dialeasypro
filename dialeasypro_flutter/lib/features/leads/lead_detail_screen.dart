@@ -76,7 +76,7 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> with Single
           Row(children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: AppColors.successBg, border: Border.all(color: AppColors.success, width: 1.5)),
+              decoration: BoxDecoration(color: AppColors.successBg, border: Border.all(color: AppColors.success, width: 1)),
               child: const Icon(Icons.chat_bubble, color: AppColors.success, size: 20),
             ),
             const SizedBox(width: 10),
@@ -153,7 +153,7 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> with Single
               IconButton(icon: const Icon(Icons.edit_outlined, color: AppColors.black), onPressed: () => context.push('/leads/${lead.id}/edit')),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, color: AppColors.black),
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: AppColors.black, width: 2)),
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: AppColors.black, width: 1)),
                 onSelected: (v) {
                   if (v == 'copy') {
                     Clipboard.setData(ClipboardData(text: lead.phone));
@@ -227,7 +227,7 @@ class _Header extends StatelessWidget {
                   border: Border.all(color: AppColors.black, width: active ? 2 : 1.5),
                 ),
                 child: Text(e.value,
-                    style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 10, color: active ? AppColors.white : AppColors.dark)),
+                    style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: active ? AppColors.white : AppColors.dark)),
               ),
             );
           }).toList()),
@@ -312,7 +312,7 @@ class _NotesTab extends ConsumerWidget {
     return Column(children: [
       Container(
         padding: const EdgeInsets.all(12),
-        decoration: const BoxDecoration(color: AppColors.white, border: Border(bottom: BorderSide(color: AppColors.black, width: 2))),
+        decoration: const BoxDecoration(color: AppColors.white, border: Border(bottom: BorderSide(color: AppColors.black, width: 1))),
         child: Row(children: [
           Expanded(child: BrutalTextField(controller: noteCtrl, hint: 'Add a note…', maxLines: 3, minLines: 1)),
           const SizedBox(width: 10),
@@ -360,7 +360,7 @@ class _FollowupsTab extends ConsumerWidget {
     return Column(children: [
       Container(
         padding: const EdgeInsets.all(12),
-        decoration: const BoxDecoration(color: AppColors.white, border: Border(bottom: BorderSide(color: AppColors.black, width: 2))),
+        decoration: const BoxDecoration(color: AppColors.white, border: Border(bottom: BorderSide(color: AppColors.black, width: 1))),
         child: BrutalButton.primary(label: '+ SCHEDULE FOLLOW-UP', iconData: Icons.event, onPressed: () => _showFollowupSheet(context, ref, leadId)),
       ),
       Expanded(child: async.when(
@@ -426,7 +426,7 @@ class _FollowupsTab extends ConsumerWidget {
                 color: sel ? AppColors.black : AppColors.white,
                 border: Border.all(color: AppColors.black, width: sel ? 2 : 1.5),
               ),
-              child: Text(t.toUpperCase(), style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 10, color: sel ? AppColors.white : AppColors.black)),
+              child: Text(t.toUpperCase(), style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: sel ? AppColors.white : AppColors.black)),
             ),
           );
         }).toList()),
@@ -486,7 +486,7 @@ class _CallsTab extends ConsumerWidget {
               return Padding(padding: const EdgeInsets.only(bottom: 10), child: BrutalCard(padding: const EdgeInsets.all(14), child: Row(children: [
                 Container(width: 38, height: 38, decoration: BoxDecoration(
                   color: c.isConnected ? AppColors.successBg : AppColors.greyLight,
-                  border: Border.all(color: AppColors.black, width: 1.5),
+                  border: Border.all(color: AppColors.black, width: 1),
                 ), child: Icon(c.direction == 'outbound' ? Icons.call_made : Icons.call_received,
                     size: 16, color: c.isConnected ? AppColors.success : AppColors.grey)),
                 const SizedBox(width: 12),
@@ -504,7 +504,7 @@ class _CallsTab extends ConsumerWidget {
                   if (c.recordingUrl != null) Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [
                     const Icon(Icons.mic, size: 12, color: AppColors.purple),
                     const SizedBox(width: 3),
-                    const Text('Recording', style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.purple)),
+                    const Text('Recording', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.purple)),
                   ])),
                 ])),
               ])).animate().fadeIn(delay: Duration(milliseconds: i * 50)));
@@ -525,8 +525,8 @@ class _ActionBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: const BoxDecoration(
         color: AppColors.white,
-        border: Border(top: BorderSide(color: AppColors.black, width: 2)),
-        boxShadow: [BoxShadow(color: AppColors.black, offset: Offset(0, -3))],
+        border: Border(top: BorderSide(color: AppColors.black, width: 1)),
+        boxShadow: [BoxShadow(color: Color(0x14111A16), offset: Offset(0, -2), blurRadius: 10, spreadRadius: -2)],
       ),
       child: SafeArea(
         child: Row(children: [

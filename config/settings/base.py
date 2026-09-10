@@ -81,6 +81,7 @@ TENANT_APPS = [
     "apps.reports",         # Phase 3 — no DB tables, but needs Django app registration
     "apps.hrms",            # Add-on module (ModuleKey.HRMS)
     "apps.erp",             # Add-on module (ModuleKey.ERP_SALES)
+    "apps.recruitment",     # Add-on module (ModuleKey.RECRUITMENT)
     "apps.ai",              # Add-on module (ModuleKey.AI_SUITE)
 ]
 

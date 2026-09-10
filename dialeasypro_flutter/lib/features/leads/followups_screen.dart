@@ -84,12 +84,12 @@ class _FollowupsScreenState extends ConsumerState<FollowupsScreen>
                     labelColor: AppColors.black,
                     unselectedLabelColor: AppColors.grey,
                     labelStyle: const TextStyle(
-                      fontFamily: 'SpaceGrotesk',
+                      fontFamily: 'Archivo',
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
                     ),
                     unselectedLabelStyle: const TextStyle(
-                      fontFamily: 'DMSans',
+                      fontFamily: 'Archivo',
                       fontSize: 12,
                     ),
                     indicatorColor: AppColors.yellow,
@@ -269,7 +269,7 @@ class _FollowupLeadTile extends StatelessWidget {
                                 ? 'Overdue · ${Fmt.relative(lead.nextFollowupAt)}'
                                 : 'Due ${Fmt.relative(lead.nextFollowupAt)}',
                             style: TextStyle(
-                              fontFamily: 'DMSans',
+                              fontFamily: 'Archivo',
                               fontSize: 11,
                               color: isOverdue
                                   ? AppColors.error
@@ -321,7 +321,7 @@ class _EmptyFollowups extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.1),
-              border: Border.all(color: color, width: 2),
+              border: Border.all(color: color, width: 1),
             ),
             child: Icon(icon, color: color, size: 48),
           ),

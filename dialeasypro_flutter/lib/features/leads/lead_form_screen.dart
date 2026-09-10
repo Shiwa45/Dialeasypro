@@ -139,7 +139,7 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
                           border: Border.all(color: AppColors.black, width: sel ? 2 : 1.5),
                         ),
                         child: Text(m.value, textAlign: TextAlign.center,
-                            style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 11, color: sel && k == 'hot' ? AppColors.white : AppColors.black)),
+                            style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 11, color: sel && k == 'hot' ? AppColors.white : AppColors.black)),
                       ),
                     ));
                   }).toList()),
@@ -177,11 +177,11 @@ class _Section extends StatelessWidget {
     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: const BoxDecoration(color: AppColors.dark, border: Border(bottom: BorderSide(color: AppColors.black, width: 2))),
+        decoration: const BoxDecoration(color: AppColors.dark, border: Border(bottom: BorderSide(color: AppColors.black, width: 1))),
         child: Row(children: [
           Icon(icon, size: 16, color: AppColors.yellow),
           const SizedBox(width: 8),
-          Text(title, style: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow)),
+          Text(title, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow)),
         ]),
       ),
       Padding(padding: const EdgeInsets.all(14), child: Column(children: children)),
@@ -202,15 +202,15 @@ class _SelectField extends StatelessWidget {
     Container(
       decoration: BoxDecoration(
         color: AppColors.white,
-        border: Border.all(color: AppColors.black, width: 2),
-        boxShadow: const [BoxShadow(color: AppColors.black, offset: Offset(3, 3))],
+        border: Border.all(color: AppColors.black, width: 1),
+        boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
       ),
       padding: const EdgeInsets.symmetric(horizontal: 14),
       child: DropdownButtonHideUnderline(child: DropdownButton<String>(
         value: value, isExpanded: true,
-        items: options.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, style: const TextStyle(fontFamily: 'DMSans', fontSize: 14)))).toList(),
+        items: options.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, style: const TextStyle(fontFamily: 'Archivo', fontSize: 14)))).toList(),
         onChanged: (v) { if (v != null) onChange(v); },
-        style: const TextStyle(fontFamily: 'DMSans', fontSize: 14, color: AppColors.black),
+        style: const TextStyle(fontFamily: 'Archivo', fontSize: 14, color: AppColors.black),
         icon: const Icon(Icons.arrow_drop_down, color: AppColors.black),
       )),
     ),

@@ -68,6 +68,29 @@ Per-Tenant Schema (one PostgreSQL schema per client)
   - **Meta Click-to-WhatsApp** turns an inbound WhatsApp conversation started from a Meta ad into a lead with its ad attribution — no Lead Form involved. Setup: [META_WHATSAPP_SETUP.md](META_WHATSAPP_SETUP.md) · [client guide](META_WHATSAPP_CLIENT_GUIDE.md) · [troubleshooting](META_WHATSAPP_TROUBLESHOOTING.md)
 - `apps/reports` — Agent performance, lead source breakdown, call analytics, conversion funnel, daily activity ticker — all Redis-cached
 
+### Phase 4 — Back-office suite (sellable add-on modules)
+- `apps/hrms` — Employee, Attendance (derived nightly from dialer sessions, with manual check-in and admin correction), Leave (types, balances, requests, bulk annual allocation), Expense claims with receipts, the Incentive engine (the CRM → payroll bridge), Salary structures and Payroll runs producing draft → finalized → paid payslips
+- `apps/erp` — Customers, Products, Quotation → Sales order → Invoice with server-side GST from HSN/SAC and place of supply, locked document numbering, payments ledger, receivables ageing, Tally/Zoho export and a GSTR-1-shaped GST summary
+- `apps/recruitment` — Full ATS: JobOpening, configurable PipelineStage, Candidate database with duplicate detection, Application with an append-only activity trail, Interview scheduling with per-interviewer scorecards, and Offers that **convert into an HRMS Employee** — the bridge that makes this one company suite rather than three products sharing a login
+
+### Access model — roles and capabilities
+Two independent gates guard every module endpoint, and both must pass:
+
+| Gate | Question | Failure |
+|---|---|---|
+| `HasFeatureAccess` | Did this tenant buy the module? | `402` + upsell payload |
+| `HasCapability` | May this user perform the action? | `403` |
+
+Capabilities live in one declarative table (`apps/core/capabilities.py`) and are served to the
+web app at `GET /api/v1/auth/capabilities/`, so a hidden button and a refused request always
+have the same cause. Two back-office roles sit deliberately **outside** the CRM hierarchy:
+
+- **`hr`** — runs HRMS and Recruitment end-to-end, including payroll, without CRM admin rights (no tenant settings, no agent passwords, no lead data)
+- **`accounts`** — runs Sales & Billing including issuing and cancelling invoices, without CRM admin rights
+
+A manager approves leave and expenses but can never read a colleague's salary; a senior agent
+files interview scorecards without seeing salary bands or offers.
+
 ---
 
 ## Quick Start
@@ -169,6 +192,38 @@ Access at: `http://acme-realty.localhost:8000/crm/`
 /api/v1/reports/agent-performance/   → Agent stats
 /api/v1/reports/lead-sources/        → Source breakdown
 /api/v1/reports/conversion-funnel/   → Pipeline funnel
+
+/api/v1/auth/features/          → Plan features + modules + role capabilities
+/api/v1/auth/capabilities/      → Role capability map only
+
+/api/v1/hrms/dashboard/         → Headcount, attendance today, pending approvals, payroll cost
+/api/v1/hrms/employees/         → Employee roster (exit is a soft delete)
+/api/v1/hrms/attendance/        → Attendance; PATCH {id}/ is the admin correction path
+/api/v1/hrms/attendance/sync/   → Rebuild a day from dialer session logs
+/api/v1/hrms/leave/             → Apply / approve / reject / cancel
+/api/v1/hrms/leave-balances/bulk-allocate/  → Grant everyone their annual quota
+/api/v1/hrms/expenses/          → Submit (multipart, with receipt) / approve / reject
+/api/v1/hrms/incentives/compute/  → Recompute a month's earnings from CRM outcomes
+/api/v1/hrms/payroll/run/       → Generate draft payslips  {"month": "YYYY-MM"}
+/api/v1/hrms/payslips/{id}/finalize/   → Freeze the numbers
+/api/v1/hrms/payslips/{id}/mark-paid/  → Record that money left
+
+/api/v1/erp/dashboard/          → Revenue, outstanding, receivables ageing, top customers
+/api/v1/erp/invoices/           → List, or POST to raise a standalone invoice
+/api/v1/erp/invoices/{id}/issue/    → Assign the GST number (Accounts/Admin only)
+/api/v1/erp/invoices/{id}/cancel/   → Cancel, keeping the number in the sequence
+/api/v1/erp/payments/           → Payments ledger
+/api/v1/erp/export/tally/       → Tally / Zoho Books CSV
+/api/v1/erp/reports/gst-summary/    → B2B / B2C by rate (a filing aid, not a return)
+
+/api/v1/recruitment/dashboard/  → Pipeline health, time-to-hire
+/api/v1/recruitment/openings/   → Job openings + publish/hold/close
+/api/v1/recruitment/stages/     → Configurable pipeline stages (+ reorder)
+/api/v1/recruitment/candidates/ → Candidate database (+ duplicate check)
+/api/v1/recruitment/applications/   → Pipeline; move, bulk-move, activity trail
+/api/v1/recruitment/interviews/     → Scheduling + per-interviewer scorecards
+/api/v1/recruitment/offers/{id}/convert-to-employee/  → ATS → HRMS handover
+
 /ws/agent-monitor/              → WebSocket: live agent monitoring
 /ws/notifications/{token}/      → WebSocket: agent push notifications
 ```

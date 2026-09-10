@@ -7,6 +7,7 @@ import 'core/services/phone_service.dart';
 import 'core/services/setup_service.dart';
 import 'core/services/recording_service.dart';
 import 'core/services/tenant_config.dart';
+import 'core/services/notification_service.dart';
 import 'app.dart';
 
 void main() async {
@@ -37,6 +38,16 @@ void main() async {
 
   // First-run flag, read before the router builds its first route.
   await SetupService.instance.preload();
+
+  // Notifications. Sets up the Android channel and asks for the post-
+  // notifications permission Android 13+ requires before anything can be
+  // shown. Reminders themselves are armed after login, once there is a token
+  // to fetch follow-ups with.
+  try {
+    await NotificationService.instance.init();
+  } catch (_) {
+    // A phone that refuses notifications must still get an app.
+  }
 
   // Cloudinary — load saved config (if user has set it in Profile)
   try {

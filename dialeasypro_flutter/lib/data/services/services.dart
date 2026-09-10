@@ -191,3 +191,59 @@ class QueueService {
     });
   }
 }
+
+// ─── NOTIFICATIONS ──────────────────────────────────────────
+/// The agent's own notifications, and the follow-ups a reminder is built from.
+///
+/// Everything here is scoped server-side to the caller — there is no agent
+/// parameter to pass, and none that would be honoured.
+class NotificationsService {
+  NotificationsService._();
+  static final instance = NotificationsService._();
+
+  Future<List<AppNotification>> list({bool unreadOnly = false, int pageSize = 30}) async {
+    final r = await _dio.get('/auth/notifications/', queryParameters: {
+      if (unreadOnly) 'unread': 'true',
+      'page_size': pageSize,
+    });
+    final results = (r.data['results'] as List?) ?? const [];
+    return results
+        .map((e) => AppNotification.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<int> unreadCount() async {
+    final r = await _dio.get('/auth/notifications/unread-count/');
+    return (r.data['unread'] as int?) ?? 0;
+  }
+
+  Future<void> markRead(int id) async {
+    await _dio.post('/auth/notifications/$id/read/');
+  }
+
+  Future<int> markAllRead() async {
+    final r = await _dio.post('/auth/notifications/read-all/');
+    return (r.data['marked_read'] as int?) ?? 0;
+  }
+
+  /// Register this device for push, or unregister by sending an empty string.
+  ///
+  /// Call it with '' on logout: without that, the next person to sign in on
+  /// the same handset inherits the previous agent's follow-up reminders.
+  Future<void> registerDevice(String fcmToken) async {
+    await _dio.post('/auth/notifications/device/', data: {'fcm_token': fcmToken});
+  }
+
+  /// Everything still open and assigned to me, soonest first.
+  ///
+  /// This is what the local reminders are built from, so it deliberately
+  /// includes overdue follow-ups — those are the ones most worth surfacing.
+  Future<List<FollowUp>> myUpcomingFollowups({int days = 14}) async {
+    final r = await _dio.get('/leads/followups/mine/', queryParameters: {'days': days});
+    final data = r.data;
+    // The endpoint is unpaginated, but tolerate either shape rather than
+    // crashing the reminder sync if that ever changes.
+    final rows = data is List ? data : ((data['results'] as List?) ?? const []);
+    return rows.map((e) => FollowUp.fromJson(e as Map<String, dynamic>)).toList();
+  }
+}

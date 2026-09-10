@@ -102,8 +102,8 @@ class _LeadImportScreenState extends ConsumerState<LeadImportScreen> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: AppColors.warningBg,
-              border: Border.all(color: AppColors.warning, width: 2),
-              boxShadow: const [BoxShadow(color: AppColors.black, offset: Offset(3, 3))],
+              border: Border.all(color: AppColors.warning, width: 1),
+              boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
               Row(children: [
@@ -114,7 +114,7 @@ class _LeadImportScreenState extends ConsumerState<LeadImportScreen> {
               SizedBox(height: 6),
               Text(
                 'One lead per line. Columns:\nname, phone, email, city, requirement\n\nMinimum: name and phone. Phone must be 10+ digits.',
-                style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: AppColors.dark, height: 1.5),
+                style: TextStyle(fontFamily: 'IBMPlexMono', fontSize: 11, color: AppColors.dark, height: 1.5),
               ),
             ]),
           ).animate().fadeIn(),
@@ -252,7 +252,7 @@ class _DropField extends StatelessWidget {
     Container(
       decoration: BoxDecoration(
         color: AppColors.white,
-        border: Border.all(color: AppColors.black, width: 1.5),
+        border: Border.all(color: AppColors.black, width: 1),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: DropdownButtonHideUnderline(child: DropdownButton<String>(
@@ -260,7 +260,7 @@ class _DropField extends StatelessWidget {
         isExpanded: true,
         items: options.entries.map((e) => DropdownMenuItem(
           value: e.key,
-          child: Text(e.value, style: const TextStyle(fontFamily: 'DMSans', fontSize: 12)),
+          child: Text(e.value, style: const TextStyle(fontFamily: 'Archivo', fontSize: 12)),
         )).toList(),
         onChanged: (v) { if (v != null) onChange(v); },
         icon: const Icon(Icons.arrow_drop_down, color: AppColors.black, size: 18),

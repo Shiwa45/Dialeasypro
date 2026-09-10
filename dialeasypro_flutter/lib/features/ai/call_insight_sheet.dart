@@ -48,7 +48,7 @@ void showCallInsightSheet(BuildContext context, String callId) {
       builder: (_, controller) => Container(
         decoration: const BoxDecoration(
           color: AppColors.background,
-          border: Border(top: BorderSide(color: AppColors.black, width: 2)),
+          border: Border(top: BorderSide(color: AppColors.black, width: 1)),
         ),
         child: _CallInsightBody(callId: callId, controller: controller),
       ),
@@ -134,7 +134,7 @@ class _CallInsightBody extends ConsumerWidget {
         Row(children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(color: bg, border: Border.all(color: AppColors.black, width: 2)),
+            decoration: BoxDecoration(color: bg, border: Border.all(color: AppColors.black, width: 1)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(icon, size: 15, color: fg),
               const SizedBox(width: 6),

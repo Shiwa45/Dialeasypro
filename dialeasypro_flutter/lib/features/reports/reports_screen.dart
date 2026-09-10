@@ -45,7 +45,7 @@ class ReportsScreen extends ConsumerWidget {
                 const Row(children: [
                   Icon(Icons.today, size: 18, color: AppColors.yellow),
                   SizedBox(width: 8),
-                  Text("Today's Activity", style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow)),
+                  Text("Today's Activity", style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow)),
                 ]),
                 const SizedBox(height: 14),
                 Row(children: [
@@ -70,9 +70,9 @@ class ReportsScreen extends ConsumerWidget {
                   return Padding(padding: const EdgeInsets.only(bottom: 10), child: Row(children: [
                     SizedBox(width: 86, child: Text(stage['label'] as String? ?? '', style: AppTextStyles.body)),
                     Expanded(child: Stack(children: [
-                      Container(height: 12, decoration: BoxDecoration(color: AppColors.greyLight, border: Border.all(color: AppColors.black, width: 1.5))),
+                      Container(height: 12, decoration: BoxDecoration(color: AppColors.greyLight, border: Border.all(color: AppColors.black, width: 1))),
                       FractionallySizedBox(widthFactor: pct / 100,
-                        child: Container(height: 12, decoration: BoxDecoration(color: AppColors.yellow, border: Border.all(color: AppColors.black, width: 1.5)))),
+                        child: Container(height: 12, decoration: BoxDecoration(color: AppColors.yellow, border: Border.all(color: AppColors.black, width: 1)))),
                     ])),
                     const SizedBox(width: 8),
                     SizedBox(width: 28, child: Text('${stage['count']}', style: AppTextStyles.h5, textAlign: TextAlign.right)),
@@ -136,7 +136,7 @@ class _ReportStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Expanded(child: Column(children: [
-    Text(value, style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 22, color: dark ? AppColors.yellow : AppColors.black)),
-    Text(label, style: TextStyle(fontFamily: 'DMSans', fontSize: 11, color: dark ? AppColors.muted : AppColors.grey)),
+    Text(value, style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 22, color: dark ? AppColors.yellow : AppColors.black)),
+    Text(label, style: TextStyle(fontFamily: 'Archivo', fontSize: 11, color: dark ? AppColors.muted : AppColors.grey)),
   ]));
 }

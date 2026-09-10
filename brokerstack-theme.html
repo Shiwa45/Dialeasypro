@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BrokerStack — CRM Theme</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════ TOKENS ═══════════════ */
+:root{
+  /* surfaces — drafting paper, not white-on-white */
+  --paper:#F1F4EF; --surface:#FFFFFF; --surface-2:#FAFBF8;
+  --line:#E0E5DC; --line-2:#C9D0C4; --line-3:#AEB8A9;
+
+  /* ink — near-black with a green cast, like survey ink */
+  --ink:#111A16; --ink-2:#1A2620; --ink-3:#25332C;
+  --text:#16211C; --text-2:#5C6A62; --text-3:#8B968F;
+
+  /* brand */
+  --brand:#0B5F55; --brand-600:#0A6E62; --brand-700:#084A43; --brand-50:#DDEBE8;
+  --brass:#A97C1E; --brass-600:#C0912A; --brass-50:#F6ECD6;
+
+  /* situational — each colour means one thing */
+  --hot:#CE3A22;   --hot-50:#FAE3DD;
+  --warm:#CF8A06;  --warm-50:#F9EDD3;
+  --cold:#5B7280;  --cold-50:#E5EAED;
+  --won:#1B7F4A;   --won-50:#DCEFE3;
+  --lost:#89302E;  --lost-50:#F2E0DF;
+  --visit:#6244B8; --visit-50:#E7E1F7;
+
+  --r:10px; --r-sm:6px;
+  --shadow:0 1px 2px rgba(17,26,22,.05), 0 8px 24px -12px rgba(17,26,22,.14);
+  --sans:'Archivo',system-ui,sans-serif;
+  --disp:'Fraunces',Georgia,serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--sans); background:var(--paper); color:var(--text);
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+/* ═══════════════ SHELL ═══════════════ */
+.app{display:grid;grid-template-columns:244px 1fr;min-height:100vh}
+
+/* — sidebar — */
+.rail{
+  background:var(--ink); color:#D6DED9; position:sticky; top:0; height:100vh;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.rail::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,.028) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.028) 1px,transparent 1px);
+  background-size:28px 28px;}
+.rail>*{position:relative;z-index:1}
+.brand{display:flex;align-items:center;gap:11px;padding:20px 18px 18px;border-bottom:1px solid rgba(255,255,255,.09)}
+.brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(150deg,var(--brass-600),var(--brass));
+  display:grid;place-items:center;color:#1A1405;font-family:var(--disp);font-weight:700;font-size:17px;flex:none}
+.brand-name{font-family:var(--disp);font-size:18px;font-weight:600;color:#fff;letter-spacing:-.2px;line-height:1}
+.brand-sub{font-family:var(--mono);font-size:9.5px;color:#7E8C85;letter-spacing:.14em;text-transform:uppercase;margin-top:3px}
+.nav{flex:1;overflow-y:auto;padding:14px 10px 20px}
+.nav::-webkit-scrollbar{width:0}
+.nav-group{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:#66746D;padding:14px 10px 7px}
+.nav-item{display:flex;align-items:center;gap:11px;padding:8px 11px;border-radius:7px;
+  color:#B7C2BB;font-size:13.5px;font-weight:500;position:relative;transition:background .13s,color .13s}
+.nav-item svg{width:17px;height:17px;flex:none;opacity:.8}
+.nav-item:hover{background:rgba(255,255,255,.055);color:#EAF0EC}
+.nav-item.on{background:rgba(255,255,255,.09);color:#fff}
+.nav-item.on::before{content:'';position:absolute;left:-10px;top:50%;transform:translateY(-50%);
+  width:3px;height:18px;border-radius:0 3px 3px 0;background:var(--brass-600)}
+.nav-item.on svg{opacity:1;color:var(--brass-600)}
+.nav-count{margin-left:auto;font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:20px;
+  background:rgba(255,255,255,.1);color:#C9D3CD}
+.nav-count.alert{background:var(--hot);color:#fff}
+.rail-foot{padding:12px;border-top:1px solid rgba(255,255,255,.09)}
+.me{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px}
+.me:hover{background:rgba(255,255,255,.05)}
+.av{width:32px;height:32px;border-radius:8px;background:var(--brand-600);color:#fff;display:grid;place-items:center;
+  font-size:12px;font-weight:600;flex:none}
+.me-n{font-size:13px;font-weight:600;color:#EAF0EC;line-height:1.2}
+.me-r{font-family:var(--mono);font-size:9.5px;color:#7E8C85;letter-spacing:.08em;text-transform:uppercase;margin-top:2px}
+
+/* — topbar — */
+.main{min-width:0;display:flex;flex-direction:column}
+.top{
+  position:sticky;top:0;z-index:20;background:rgba(241,244,239,.86);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);padding:0 26px;height:60px;display:flex;align-items:center;gap:18px;
+}
+.crumb{font-family:var(--mono);font-size:11px;color:var(--text-3);letter-spacing:.05em}
+.crumb b{color:var(--text-2);font-weight:500}
+.search{
+  margin-left:auto;display:flex;align-items:center;gap:9px;background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;padding:7px 12px;width:290px;color:var(--text-3);
+}
+.search input{border:0;outline:0;background:none;font:inherit;font-size:13px;width:100%;color:var(--text)}
+.search kbd{font-family:var(--mono);font-size:10px;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--text-3)}
+.icon-btn{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:var(--text-2);
+  border:1px solid transparent;position:relative}
+.icon-btn:hover{background:var(--surface);border-color:var(--line)}
+.dot{position:absolute;top:7px;right:8px;width:6px;height:6px;border-radius:50%;background:var(--hot);border:1.5px solid var(--paper)}
+
+/* — tabs — */
+.tabs{display:flex;gap:2px;padding:0 26px;border-bottom:1px solid var(--line);background:var(--paper);
+  position:sticky;top:60px;z-index:19}
+.tab{padding:11px 14px;font-size:13px;font-weight:500;color:var(--text-2);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+
+.page{padding:26px;flex:1}
+.panel{display:none}.panel.on{display:block}
+
+/* — page head — */
+.phead{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:22px;flex-wrap:wrap}
+.ptitle{font-family:var(--disp);font-size:29px;font-weight:600;letter-spacing:-.5px;line-height:1.1;margin:0}
+.psub{color:var(--text-2);font-size:13.5px;margin-top:6px}
+.psub .num{color:var(--text);font-weight:500}
+
+/* ═══════════════ PLATE (signature card) ═══════════════ */
+.plate{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  position:relative;box-shadow:var(--shadow);
+}
+/* corner registration ticks — the drawing-sheet motif */
+.plate::before,.plate::after{content:'';position:absolute;width:9px;height:9px;pointer-events:none;opacity:.75}
+.plate::before{top:7px;left:7px;border-top:1px solid var(--line-3);border-left:1px solid var(--line-3);border-radius:2px 0 0 0}
+.plate::after{bottom:7px;right:7px;border-bottom:1px solid var(--line-3);border-right:1px solid var(--line-3);border-radius:0 0 2px 0}
+.plate-h{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:15px 18px 13px;border-bottom:1px solid var(--line)}
+.plate-t{font-size:14px;font-weight:600;letter-spacing:-.15px}
+.plate-s{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3);margin-top:3px}
+.plate-b{padding:18px}
+
+/* — grids — */
+.g{display:grid;gap:16px}
+.g-4{grid-template-columns:repeat(4,1fr)}
+.g-2a{grid-template-columns:1.75fr 1fr}
+.g-2b{grid-template-columns:1fr 1.45fr}
+.g-3{grid-template-columns:repeat(3,1fr)}
+.mt{margin-top:16px}
+
+/* ═══════════════ KPI ═══════════════ */
+.kpi{padding:16px 17px 14px;position:relative;overflow:hidden}
+.kpi-top{display:flex;align-items:center;gap:9px}
+.kpi-ic{width:29px;height:29px;border-radius:7px;display:grid;place-items:center;flex:none}
+.kpi-ic svg{width:15px;height:15px}
+.kpi-l{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3)}
+.kpi-v{font-family:var(--mono);font-size:27px;font-weight:600;letter-spacing:-1.3px;margin:11px 0 0;line-height:1}
+.kpi-v small{font-size:15px;font-weight:500;color:var(--text-2);letter-spacing:0}
+.kpi-f{display:flex;align-items:center;justify-content:space-between;margin-top:11px}
+.delta{font-family:var(--mono);font-size:11px;font-weight:500;display:flex;align-items:center;gap:3px}
+.delta.up{color:var(--won)} .delta.dn{color:var(--hot)}
+.kpi-note{font-size:11.5px;color:var(--text-3)}
+.spark{height:26px}
+
+/* ═══════════════ CHIPS ═══════════════ */
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:5px;
+  font-size:11.5px;font-weight:600;line-height:1.6;white-space:nowrap}
+.chip .pip{width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
+.c-hot{background:var(--hot-50);color:var(--hot)}
+.c-warm{background:var(--warm-50);color:#96650B}
+.c-cold{background:var(--cold-50);color:var(--cold)}
+.c-won{background:var(--won-50);color:var(--won)}
+.c-lost{background:var(--lost-50);color:var(--lost)}
+.c-visit{background:var(--visit-50);color:var(--visit)}
+.c-brass{background:var(--brass-50);color:#87630F}
+.c-brand{background:var(--brand-50);color:var(--brand)}
+.c-mute{background:#EDF0EA;color:var(--text-2)}
+
+/* ═══════════════ BUTTONS ═══════════════ */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;
+  border:1px solid transparent;transition:.14s}
+.btn svg{width:15px;height:15px}
+.btn-p{background:var(--brand);color:#fff}
+.btn-p:hover{background:var(--brand-600)}
+.btn-g{background:var(--surface);border-color:var(--line-2);color:var(--text)}
+.btn-g:hover{border-color:var(--line-3);background:var(--surface-2)}
+.btn-b{background:var(--brass);color:#fff}
+.btn-b:hover{background:var(--brass-600)}
+.btn-q{color:var(--text-2);padding:8px 10px}
+.btn-q:hover{background:#EAEEE6;color:var(--text)}
+.btn-sm{padding:5px 10px;font-size:12px}
+
+/* ═══════════════ TABLE ═══════════════ */
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+thead th{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3);
+  text-align:left;padding:9px 14px;background:var(--surface-2);border-bottom:1px solid var(--line);
+  border-top:1px solid var(--line);font-weight:500;white-space:nowrap
+}
+thead th.r{text-align:right}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:13.5px}
+tbody td.r{text-align:right}
+tbody tr{transition:background .12s}
+tbody tr:hover{background:#F7F9F5}
+tbody tr:last-child td{border-bottom:0}
+.cell-p{display:flex;align-items:center;gap:10px}
+.cell-n{font-weight:600;letter-spacing:-.1px}
+.cell-m{font-size:11.5px;color:var(--text-3);font-family:var(--mono);margin-top:1px}
+.avt{width:31px;height:31px;border-radius:8px;display:grid;place-items:center;font-size:11.5px;font-weight:600;flex:none;
+  color:#fff;letter-spacing:.3px}
+.money{font-family:var(--mono);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+.rowact{opacity:0;display:flex;gap:3px;justify-content:flex-end;transition:opacity .13s}
+tbody tr:hover .rowact{opacity:1}
+.mini{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;color:var(--text-2);border:1px solid var(--line)}
+.mini:hover{background:var(--surface);border-color:var(--line-3);color:var(--text)}
+.mini svg{width:13px;height:13px}
+.score{display:flex;align-items:center;gap:7px}
+.score-bar{width:44px;height:4px;border-radius:3px;background:#E7EBE4;overflow:hidden}
+.score-bar i{display:block;height:100%;border-radius:3px}
+
+/* — filter bar — */
+.fbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line)}
+.fsel{display:flex;align-items:center;gap:7px;padding:6px 11px;border:1px solid var(--line-2);border-radius:7px;
+  background:var(--surface);font-size:12.5px;font-weight:500;color:var(--text-2)}
+.fsel:hover{border-color:var(--line-3);color:var(--text)}
+.fsel svg{width:13px;height:13px;opacity:.6}
+.fsel.act{border-color:var(--brand);background:var(--brand-50);color:var(--brand)}
+.seg{display:flex;background:#EAEEE6;border-radius:8px;padding:2px}
+.seg button{padding:5px 12px;border-radius:6px;font-size:12.5px;font-weight:500;color:var(--text-2)}
+.seg button.on{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(17,26,22,.09);font-weight:600}
+
+/* ═══════════════ PIPELINE PLATE — the signature ═══════════════ */
+.pipe{padding:22px 20px 16px;overflow-x:auto}
+.pipe-row{display:flex;align-items:flex-end;gap:0;min-width:760px}
+.plot{flex:1;position:relative;padding:0 3px}
+.plot-dim{display:flex;align-items:center;gap:6px;margin-bottom:9px;color:var(--text-3)}
+.plot-dim .rule{flex:1;height:1px;background:var(--line-2);position:relative}
+.plot-dim .rule::before,.plot-dim .rule::after{content:'';position:absolute;top:-3px;width:1px;height:7px;background:var(--line-2)}
+.plot-dim .rule::before{left:0}.plot-dim .rule::after{right:0}
+.plot-dim .val{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text-2);white-space:nowrap}
+.plot-box{border:1px solid var(--line-2);border-radius:7px;background:var(--surface-2);padding:12px 12px 11px;
+  position:relative;overflow:hidden;transition:.15s;cursor:pointer}
+.plot-box:hover{border-color:var(--line-3);transform:translateY(-2px);box-shadow:0 8px 20px -10px rgba(17,26,22,.22)}
+.plot-fill{position:absolute;left:0;bottom:0;right:0;opacity:.16}
+.plot-n{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:-1px;position:relative}
+.plot-lb{font-size:12px;font-weight:600;margin-top:3px;position:relative}
+.plot-sub{font-family:var(--mono);font-size:10px;color:var(--text-3);margin-top:4px;position:relative;letter-spacing:.03em}
+.plot-arrow{align-self:center;color:var(--line-3);flex:none;padding:0 2px;margin-bottom:22px}
+.pipe-foot{display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding-top:13px;
+  border-top:1px dashed var(--line-2);min-width:760px}
+.leak{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2)}
+
+/* ═══════════════ SCHEDULE ═══════════════ */
+.tl{position:relative;padding-left:16px}
+.tl::before{content:'';position:absolute;left:4px;top:6px;bottom:6px;width:1px;background:var(--line)}
+.tli{position:relative;padding:0 0 15px 14px}
+.tli:last-child{padding-bottom:0}
+.tli::before{content:'';position:absolute;left:-8px;top:5px;width:9px;height:9px;border-radius:50%;
+  background:var(--surface);border:2px solid var(--line-3)}
+.tli.now::before{border-color:var(--visit);box-shadow:0 0 0 3px var(--visit-50)}
+.tli-t{font-family:var(--mono);font-size:10.5px;color:var(--text-3);letter-spacing:.05em}
+.tli-n{font-size:13.5px;font-weight:600;margin-top:2px}
+.tli-m{font-size:12px;color:var(--text-2);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+
+/* ═══════════════ KANBAN ═══════════════ */
+.kb{display:grid;grid-template-columns:repeat(5,minmax(230px,1fr));gap:13px;overflow-x:auto;padding-bottom:6px}
+.kcol{background:#EAEEE6;border-radius:10px;padding:10px;min-width:230px}
+.kh{display:flex;align-items:center;justify-content:space-between;padding:3px 4px 11px}
+.kh-l{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600}
+.kh-l .bar{width:3px;height:14px;border-radius:2px}
+.kh-c{font-family:var(--mono);font-size:10.5px;color:var(--text-2);background:rgba(255,255,255,.75);
+  padding:1px 7px;border-radius:20px}
+.kh-v{font-family:var(--mono);font-size:10.5px;color:var(--text-3);padding:0 4px 10px;letter-spacing:.03em}
+.kcard{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:11px 12px;margin-bottom:9px;
+  cursor:grab;transition:.14s}
+.kcard:hover{box-shadow:0 8px 20px -12px rgba(17,26,22,.3);transform:translateY(-1px);border-color:var(--line-2)}
+.kcard:last-child{margin-bottom:0}
+.kc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.kc-n{font-size:13px;font-weight:600;letter-spacing:-.1px}
+.kc-p{font-size:11.5px;color:var(--text-2);margin-top:2px}
+.kc-v{font-family:var(--mono);font-size:14px;font-weight:600;margin-top:9px;letter-spacing:-.4px}
+.kc-f{display:flex;align-items:center;justify-content:space-between;margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+.kc-meta{font-family:var(--mono);font-size:10px;color:var(--text-3);display:flex;align-items:center;gap:4px}
+.prob{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10.5px;color:var(--text-2)}
+.prob i{display:block;width:30px;height:3px;border-radius:2px;background:#E7EBE4;overflow:hidden;position:relative}
+.prob i b{position:absolute;left:0;top:0;bottom:0;border-radius:2px}
+.kadd{width:100%;padding:8px;border:1px dashed var(--line-2);border-radius:8px;color:var(--text-3);font-size:12.5px;
+  font-weight:500;margin-top:2px}
+.kadd:hover{border-color:var(--brand);color:var(--brand);background:rgba(11,95,85,.03)}
+
+/* ═══════════════ PROPERTY CARDS ═══════════════ */
+.pcard{overflow:hidden;transition:.15s}
+.pcard:hover{transform:translateY(-2px);box-shadow:0 14px 30px -16px rgba(17,26,22,.3)}
+.pimg{height:132px;position:relative;background:linear-gradient(150deg,#20302A,#0F1A15);overflow:hidden}
+.pimg .grid{position:absolute;inset:0;opacity:.5;
+  background-image:linear-gradient(rgba(255,255,255,.09) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.09) 1px,transparent 1px);
+  background-size:22px 22px}
+.pimg .tags{position:absolute;top:10px;left:10px;display:flex;gap:5px;z-index:2}
+.pimg .rera{position:absolute;bottom:10px;left:10px;z-index:2;display:flex;align-items:center;gap:5px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;color:#CFE0D9;background:rgba(0,0,0,.42);
+  border:1px solid rgba(255,255,255,.16);padding:3px 7px;border-radius:5px;backdrop-filter:blur(3px)}
+.pimg .save{position:absolute;top:10px;right:10px;z-index:2;width:27px;height:27px;border-radius:7px;
+  background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.16);display:grid;place-items:center;color:#fff;backdrop-filter:blur(3px)}
+.pimg .save:hover{background:rgba(0,0,0,.55)}
+.pb{padding:13px 14px}
+.p-n{font-size:14px;font-weight:600;letter-spacing:-.2px}
+.p-l{font-size:12px;color:var(--text-2);margin-top:3px;display:flex;align-items:center;gap:4px}
+.p-price{font-family:var(--mono);font-size:16px;font-weight:600;letter-spacing:-.5px;margin-top:10px;color:var(--brand)}
+.p-price span{font-size:11px;color:var(--text-3);font-weight:400;letter-spacing:0}
+.p-specs{display:flex;gap:12px;margin-top:11px;padding-top:11px;border-top:1px solid var(--line)}
+.p-spec{font-size:11.5px;color:var(--text-2);display:flex;align-items:center;gap:4px}
+.p-spec b{color:var(--text);font-weight:600;font-family:var(--mono)}
+
+/* ═══════════════ THEME PANEL ═══════════════ */
+.sw{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface)}
+.sw-c{height:66px}
+.sw-b{padding:9px 11px}
+.sw-n{font-size:12.5px;font-weight:600}
+.sw-u{font-size:11px;color:var(--text-2);margin-top:2px;line-height:1.35}
+.sw-h{font-family:var(--mono);font-size:10px;color:var(--text-3);margin-top:5px;letter-spacing:.04em}
+.tscale{display:flex;flex-direction:column;gap:16px}
+.trow{display:flex;align-items:baseline;gap:18px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.trow:last-child{border-bottom:0;padding-bottom:0}
+.tlab{font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--text-3);width:118px;flex:none}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px}
+.lg{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2)}
+.lg i{width:9px;height:9px;border-radius:2.5px;flex:none}
+
+.hint{font-size:12px;color:var(--text-3);margin-top:9px;display:flex;align-items:center;gap:6px}
+
+@media(max-width:1180px){.g-4{grid-template-columns:repeat(2,1fr)}.g-2a,.g-2b,.g-3{grid-template-columns:1fr}}
+@media(max-width:900px){.app{grid-template-columns:1fr}.rail{display:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+<!-- ══════ SIDEBAR ══════ -->
+<aside class="rail">
+  <div class="brand">
+    <div class="brand-mark">B</div>
+    <div>
+      <div class="brand-name">BrokerStack</div>
+      <div class="brand-sub">Kalra Realty</div>
+    </div>
+  </div>
+
+  <nav class="nav">
+    <div class="nav-group">Workspace</div>
+    <a class="nav-item on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>Leads<span class="nav-count alert">18</span></a>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-7h6v7"/></svg>Inventory<span class="nav-count">312</span></a>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M3 12h18M3 18h11"/></svg>Deals<span class="nav-count">47</span></a>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>Site visits<span class="nav-count">9</span></a>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2Z"/><path d="M2 11h20"/></svg>Payouts</a>
+
+    <div class="nav-group">Relationships</div>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Contacts</a>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg>Channel partners</a>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></svg>Inbox<span class="nav-count">4</span></a>
+
+    <div class="nav-group">Intelligence</div>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>Reports</a>
+    <a class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>Settings</a>
+  </nav>
+
+  <div class="rail-foot">
+    <div class="me">
+      <div class="av">SK</div>
+      <div><div class="me-n">Shiwansh K.</div><div class="me-r">Admin</div></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ══════ MAIN ══════ -->
+<div class="main">
+  <header class="top">
+    <div class="crumb">WORKSPACE / <b>DASHBOARD</b></div>
+    <div class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input placeholder="Search leads, properties, deals…"/>
+      <kbd>⌘K</kbd>
+    </div>
+    <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><i class="dot"></i></button>
+    <button class="btn btn-p"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New lead</button>
+  </header>
+
+  <div class="tabs">
+    <button class="tab on" data-t="dash">Dashboard</button>
+    <button class="tab" data-t="leads">Leads</button>
+    <button class="tab" data-t="deals">Deals</button>
+    <button class="tab" data-t="props">Inventory</button>
+    <button class="tab" data-t="theme">Design system</button>
+  </div>
+
+  <div class="page">
+
+  <!-- ════════ DASHBOARD ════════ -->
+  <section class="panel on" id="dash">
+    <div class="phead">
+      <div>
+        <h1 class="ptitle">Good morning, Shiwansh</h1>
+        <p class="psub"><span class="num">9</span> site visits today · <span class="num">18</span> leads waiting on a callback · <span class="num">3</span> deals need a token follow-up</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <div class="seg"><button>Week</button><button class="on">Month</button><button>Quarter</button></div>
+        <button class="btn btn-g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></svg>Export</button>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="g g-4">
+      <div class="plate kpi">
+        <div class="kpi-top"><div class="kpi-ic" style="background:var(--won-50);color:var(--won)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="kpi-l">Booked this month</div></div>
+        <div class="kpi-v">₹4.82<small> Cr</small></div>
+        <div class="kpi-f"><span class="delta up">▲ 18.4%</span><span class="kpi-note">vs ₹4.07 Cr in Jul</span></div>
+      </div>
+      <div class="plate kpi">
+        <div class="kpi-top"><div class="kpi-ic" style="background:var(--brass-50);color:var(--brass)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg></div><div class="kpi-l">Open pipeline</div></div>
+        <div class="kpi-v">₹18.6<small> Cr</small></div>
+        <div class="kpi-f"><span class="delta up">▲ 6.1%</span><span class="kpi-note">47 live deals</span></div>
+      </div>
+      <div class="plate kpi">
+        <div class="kpi-top"><div class="kpi-ic" style="background:var(--hot-50);color:var(--hot)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.13-.5-4 1.5-5.5 0 2 .5 3.5 2 4.5 1.9 1.27 3.5 2.9 3.5 5.5a6 6 0 0 1-12 0c0-.7.2-1.4.5-2 .5 1 1.5 2 3 2Z"/></svg></div><div class="kpi-l">Hot leads</div></div>
+        <div class="kpi-v">24</div>
+        <div class="kpi-f"><span class="delta dn">▼ 3 unworked</span><span class="kpi-note">avg. 2.1 days idle</span></div>
+      </div>
+      <div class="plate kpi">
+        <div class="kpi-top"><div class="kpi-ic" style="background:var(--visit-50);color:var(--visit)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></div><div class="kpi-l">Visits → booking</div></div>
+        <div class="kpi-v">31.4<small>%</small></div>
+        <div class="kpi-f"><span class="delta up">▲ 4.2 pts</span><span class="kpi-note">68 visits done</span></div>
+      </div>
+    </div>
+
+    <!-- collections + sources -->
+    <div class="g g-2a mt">
+      <div class="plate">
+        <div class="plate-h">
+          <div><div class="plate-t">Collections against target</div><div class="plate-s">FY 2026–27 · ₹ Crore</div></div>
+          <div class="seg"><button class="on">Value</button><button>Units</button></div>
+        </div>
+        <div class="plate-b"><svg id="areaChart" viewBox="0 0 700 250" style="width:100%;height:auto"></svg>
+          <div class="legend">
+            <span class="lg"><i style="background:var(--brand)"></i>Collected</span>
+            <span class="lg"><i style="background:var(--brass)"></i>Target</span>
+            <span class="lg"><i style="background:var(--warm)"></i>Shortfall month</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="plate">
+        <div class="plate-h"><div><div class="plate-t">Where leads come from</div><div class="plate-s">Last 30 days · 186 leads</div></div></div>
+        <div class="plate-b">
+          <svg id="donut" viewBox="0 0 240 170" style="width:100%;height:auto"></svg>
+          <div id="donutLegend" style="margin-top:6px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIGNATURE: pipeline plate -->
+    <div class="plate mt">
+      <div class="plate-h">
+        <div><div class="plate-t">Deal pipeline</div><div class="plate-s">Site plan · value held at each stage</div></div>
+        <button class="btn btn-g btn-sm">Open board</button>
+      </div>
+      <div class="pipe">
+        <div class="pipe-row">
+          <div class="plot">
+            <div class="plot-dim"><span class="val">₹6.1 Cr</span><span class="rule"></span></div>
+            <div class="plot-box"><div class="plot-fill" style="height:72%;background:var(--cold)"></div>
+              <div class="plot-n">31</div><div class="plot-lb">Discovery</div><div class="plot-sub">AVG 4.2 D</div></div>
+          </div>
+          <div class="plot-arrow"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="plot">
+            <div class="plot-dim"><span class="val">₹4.9 Cr</span><span class="rule"></span></div>
+            <div class="plot-box"><div class="plot-fill" style="height:58%;background:var(--visit)"></div>
+              <div class="plot-n">22</div><div class="plot-lb">Site visit</div><div class="plot-sub">AVG 6.8 D</div></div>
+          </div>
+          <div class="plot-arrow"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="plot">
+            <div class="plot-dim"><span class="val">₹3.8 Cr</span><span class="rule"></span></div>
+            <div class="plot-box" style="border-color:var(--warm)"><div class="plot-fill" style="height:46%;background:var(--warm)"></div>
+              <div class="plot-n">14</div><div class="plot-lb">Negotiation</div><div class="plot-sub" style="color:var(--warm)">AVG 11.4 D · SLOW</div></div>
+          </div>
+          <div class="plot-arrow"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="plot">
+            <div class="plot-dim"><span class="val">₹2.9 Cr</span><span class="rule"></span></div>
+            <div class="plot-box"><div class="plot-fill" style="height:34%;background:var(--brass)"></div>
+              <div class="plot-n">9</div><div class="plot-lb">Token paid</div><div class="plot-sub">AVG 3.1 D</div></div>
+          </div>
+          <div class="plot-arrow"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="plot">
+            <div class="plot-dim"><span class="val">₹4.82 Cr</span><span class="rule"></span></div>
+            <div class="plot-box" style="border-color:var(--won);background:var(--won-50)"><div class="plot-fill" style="height:28%;background:var(--won)"></div>
+              <div class="plot-n" style="color:var(--won)">12</div><div class="plot-lb">Registered</div><div class="plot-sub">AVG 18.6 D</div></div>
+          </div>
+        </div>
+        <div class="pipe-foot">
+          <div class="leak"><span class="chip c-lost"><span class="pip"></span>Dropped</span> 8 deals worth ₹2.1 Cr fell out at negotiation this month</div>
+          <div class="leak"><span style="font-family:var(--mono);font-size:11px;color:var(--text-3)">DISCOVERY → REGISTERED</span> <b class="num" style="color:var(--won)">38.7%</b></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- schedule + hot leads -->
+    <div class="g g-2b mt">
+      <div class="plate">
+        <div class="plate-h"><div><div class="plate-t">Today's ground</div><div class="plate-s">Mon 24 Aug · 5 stops</div></div>
+          <button class="btn btn-q btn-sm">Full day</button></div>
+        <div class="plate-b">
+          <div class="tl">
+            <div class="tli now">
+              <div class="tli-t">10:30 — 11:15</div>
+              <div class="tli-n">Ananya Iyer · Godrej Woods</div>
+              <div class="tli-m"><span class="chip c-visit"><span class="pip"></span>En route</span> Sector 43, Noida</div>
+            </div>
+            <div class="tli">
+              <div class="tli-t">12:00 — 12:45</div>
+              <div class="tli-n">Rohit Malhotra · ATS Knightsbridge</div>
+              <div class="tli-m"><span class="chip c-brand"><span class="pip"></span>Confirmed</span> 4 BHK · repeat visit</div>
+            </div>
+            <div class="tli">
+              <div class="tli-t">15:00 — 15:30</div>
+              <div class="tli-n">Call back — Farhan Qureshi</div>
+              <div class="tli-m"><span class="chip c-hot"><span class="pip"></span>Hot</span> asked for payment plan</div>
+            </div>
+            <div class="tli">
+              <div class="tli-t">16:30 — 17:15</div>
+              <div class="tli-n">Meera Nambiar · Eldeco Live By The Greens</div>
+              <div class="tli-m"><span class="chip c-warm"><span class="pip"></span>Unconfirmed</span> nudge on WhatsApp</div>
+            </div>
+            <div class="tli">
+              <div class="tli-t">18:00</div>
+              <div class="tli-n">Token collection — Deal DL-0412</div>
+              <div class="tli-m"><span class="chip c-brass"><span class="pip"></span>₹5.00 L</span> Kartik Anand</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="plate">
+        <div class="plate-h"><div><div class="plate-t">Leads that can't wait</div><div class="plate-s">Ranked by score × idle time</div></div>
+          <button class="btn btn-g btn-sm">See all 24</button></div>
+        <div class="tw"><table>
+          <thead><tr><th>Lead</th><th>Interest</th><th>Score</th><th>Idle</th><th class="r">Budget</th><th></th></tr></thead>
+          <tbody id="hotLeads"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="g g-3 mt">
+      <div class="plate">
+        <div class="plate-h"><div><div class="plate-t">Agent leaderboard</div><div class="plate-s">Booked value · August</div></div></div>
+        <div class="plate-b"><svg id="bars" viewBox="0 0 300 176" style="width:100%;height:auto"></svg></div>
+      </div>
+      <div class="plate">
+        <div class="plate-h"><div><div class="plate-t">Inventory ageing</div><div class="plate-s">Days on book</div></div></div>
+        <div class="plate-b"><svg id="ageing" viewBox="0 0 300 176" style="width:100%;height:auto"></svg></div>
+      </div>
+      <div class="plate">
+        <div class="plate-h"><div><div class="plate-t">Commission wallet</div><div class="plate-s">Payable to you</div></div></div>
+        <div class="plate-b">
+          <div class="num" style="font-size:30px;font-weight:600;letter-spacing:-1.4px;color:var(--brass)">₹8,42,500</div>
+          <div style="font-size:12px;color:var(--text-2);margin-top:5px">Cleared and ready to withdraw</div>
+          <div style="margin-top:15px;display:flex;flex-direction:column;gap:9px">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--text-2)">In escrow (registry pending)</span><b class="num">₹3,10,000</b></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--text-2)">Raised, awaiting builder</span><b class="num">₹1,75,000</b></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--text-2)">Paid out in FY</span><b class="num">₹22,60,000</b></div>
+          </div>
+          <button class="btn btn-b" style="width:100%;justify-content:center;margin-top:16px">Withdraw ₹8.42 L</button>
+          <div class="hint"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>Settles to HDFC ••4471 in 2 working days</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ LEADS ════════ -->
+  <section class="panel" id="leads">
+    <div class="phead">
+      <div><h1 class="ptitle">Leads</h1><p class="psub"><span class="num">186</span> active · <span class="num">18</span> untouched for over 48 hours</p></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12M8 11l4 4 4-4M4 21h16"/></svg>Import CSV</button>
+        <button class="btn btn-p"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New lead</button>
+      </div>
+    </div>
+
+    <div class="g g-4" style="margin-bottom:16px">
+      <div class="plate kpi" style="border-left:3px solid var(--hot)">
+        <div class="kpi-l">Hot</div><div class="kpi-v" style="color:var(--hot)">24</div>
+        <div class="kpi-note" style="margin-top:8px">Ready to visit or negotiate</div></div>
+      <div class="plate kpi" style="border-left:3px solid var(--warm)">
+        <div class="kpi-l">Warm</div><div class="kpi-v" style="color:var(--warm)">46</div>
+        <div class="kpi-note" style="margin-top:8px">Engaged, no visit booked</div></div>
+      <div class="plate kpi" style="border-left:3px solid var(--cold)">
+        <div class="kpi-l">Cold</div><div class="kpi-v" style="color:var(--cold)">58</div>
+        <div class="kpi-note" style="margin-top:8px">No reply in 14+ days</div></div>
+      <div class="plate kpi" style="border-left:3px solid var(--won)">
+        <div class="kpi-l">Converted</div><div class="kpi-v" style="color:var(--won)">32</div>
+        <div class="kpi-note" style="margin-top:8px">Moved to a live deal</div></div>
+    </div>
+
+    <div class="plate">
+      <div class="fbar">
+        <div class="search" style="margin:0;width:250px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input placeholder="Name, phone, project…"/>
+        </div>
+        <button class="fsel act">Heat: Hot, Warm <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button class="fsel">Source <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button class="fsel">Assigned to <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button class="fsel">Budget <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button class="btn btn-q btn-sm" style="color:var(--hot)">Clear</button>
+        <div style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-3)">70 OF 186</div>
+      </div>
+      <div class="tw"><table>
+        <thead><tr>
+          <th style="width:26px"><input type="checkbox"/></th>
+          <th>Lead</th><th>Heat</th><th>Stage</th><th>Interested in</th>
+          <th class="r">Budget</th><th>Source</th><th>Owner</th><th>Next action</th><th></th>
+        </tr></thead>
+        <tbody id="leadRows"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ════════ DEALS ════════ -->
+  <section class="panel" id="deals">
+    <div class="phead">
+      <div><h1 class="ptitle">Deals</h1><p class="psub"><span class="num">47</span> live deals worth <span class="num">₹18.6 Cr</span> · weighted <span class="num">₹7.4 Cr</span></p></div>
+      <div style="display:flex;gap:8px">
+        <div class="seg"><button class="on">Board</button><button>Table</button><button>Forecast</button></div>
+        <button class="btn btn-p"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>New deal</button>
+      </div>
+    </div>
+    <div class="kb" id="kanban"></div>
+  </section>
+
+  <!-- ════════ INVENTORY ════════ -->
+  <section class="panel" id="props">
+    <div class="phead">
+      <div><h1 class="ptitle">Inventory</h1><p class="psub"><span class="num">312</span> units across <span class="num">28</span> projects · <span class="num">41</span> RERA-verified</p></div>
+      <div style="display:flex;gap:8px">
+        <div class="seg"><button class="on">Cards</button><button>Table</button><button>Map</button></div>
+        <button class="btn btn-p"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>Add project</button>
+      </div>
+    </div>
+    <div class="g g-4" id="propCards"></div>
+
+    <div class="plate mt">
+      <div class="plate-h"><div><div class="plate-t">Unit availability</div><div class="plate-s">Live stock by project</div></div>
+        <button class="btn btn-g btn-sm">Sync from builder</button></div>
+      <div class="tw"><table>
+        <thead><tr><th>Project</th><th>Builder</th><th>Config</th><th class="r">Price band</th><th>Availability</th><th>Status</th><th class="r">Payout</th><th></th></tr></thead>
+        <tbody id="propRows"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ════════ DESIGN SYSTEM ════════ -->
+  <section class="panel" id="theme">
+    <div class="phead">
+      <div><h1 class="ptitle">Brass &amp; Blueprint</h1>
+        <p class="psub">Survey drawings and brass fittings, not another blue SaaS dashboard. Every colour carries one meaning.</p></div>
+    </div>
+
+    <div class="plate">
+      <div class="plate-h"><div><div class="plate-t">Brand</div><div class="plate-s">Structure and value</div></div></div>
+      <div class="plate-b g g-4" style="padding:18px">
+        <div class="sw"><div class="sw-c" style="background:#0B5F55"></div><div class="sw-b"><div class="sw-n">Pine</div><div class="sw-u">Primary actions, links, active nav, chart series 1</div><div class="sw-h">#0B5F55</div></div></div>
+        <div class="sw"><div class="sw-c" style="background:#A97C1E"></div><div class="sw-b"><div class="sw-n">Brass</div><div class="sw-u">Money in motion — commission, tokens, premium stock</div><div class="sw-h">#A97C1E</div></div></div>
+        <div class="sw"><div class="sw-c" style="background:#111A16"></div><div class="sw-b"><div class="sw-n">Survey ink</div><div class="sw-u">Sidebar, headings, body text</div><div class="sw-h">#111A16</div></div></div>
+        <div class="sw"><div class="sw-c" style="background:#F1F4EF;border-bottom:1px solid var(--line)"></div><div class="sw-b"><div class="sw-n">Drafting paper</div><div class="sw-u">App canvas, so white plates actually read as plates</div><div class="sw-h">#F1F4EF</div></div></div>
+      </div>
+    </div>
+
+    <div class="plate mt">
+      <div class="plate-h"><div><div class="plate-t">Situational colour</div><div class="plate-s">Six states, six meanings — never reused decoratively</div></div></div>
+      <div class="plate-b g g-3" style="padding:18px">
+        <div class="sw"><div class="sw-c" style="background:#CE3A22"></div><div class="sw-b"><div class="sw-n">Vermilion — Hot</div><div class="sw-u">Act today. Hot leads, overdue follow-ups, failed payments, SLA breaches.</div><div class="sw-h">#CE3A22</div></div></div>
+        <div class="sw"><div class="sw-c" style="background:#CF8A06"></div><div class="sw-b"><div class="sw-n">Amber — Attention</div><div class="sw-u">Slipping, not lost. Warm leads, stalled stages, unconfirmed visits, pending KYC.</div><div class="sw-h">#CF8A06</div></div></div>
+        <div class="sw"><div class="sw-c" style="background:#5B7280"></div><div class="sw-b"><div class="sw-n">Slate — Dormant</div><div class="sw-u">Parked. Cold leads, archived stock, inactive partners.</div><div class="sw-h">#5B7280</div></div></div>
+        <div class="sw"><div class="sw-c" style="background:#1B7F4A"></div><div class="sw-b"><div class="sw-n">Emerald — Booked</div><div class="sw-u">Money is real. Registered deals, cleared payouts, targets met.</div><div class="sw-h">#1B7F4A</div></div></div>
+        <div class="sw"><div class="sw-c" style="background:#6244B8"></div><div class="sw-b"><div class="sw-n">Violet — Scheduled</div><div class="sw-u">On the calendar. Site visits, meetings, en-route agents.</div><div class="sw-h">#6244B8</div></div></div>
+        <div class="sw"><div class="sw-c" style="background:#89302E"></div><div class="sw-b"><div class="sw-n">Maroon — Lost</div><div class="sw-u">Closed the wrong way. Dropped deals, rejected KYC, cancelled bookings.</div><div class="sw-h">#89302E</div></div></div>
+      </div>
+    </div>
+
+    <div class="g g-2a mt">
+      <div class="plate">
+        <div class="plate-h"><div><div class="plate-t">Type</div><div class="plate-s">Three faces, three jobs</div></div></div>
+        <div class="plate-b tscale">
+          <div class="trow"><span class="tlab">Fraunces 29/600</span><span style="font-family:var(--disp);font-size:29px;font-weight:600;letter-spacing:-.5px">Page titles only</span></div>
+          <div class="trow"><span class="tlab">Archivo 14/600</span><span style="font-size:14px;font-weight:600">Card titles and controls</span></div>
+          <div class="trow"><span class="tlab">Archivo 13.5/400</span><span style="font-size:13.5px">Body copy, table cells, descriptions</span></div>
+          <div class="trow"><span class="tlab">Plex Mono 27/600</span><span class="num" style="font-size:27px;font-weight:600;letter-spacing:-1.3px">₹4.82 Cr</span></div>
+          <div class="trow"><span class="tlab">Plex Mono 10/.13em</span><span class="num" style="font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3)">Eyebrows · IDs · units</span></div>
+          <div class="hint">Every number in this app is monospaced with tabular figures, so a column of ₹ values lines up on the decimal. Fraunces appears fewer than three times per screen.</div>
+        </div>
+      </div>
+
+      <div class="plate">
+        <div class="plate-h"><div><div class="plate-t">Components</div><div class="plate-s">States and controls</div></div></div>
+        <div class="plate-b">
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-p">Primary</button><button class="btn btn-b">Money</button><button class="btn btn-g">Secondary</button><button class="btn btn-q">Quiet</button></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:18px">
+            <span class="chip c-hot"><span class="pip"></span>Hot</span><span class="chip c-warm"><span class="pip"></span>Warm</span>
+            <span class="chip c-cold"><span class="pip"></span>Cold</span><span class="chip c-won"><span class="pip"></span>Registered</span>
+            <span class="chip c-visit"><span class="pip"></span>Visit booked</span><span class="chip c-lost"><span class="pip"></span>Dropped</span>
+            <span class="chip c-brass"><span class="pip"></span>Token paid</span><span class="chip c-brand"><span class="pip"></span>Confirmed</span>
+          </div>
+          <div style="margin-top:18px;padding:13px 14px;border:1px solid var(--line-2);border-radius:9px;background:var(--surface-2);position:relative">
+            <div style="position:absolute;top:6px;left:6px;width:8px;height:8px;border-top:1px solid var(--line-3);border-left:1px solid var(--line-3)"></div>
+            <div style="position:absolute;bottom:6px;right:6px;width:8px;height:8px;border-bottom:1px solid var(--line-3);border-right:1px solid var(--line-3)"></div>
+            <div style="font-size:12.5px;font-weight:600">Registration ticks</div>
+            <div style="font-size:12px;color:var(--text-2);margin-top:4px">Two hairline corners on every plate. Borrowed from drawing sheets — it's what stops these cards looking like Bootstrap.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  </div>
+</div>
+</div>
+
+<script>
+/* ═══ data ═══ */
+const C={brand:'#0B5F55',brass:'#A97C1E',hot:'#CE3A22',warm:'#CF8A06',cold:'#5B7280',won:'#1B7F4A',lost:'#89302E',visit:'#6244B8',line:'#E0E5DC',t3:'#8B968F',t2:'#5C6A62'};
+const NS='http://www.w3.org/2000/svg';
+const el=(n,a={})=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);return e};
+
+/* ─ area chart ─ */
+(function(){
+  const s=document.getElementById('areaChart');
+  const months=['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+  const got=[2.9,3.4,3.1,4.07,4.82,4.4,5.2,5.9,6.3,5.1,5.8,6.9];
+  const tgt=[3.2,3.4,3.6,4.0,4.6,5.0,5.2,5.6,6.0,5.8,6.2,6.6];
+  const W=700,H=250,L=42,R=12,T=14,B=30, iw=W-L-R, ih=H-T-B, max=8;
+  const x=i=>L+i*(iw/(months.length-1)), y=v=>T+ih-(v/max)*ih;
+
+  const defs=el('defs');
+  const p=el('pattern',{id:'hatch',width:6,height:6,patternUnits:'userSpaceOnUse',patternTransform:'rotate(45)'});
+  p.appendChild(el('line',{x1:0,y1:0,x2:0,y2:6,stroke:C.brand,'stroke-width':1.5,opacity:.3}));
+  defs.appendChild(p); s.appendChild(defs);
+
+  for(let v=0;v<=8;v+=2){
+    s.appendChild(el('line',{x1:L,y1:y(v),x2:W-R,y2:y(v),stroke:C.line,'stroke-width':1,'stroke-dasharray':v?'2 4':''}));
+    const t=el('text',{x:L-9,y:y(v)+4,'text-anchor':'end',fill:C.t3,'font-size':10,'font-family':'IBM Plex Mono'});
+    t.textContent=v; s.appendChild(t);
+  }
+  // hatched area
+  let d=`M ${x(0)} ${y(got[0])}`;
+  got.forEach((v,i)=>{if(i)d+=` L ${x(i)} ${y(v)}`});
+  s.appendChild(el('path',{d:d+` L ${x(11)} ${T+ih} L ${x(0)} ${T+ih} Z`,fill:'url(#hatch)'}));
+  s.appendChild(el('path',{d,fill:'none',stroke:C.brand,'stroke-width':2.4,'stroke-linejoin':'round','stroke-linecap':'round'}));
+  // target
+  let td=`M ${x(0)} ${y(tgt[0])}`; tgt.forEach((v,i)=>{if(i)td+=` L ${x(i)} ${y(v)}`});
+  s.appendChild(el('path',{d:td,fill:'none',stroke:C.brass,'stroke-width':1.6,'stroke-dasharray':'5 4'}));
+  // points
+  got.forEach((v,i)=>{
+    const miss=v<tgt[i], c=miss?C.warm:C.brand;
+    s.appendChild(el('circle',{cx:x(i),cy:y(v),r:i===4?4.6:3.2,fill:'#fff',stroke:c,'stroke-width':2.2}));
+    const t=el('text',{x:x(i),y:H-9,'text-anchor':'middle',fill:i===4?'#16211C':C.t3,'font-size':10,'font-family':'Archivo','font-weight':i===4?600:400});
+    t.textContent=months[i]; s.appendChild(t);
+  });
+  // callout on current month
+  s.appendChild(el('line',{x1:x(4),y1:y(4.82)-10,x2:x(4),y2:T+2,stroke:C.brand,'stroke-width':1,'stroke-dasharray':'2 3',opacity:.5}));
+  const lb=el('text',{x:x(4),y:T-2,'text-anchor':'middle',fill:C.brand,'font-size':10.5,'font-family':'IBM Plex Mono','font-weight':600});
+  lb.textContent='₹4.82 Cr'; s.appendChild(lb);
+})();
+
+/* ─ donut ─ */
+(function(){
+  const s=document.getElementById('donut');
+  const segs=[{n:'Walk-in / referral',v:34,c:C.brand},{n:'99acres + MagicBricks',v:27,c:C.brass},
+              {n:'Meta ads',v:19,c:C.visit},{n:'Channel partners',v:13,c:C.won},{n:'Website form',v:7,c:C.cold}];
+  const cx=78,cy=85,r=58,w=19; let a=-Math.PI/2;
+  segs.forEach(g=>{
+    const ang=(g.v/100)*Math.PI*2, e=a+ang, big=ang>Math.PI?1:0;
+    const P=(rr,t)=>[cx+rr*Math.cos(t),cy+rr*Math.sin(t)];
+    const [x1,y1]=P(r,a),[x2,y2]=P(r,e),[x3,y3]=P(r-w,e),[x4,y4]=P(r-w,a);
+    s.appendChild(el('path',{d:`M ${x1} ${y1} A ${r} ${r} 0 ${big} 1 ${x2} ${y2} L ${x3} ${y3} A ${r-w} ${r-w} 0 ${big} 0 ${x4} ${y4} Z`,fill:g.c,stroke:'#fff','stroke-width':2}));
+    a=e;
+  });
+  let t=el('text',{x:cx,y:cy-2,'text-anchor':'middle',fill:'#16211C','font-size':22,'font-family':'IBM Plex Mono','font-weight':600});
+  t.textContent='186'; s.appendChild(t);
+  t=el('text',{x:cx,y:cy+14,'text-anchor':'middle',fill:C.t3,'font-size':9,'font-family':'IBM Plex Mono','letter-spacing':1.2});
+  t.textContent='LEADS'; s.appendChild(t);
+  document.getElementById('donutLegend').innerHTML=segs.map(g=>
+    `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12.5px">
+      <i style="width:9px;height:9px;border-radius:2.5px;background:${g.c};flex:none"></i>
+      <span style="color:var(--text-2)">${g.n}</span>
+      <b class="num" style="margin-left:auto;font-size:12px">${g.v}%</b></div>`).join('');
+})();
+
+/* ─ leaderboard bars ─ */
+(function(){
+  const s=document.getElementById('bars');
+  const d=[{n:'Priya Raghavan',v:1.72,c:C.won},{n:'Aditya Sen',v:1.28,c:C.brand},{n:'Nikhil Bose',v:0.94,c:C.brand},
+           {n:'Sana Kapoor',v:0.61,c:C.brass},{n:'Vikram Devgan',v:0.27,c:C.warm}];
+  const max=1.8,L=0,W=300;
+  d.forEach((g,i)=>{
+    const yy=i*35+8;
+    let t=el('text',{x:L,y:yy+10,fill:'#16211C','font-size':11.5,'font-family':'Archivo','font-weight':500});
+    t.textContent=g.n; s.appendChild(t);
+    t=el('text',{x:W,y:yy+10,'text-anchor':'end',fill:C.t2,'font-size':11,'font-family':'IBM Plex Mono','font-weight':600});
+    t.textContent='₹'+g.v.toFixed(2)+' Cr'; s.appendChild(t);
+    s.appendChild(el('rect',{x:L,y:yy+16,width:W,height:6,rx:3,fill:'#EDF0EA'}));
+    s.appendChild(el('rect',{x:L,y:yy+16,width:(g.v/max)*W,height:6,rx:3,fill:g.c}));
+  });
+})();
+
+/* ─ ageing bars ─ */
+(function(){
+  const s=document.getElementById('ageing');
+  const d=[{n:'0–30 d',v:118,c:C.won},{n:'31–60 d',v:84,c:C.brand},{n:'61–90 d',v:57,c:C.warm},{n:'91–180 d',v:38,c:C.hot},{n:'180 d +',v:15,c:C.lost}];
+  const max=130,W=300,BW=44,gap=(W-d.length*BW)/(d.length-1),H=124;
+  d.forEach((g,i)=>{
+    const x=i*(BW+gap), h=(g.v/max)*H, y=H-h+14;
+    s.appendChild(el('rect',{x,y,width:BW,height:h,rx:4,fill:g.c,opacity:.9}));
+    let t=el('text',{x:x+BW/2,y:y-6,'text-anchor':'middle',fill:'#16211C','font-size':11.5,'font-family':'IBM Plex Mono','font-weight':600});
+    t.textContent=g.v; s.appendChild(t);
+    t=el('text',{x:x+BW/2,y:H+30,'text-anchor':'middle',fill:C.t3,'font-size':9.5,'font-family':'Archivo'});
+    t.textContent=g.n; s.appendChild(t);
+  });
+})();
+
+/* ─ sparkline helper ─ */
+function spark(vals,c){
+  const W=90,H=26,mn=Math.min(...vals),mx=Math.max(...vals),rg=mx-mn||1;
+  const pts=vals.map((v,i)=>`${(i/(vals.length-1))*W},${H-2-((v-mn)/rg)*(H-6)}`).join(' L ');
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><path d="M ${pts}" fill="none" stroke="${c}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+const AV=['#0B5F55','#A97C1E','#6244B8','#1B7F4A','#5B7280','#89302E'];
+const ini=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+
+/* ─ hot leads table ─ */
+(function(){
+  const d=[
+    {n:'Farhan Qureshi',p:'+91 98118 40221',i:'Godrej Woods · 3 BHK',s:94,idle:'6 h',b:'₹2.4 Cr'},
+    {n:'Ananya Iyer',p:'+91 99715 33098',i:'ATS Knightsbridge · 4 BHK',s:88,idle:'1 d',b:'₹4.1 Cr'},
+    {n:'Kartik Anand',p:'+91 97180 55412',i:'Gaur Yamuna City · Plot',s:81,idle:'2 d',b:'₹85 L'},
+    {n:'Meera Nambiar',p:'+91 98735 60117',i:'Eldeco Greens · 2 BHK',s:76,idle:'3 d',b:'₹1.2 Cr'},
+    {n:'Rohit Malhotra',p:'+91 99998 21763',i:'Ace Divino · 3 BHK',s:72,idle:'4 d',b:'₹1.6 Cr'}];
+  document.getElementById('hotLeads').innerHTML=d.map((r,i)=>{
+    const c=r.s>=85?C.hot:r.s>=75?C.warm:C.cold;
+    return `<tr>
+      <td><div class="cell-p"><div class="avt" style="background:${AV[i%6]}">${ini(r.n)}</div>
+        <div><div class="cell-n">${r.n}</div><div class="cell-m">${r.p}</div></div></div></td>
+      <td style="font-size:12.5px;color:var(--text-2)">${r.i}</td>
+      <td><div class="score"><b class="num" style="font-size:12.5px;color:${c}">${r.s}</b>
+        <span class="score-bar"><i style="width:${r.s}%;background:${c}"></i></span></div></td>
+      <td class="num" style="font-size:12px;color:var(--text-2)">${r.idle}</td>
+      <td class="r money">${r.b}</td>
+      <td class="r"><div class="rowact">
+        <button class="mini" title="Call"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.1a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg></button>
+        <button class="mini" title="WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-12.6 7.3L3 20.5l1.8-5.3A8.5 8.5 0 1 1 21 11.5Z"/></svg></button>
+      </div></td></tr>`}).join('');
+})();
+
+/* ─ leads table ─ */
+(function(){
+  const HEAT={hot:['c-hot','Hot'],warm:['c-warm','Warm'],cold:['c-cold','Cold'],won:['c-won','Converted']};
+  const d=[
+    {n:'Farhan Qureshi',p:'+91 98118 40221',h:'hot',st:'Negotiation',i:'Godrej Woods, Sector 43',b:'₹2.4 Cr',s:'Referral',o:'Priya R.',a:'Send payment plan',ac:'hot',sp:[3,5,4,7,9,8,12]},
+    {n:'Ananya Iyer',p:'+91 99715 33098',h:'hot',st:'Site visit',i:'ATS Knightsbridge, Sec 124',b:'₹4.1 Cr',s:'99acres',o:'Aditya S.',a:'Visit 10:30 today',ac:'visit',sp:[2,3,5,4,6,9,11]},
+    {n:'Meera Nambiar',p:'+91 98735 60117',h:'warm',st:'Qualified',i:'Eldeco Greens, Sec 150',b:'₹1.2 Cr',s:'Meta ads',o:'Nikhil B.',a:'Confirm 4:30 slot',ac:'warm',sp:[4,4,3,5,4,6,5]},
+    {n:'Kartik Anand',p:'+91 97180 55412',h:'hot',st:'Token',i:'Gaur Yamuna City · Plot',b:'₹85 L',s:'Walk-in',o:'Priya R.',a:'Collect ₹5 L token',ac:'brass',sp:[1,3,6,8,9,11,14]},
+    {n:'Rohit Malhotra',p:'+91 99998 21763',h:'warm',st:'Site visit',i:'Ace Divino, Sector 1',b:'₹1.6 Cr',s:'MagicBricks',o:'Sana K.',a:'Second visit 12:00',ac:'visit',sp:[3,4,4,6,5,7,8]},
+    {n:'Divya Rathore',p:'+91 98101 77340',h:'cold',st:'New',i:'Undecided · Greater Noida',b:'₹60 L',s:'Website',o:'Unassigned',a:'No reply · 16 days',ac:'cold',sp:[6,5,4,3,2,2,1]},
+    {n:'Imran Sheikh',p:'+91 99534 12908',h:'won',st:'Registered',i:'Godrej Woods · 3 BHK',b:'₹2.1 Cr',s:'Channel partner',o:'Aditya S.',a:'Payout raised',ac:'won',sp:[2,4,6,9,11,13,15]},
+    {n:'Nandini Verma',p:'+91 98999 20514',h:'warm',st:'Qualified',i:'Godrej Woods · 2 BHK',b:'₹1.4 Cr',s:'Referral',o:'Nikhil B.',a:'Share brochure',ac:'warm',sp:[3,3,5,4,6,5,7]}];
+  document.getElementById('leadRows').innerHTML=d.map((r,i)=>{
+    const [cls,lab]=HEAT[r.h];
+    const sc={hot:C.hot,warm:C.warm,cold:C.cold,won:C.won}[r.h];
+    return `<tr>
+      <td><input type="checkbox"/></td>
+      <td><div class="cell-p"><div class="avt" style="background:${AV[i%6]}">${ini(r.n)}</div>
+        <div><div class="cell-n">${r.n}</div><div class="cell-m">${r.p}</div></div>
+        <span style="margin-left:6px">${spark(r.sp,sc)}</span></div></td>
+      <td><span class="chip ${cls}"><span class="pip"></span>${lab}</span></td>
+      <td style="font-size:12.5px;font-weight:500">${r.st}</td>
+      <td style="font-size:12.5px;color:var(--text-2)">${r.i}</td>
+      <td class="r money">${r.b}</td>
+      <td style="font-size:12px;color:var(--text-2)">${r.s}</td>
+      <td style="font-size:12.5px">${r.o==='Unassigned'?'<span style="color:var(--hot);font-weight:500">Unassigned</span>':r.o}</td>
+      <td><span class="chip c-${r.ac}">${r.a}</span></td>
+      <td class="r"><div class="rowact">
+        <button class="mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.1a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg></button>
+        <button class="mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-12.6 7.3L3 20.5l1.8-5.3A8.5 8.5 0 1 1 21 11.5Z"/></svg></button>
+        <button class="mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+      </div></td></tr>`}).join('');
+})();
+
+/* ─ kanban ─ */
+(function(){
+  const cols=[
+    {n:'Discovery',c:C.cold,v:'₹6.10 Cr',cards:[
+      {n:'Divya Rathore',p:'Ace Divino · 2 BHK',v:'₹60.0 L',pr:20,d:'4d',o:'NB'},
+      {n:'Sameer Joshi',p:'Gaur City · 3 BHK',v:'₹92.0 L',pr:20,d:'2d',o:'SK'},
+      {n:'Pooja Bhandari',p:'Eldeco Greens · 2 BHK',v:'₹1.15 Cr',pr:20,d:'6d',o:'PR'}]},
+    {n:'Site visit',c:C.visit,v:'₹4.90 Cr',cards:[
+      {n:'Ananya Iyer',p:'ATS Knightsbridge · 4 BHK',v:'₹4.10 Cr',pr:40,d:'today',o:'AS',hot:1},
+      {n:'Rohit Malhotra',p:'Ace Divino · 3 BHK',v:'₹1.60 Cr',pr:40,d:'today',o:'SK'}]},
+    {n:'Negotiation',c:C.warm,v:'₹3.80 Cr',cards:[
+      {n:'Farhan Qureshi',p:'Godrej Woods · 3 BHK',v:'₹2.40 Cr',pr:65,d:'11d',o:'PR',hot:1},
+      {n:'Nandini Verma',p:'Godrej Woods · 2 BHK',v:'₹1.40 Cr',pr:65,d:'8d',o:'NB'}]},
+    {n:'Token paid',c:C.brass,v:'₹2.90 Cr',cards:[
+      {n:'Kartik Anand',p:'Gaur Yamuna City · Plot',v:'₹85.0 L',pr:85,d:'3d',o:'PR'},
+      {n:'Suhail Ahmed',p:'Godrej Woods · 3 BHK',v:'₹2.05 Cr',pr:85,d:'1d',o:'AS'}]},
+    {n:'Registered',c:C.won,v:'₹4.82 Cr',cards:[
+      {n:'Imran Sheikh',p:'Godrej Woods · 3 BHK',v:'₹2.10 Cr',pr:100,d:'done',o:'AS'},
+      {n:'Ritu Chawla',p:'ATS Pristine · 4 BHK',v:'₹2.72 Cr',pr:100,d:'done',o:'PR'}]}];
+  document.getElementById('kanban').innerHTML=cols.map(col=>`
+    <div class="kcol">
+      <div class="kh"><div class="kh-l"><span class="bar" style="background:${col.c}"></span>${col.n}</div>
+        <span class="kh-c">${col.cards.length}</span></div>
+      <div class="kh-v">${col.v}</div>
+      ${col.cards.map(k=>`
+        <div class="kcard">
+          <div class="kc-top"><div><div class="kc-n">${k.n}</div><div class="kc-p">${k.p}</div></div>
+            ${k.hot?'<span class="chip c-hot" style="padding:1px 6px;font-size:10px">HOT</span>':''}</div>
+          <div class="kc-v" style="color:${col.c}">${k.v}</div>
+          <div class="kc-f">
+            <span class="prob">${k.pr}%<i><b style="width:${k.pr}%;background:${col.c}"></b></i></span>
+            <span class="kc-meta">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>${k.d}
+              <span class="avt" style="width:20px;height:20px;border-radius:5px;font-size:9px;background:${AV[k.o.charCodeAt(0)%6]};margin-left:4px">${k.o}</span>
+            </span></div>
+        </div>`).join('')}
+      <button class="kadd">+ Add deal</button>
+    </div>`).join('');
+})();
+
+/* ─ property cards ─ */
+(function(){
+  const d=[
+    {n:'Godrej Woods',l:'Sector 43, Noida',b:'Godrej Properties',p:'₹2.10 – 4.40 Cr',cfg:'2, 3, 4 BHK',ar:'1,250 – 2,890',u:14,tag:['Premium','brass'],st:'Ready'},
+    {n:'ATS Knightsbridge',l:'Sector 124, Noida',b:'ATS Infrastructure',p:'₹8.50 – 14.0 Cr',cfg:'4, 5 BHK',ar:'5,000 – 8,100',u:3,tag:['Luxury','visit'],st:'Ready'},
+    {n:'Gaur Yamuna City',l:'YEX Expressway',b:'Gaursons India',p:'₹45.0 L – 1.20 Cr',cfg:'Plots · 100–300 sq yd',ar:'900 – 2,700',u:42,tag:['New launch','brand'],st:'Under construction'},
+    {n:'Eldeco Live Greens',l:'Sector 150, Noida',b:'Eldeco Group',p:'₹1.15 – 2.30 Cr',cfg:'2, 3 BHK',ar:'1,095 – 1,845',u:8,tag:['Best seller','won'],st:'Under construction'}];
+  document.getElementById('propCards').innerHTML=d.map(p=>`
+    <div class="plate pcard">
+      <div class="pimg"><div class="grid"></div>
+        <div class="tags"><span class="chip c-${p.tag[1]}">${p.tag[0]}</span>
+          ${p.u<=5?'<span class="chip c-hot"><span class="pip"></span>'+p.u+' left</span>':''}</div>
+        <button class="save"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>
+        <div class="rera"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m20 6-11 11-5-5"/></svg>RERA VERIFIED</div>
+      </div>
+      <div class="pb">
+        <div class="p-n">${p.n}</div>
+        <div class="p-l"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>${p.l}</div>
+        <div class="p-price">${p.p}</div>
+        <div class="p-specs">
+          <span class="p-spec"><b>${p.cfg.split('·')[0].trim()}</b></span>
+          <span class="p-spec"><b>${p.ar}</b> sq ft</span>
+          <span class="p-spec" style="margin-left:auto;color:${p.u<=5?'var(--hot)':'var(--text-2)'}"><b style="color:inherit">${p.u}</b> units</span>
+        </div>
+      </div>
+    </div>`).join('');
+})();
+
+/* ─ property table ─ */
+(function(){
+  const d=[
+    {n:'Godrej Woods',b:'Godrej Properties',c:'2, 3, 4 BHK',p:'₹2.10 – 4.40 Cr',a:14,tot:120,st:['Ready','won'],pay:'2.0%'},
+    {n:'ATS Knightsbridge',b:'ATS Infrastructure',c:'4, 5 BHK',p:'₹8.50 – 14.0 Cr',a:3,tot:64,st:['Ready','won'],pay:'2.5%'},
+    {n:'Gaur Yamuna City',b:'Gaursons India',c:'Plots',p:'₹45.0 L – 1.20 Cr',a:42,tot:210,st:['Under construction','warm'],pay:'3.0%'},
+    {n:'Eldeco Live Greens',b:'Eldeco Group',c:'2, 3 BHK',p:'₹1.15 – 2.30 Cr',a:8,tot:96,st:['Under construction','warm'],pay:'2.25%'},
+    {n:'Ace Divino',b:'Ace Group',c:'2, 3 BHK',p:'₹78.0 L – 1.60 Cr',a:0,tot:180,st:['Sold out','cold'],pay:'—'},
+    {n:'ATS Pristine',b:'ATS Infrastructure',c:'3, 4 BHK',p:'₹2.60 – 4.80 Cr',a:19,tot:88,st:['New launch','brand'],pay:'2.75%'}];
+  document.getElementById('propRows').innerHTML=d.map(r=>{
+    const pct=Math.round((r.a/r.tot)*100), c=r.a===0?C.cold:pct<10?C.hot:pct<30?C.warm:C.won;
+    return `<tr>
+      <td><div class="cell-n">${r.n}</div><div class="cell-m">PROP-${(1000+Math.floor(Math.random()*8999))}</div></td>
+      <td style="font-size:12.5px;color:var(--text-2)">${r.b}</td>
+      <td style="font-size:12.5px">${r.c}</td>
+      <td class="r money">${r.p}</td>
+      <td><div class="score"><b class="num" style="font-size:12.5px;color:${c}">${r.a}</b>
+        <span style="color:var(--text-3);font-size:11px" class="num">/ ${r.tot}</span>
+        <span class="score-bar" style="width:52px"><i style="width:${pct}%;background:${c}"></i></span></div></td>
+      <td><span class="chip c-${r.st[1]}"><span class="pip"></span>${r.st[0]}</span></td>
+      <td class="r money" style="color:${r.pay==='—'?'var(--text-3)':'var(--brass)'}">${r.pay}</td>
+      <td class="r"><div class="rowact"><button class="mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></td>
+    </tr>`}).join('');
+})();
+
+/* ─ tabs ─ */
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  document.getElementById(b.dataset.t).classList.add('on');
+  document.querySelector('.crumb').innerHTML='WORKSPACE / <b>'+b.textContent.toUpperCase()+'</b>';
+  window.scrollTo({top:0});
+});
+/* ─ segmented controls ─ */
+document.querySelectorAll('.seg').forEach(s=>s.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  s.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on')}));
+</script>
+</body>
+</html>

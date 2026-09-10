@@ -46,9 +46,9 @@ class DashboardScreen extends ConsumerWidget {
                   width: 36, height: 36,
                   decoration: BoxDecoration(
                     color: AppColors.yellow,
-                    border: Border.all(color: AppColors.black, width: 2),
+                    border: Border.all(color: AppColors.black, width: 1),
                   ),
-                  child: const Center(child: Text('D', style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 18))),
+                  child: const Center(child: Text('D', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18))),
                 ),
                 const SizedBox(width: 10),
                 const Text('DialEasypro', style: AppTextStyles.h3),
@@ -166,7 +166,7 @@ class DashboardScreen extends ConsumerWidget {
                   icon: Icons.history,
                   action: TextButton(
                     onPressed: () => context.go('/leads'),
-                    child: const Text('All →', style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.black)),
+                    child: const Text('All →', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.black)),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -210,16 +210,16 @@ class _Greeting extends StatelessWidget {
       child: Row(children: [
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('$greet, ${agent?.name.split(' ').first ?? 'Agent'}! $emoji',
-              style: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.yellow)),
+              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.yellow)),
           const SizedBox(height: 3),
           Text(Fmt.date(DateTime.now().toIso8601String()),
-              style: const TextStyle(fontFamily: 'DMSans', fontSize: 12, color: AppColors.muted)),
+              style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.muted)),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(border: Border.all(color: AppColors.yellow, width: 1.5)),
+          decoration: BoxDecoration(border: Border.all(color: AppColors.yellow, width: 1)),
           child: Text((agent?.role ?? 'agent').toUpperCase(),
-              style: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.yellow, letterSpacing: 0.5)),
+              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.yellow, letterSpacing: 0.5)),
         ),
       ]),
     );
@@ -244,17 +244,17 @@ class _AutoDialerCTA extends StatelessWidget {
               width: 56, height: 56,
               decoration: BoxDecoration(
                 color: AppColors.black,
-                border: Border.all(color: AppColors.black, width: 2),
+                border: Border.all(color: AppColors.black, width: 1),
               ),
               child: const Icon(Icons.flash_on, color: AppColors.yellow, size: 30),
             ),
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
               Text('Auto-Dialer Queue',
-                  style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.black)),
+                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.black)),
               SizedBox(height: 2),
               Text('Dial leads one-by-one. No tap needed.',
-                  style: TextStyle(fontFamily: 'DMSans', fontSize: 12, color: AppColors.dark)),
+                  style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.dark)),
             ])),
             const Icon(Icons.arrow_forward, color: AppColors.black),
           ]),
@@ -309,26 +309,26 @@ class _TodayCallsCard extends StatelessWidget {
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: AppColors.yellow,
-            border: Border.all(color: AppColors.black, width: 1.5),
+            border: Border.all(color: AppColors.black, width: 1),
           ),
           child: const Icon(Icons.phone_in_talk, color: AppColors.black, size: 22),
         ),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('TODAY\'S CALLS',
-              style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.muted, letterSpacing: 0.6)),
+              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.muted, letterSpacing: 0.6)),
           const SizedBox(height: 3),
           Text('${today['total'] ?? 0} total · ${today['connected'] ?? 0} connected',
-              style: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.yellow)),
+              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.yellow)),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
             color: AppColors.yellow,
-            border: Border.all(color: AppColors.black, width: 1.5),
+            border: Border.all(color: AppColors.black, width: 1),
           ),
           child: Text('${period['connection_rate'] ?? 0}%',
-              style: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 13)),
+              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 13)),
         ),
       ]),
     );
@@ -359,10 +359,10 @@ class _PipelineCard extends StatelessWidget {
           child: Row(children: [
             SizedBox(width: 90, child: Text(e.$1, style: AppTextStyles.body)),
             Expanded(child: Stack(children: [
-              Container(height: 12, decoration: BoxDecoration(color: AppColors.greyLight, border: Border.all(color: AppColors.black, width: 1.5))),
+              Container(height: 12, decoration: BoxDecoration(color: AppColors.greyLight, border: Border.all(color: AppColors.black, width: 1))),
               if (total > 0) FractionallySizedBox(
                 widthFactor: e.$2 / total,
-                child: Container(height: 12, decoration: BoxDecoration(color: e.$3, border: Border.all(color: AppColors.black, width: 1.5))),
+                child: Container(height: 12, decoration: BoxDecoration(color: e.$3, border: Border.all(color: AppColors.black, width: 1))),
               ),
             ])),
             const SizedBox(width: 8),
@@ -441,7 +441,7 @@ class _TasksCard extends StatelessWidget {
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: hasOverdue ? AppColors.error : AppColors.warning,
-            border: Border.all(color: AppColors.black, width: 1.5),
+            border: Border.all(color: AppColors.black, width: 1),
           ),
           child: Icon(
             hasOverdue ? Icons.warning_amber_rounded : Icons.event_available,
@@ -453,7 +453,7 @@ class _TasksCard extends StatelessWidget {
           Text(
             hasOverdue ? '${stats.overdueFollowups} OVERDUE!' : "TODAY'S TASKS",
             style: const TextStyle(
-              fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700,
+              fontFamily: 'Archivo', fontWeight: FontWeight.w700,
               fontSize: 11, color: AppColors.black, letterSpacing: 0.5,
             ),
           ),

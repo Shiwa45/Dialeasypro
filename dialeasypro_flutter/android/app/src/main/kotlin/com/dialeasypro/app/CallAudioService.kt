@@ -72,7 +72,7 @@ class CallAudioService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
-            startForeground(NOTIFICATION_ID, buildNotification())
+            startForegroundCompat(NOTIFICATION_ID, buildNotification())
         } catch (e: Exception) {
             Log.w(TAG, "startForeground rejected: ${e.javaClass.simpleName}")
             stopSelf()
@@ -83,7 +83,7 @@ class CallAudioService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startForeground(id: Int, notification: Notification) {
+    private fun startForegroundCompat(id: Int, notification: Notification) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Android 14 requires the declared type to match the manifest, and
             // requires FOREGROUND_SERVICE_MICROPHONE to be granted.

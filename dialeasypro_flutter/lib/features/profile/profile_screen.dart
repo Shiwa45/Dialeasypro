@@ -108,8 +108,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             BrutalAvatar(name: agent?.name ?? 'A', size: 64, backgroundColor: AppColors.yellow),
             const SizedBox(width: 16),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(agent?.name ?? '', style: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.yellow)),
-              Text(agent?.email ?? '', style: const TextStyle(fontFamily: 'DMSans', fontSize: 12, color: AppColors.muted)),
+              Text(agent?.name ?? '', style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.yellow)),
+              Text(agent?.email ?? '', style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.muted)),
               const SizedBox(height: 6),
               TagChip(label: agent?.roleDisplay ?? agent?.role ?? '', backgroundColor: AppColors.yellow),
             ])),
@@ -130,12 +130,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   color: AppColors.white,
-                  border: Border.all(color: AppColors.black, width: 1.5),
+                  border: Border.all(color: AppColors.black, width: 1),
                 ),
                 child: Row(children: [
                   Expanded(child: Text(
                     TenantConfig.instance.summary,
-                    style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.black),
+                    style: const TextStyle(fontFamily: 'IBMPlexMono', fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.black),
                     overflow: TextOverflow.ellipsis,
                   )),
                   TagChip(
@@ -148,7 +148,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               const SizedBox(height: 4),
               Text(
                 TenantConfig.instance.apiBaseUrl,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: AppColors.greyDark),
+                style: const TextStyle(fontFamily: 'IBMPlexMono', fontSize: 10, color: AppColors.greyDark),
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 10),
@@ -322,11 +322,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 padding: const EdgeInsets.all(10),
                 color: AppColors.infoBg,
                 child: const Text(
-                  'Best quality comes from your phone's own call recorder — turn it '
+                  // Double-quoted: the copy contains an apostrophe, and a
+                  // single-quoted Dart string would end at it.
+                  "Best quality comes from your phone's own call recorder — turn it "
                   'on in the Dialer app settings and grant "All files access" here. '
                   'Without one, the app records through the microphone; put the call '
                   'on speaker so both sides are captured.',
-                  style: TextStyle(fontFamily: 'DMSans', fontSize: 11.5, color: AppColors.dark, height: 1.4),
+                  style: TextStyle(fontFamily: 'Archivo', fontSize: 11.5, color: AppColors.dark, height: 1.4),
                 ),
               ),
               const SizedBox(height: 10),
@@ -365,7 +367,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: AppColors.white,
-                    border: Border.all(color: AppColors.error, width: 2),
+                    border: Border.all(color: AppColors.error, width: 1),
                   ),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     const Text('LAST RECORDING ISSUE', style: AppTextStyles.label),
@@ -373,7 +375,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Text(
                       CallRecordingService.instance.lastError!,
                       style: const TextStyle(
-                          fontFamily: 'DMSans', fontSize: 11.5,
+                          fontFamily: 'Archivo', fontSize: 11.5,
                           color: AppColors.dark, height: 1.4),
                     ),
                   ]),
@@ -476,15 +478,15 @@ class _WaModeBox extends StatelessWidget {
             width: 12, height: 12,
             decoration: BoxDecoration(
               color: selected ? AppColors.white : AppColors.white,
-              border: Border.all(color: AppColors.black, width: 1.5),
+              border: Border.all(color: AppColors.black, width: 1),
             ),
             child: selected ? const Icon(Icons.check, size: 8, color: AppColors.black) : null,
           ),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 11, color: selected ? AppColors.white : AppColors.black)),
+          Text(label, style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 11, color: selected ? AppColors.white : AppColors.black)),
         ]),
         const SizedBox(height: 3),
-        Text(subtitle, style: TextStyle(fontFamily: 'DMSans', fontSize: 10, color: selected ? AppColors.white.withOpacity(0.85) : AppColors.grey)),
+        Text(subtitle, style: TextStyle(fontFamily: 'Archivo', fontSize: 10, color: selected ? AppColors.white.withOpacity(0.85) : AppColors.grey)),
       ]),
     );
   }

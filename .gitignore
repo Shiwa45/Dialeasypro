@@ -123,3 +123,4 @@ dialeasypro_flutter/build/
 # sits inside this folder. Ignored so a `git add -A` here can never pull it
 # into the backend repo as a stray gitlink.
 Dialeasyproreact/
+docker-compose.override.yml

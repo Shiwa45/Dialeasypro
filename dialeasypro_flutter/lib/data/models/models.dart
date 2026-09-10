@@ -104,18 +104,35 @@ class FollowUp {
   final String scheduledAt, notes, createdAt;
   final bool isCompleted, isOverdue;
   final String? completedAt;
+  /// Who the follow-up is with. A lock-screen reminder saying "follow up with
+  /// lead 54" is useless, and resolving it needed a request per follow-up
+  /// until the serializer started sending it.
+  final String? leadName;
+  final String? leadPhone;
 
   const FollowUp({
     required this.id, required this.lead, required this.assignedTo,
     this.assignedToName = '', required this.followupType, this.followupTypeDisplay = '',
     required this.scheduledAt, this.notes = '', required this.createdAt,
     this.isCompleted = false, this.isOverdue = false, this.completedAt,
+    this.leadName, this.leadPhone,
   });
+
+  /// Alias so callers reading a reminder do not have to remember that the
+  /// foreign key is called `lead`.
+  int get leadId => lead;
+
+  /// Parsed local time, or the epoch when the server sent nothing usable —
+  /// scheduling code checks that the time is in the future anyway, so an
+  /// unparseable value is simply skipped rather than throwing.
+  DateTime get scheduledAtLocal =>
+      DateTime.tryParse(scheduledAt)?.toLocal() ??
+      DateTime.fromMillisecondsSinceEpoch(0);
 
   factory FollowUp.fromJson(Map<String, dynamic> j) => FollowUp(
     id: j['id'] as int,
     lead: j['lead'] as int,
-    assignedTo: j['assigned_to'] as int,
+    assignedTo: j['assigned_to'] as int? ?? 0,
     assignedToName: j['assigned_to_name'] as String? ?? '',
     followupType: j['followup_type'] as String? ?? 'call',
     followupTypeDisplay: j['followup_type_display'] as String? ?? '',
@@ -125,6 +142,38 @@ class FollowUp {
     isCompleted: j['is_completed'] as bool? ?? false,
     isOverdue: j['is_overdue'] as bool? ?? false,
     completedAt: j['completed_at'] as String?,
+    leadName: j['lead_name'] as String?,
+    leadPhone: j['lead_phone'] as String?,
+  );
+}
+
+/// One notification, matching apps/authentication/serializers_notifications.py.
+class AppNotification {
+  final int id;
+  final String kind, title, body, url;
+  final int? leadId, followupId;
+  final bool isRead;
+  final String createdAt;
+
+  const AppNotification({
+    required this.id, required this.kind, required this.title,
+    this.body = '', this.url = '',
+    this.leadId, this.followupId,
+    this.isRead = false, this.createdAt = '',
+  });
+
+  DateTime? get createdAtLocal => DateTime.tryParse(createdAt)?.toLocal();
+
+  factory AppNotification.fromJson(Map<String, dynamic> j) => AppNotification(
+    id: j['id'] as int,
+    kind: j['kind'] as String? ?? 'system',
+    title: j['title'] as String? ?? '',
+    body: j['body'] as String? ?? '',
+    url: j['url'] as String? ?? '',
+    leadId: j['lead_id'] as int?,
+    followupId: j['followup_id'] as int?,
+    isRead: j['is_read'] as bool? ?? false,
+    createdAt: j['created_at'] as String? ?? '',
   );
 }
 

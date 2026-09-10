@@ -6,6 +6,7 @@ import 'core/services/setup_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/colors.dart';
 import 'data/models/addon_models.dart';
+import 'features/notifications/notifications_screen.dart';
 import 'features/auth/auth_provider.dart';
 import 'features/auth/login_screen.dart';
 import 'features/calls/calls_screen.dart';
@@ -95,6 +96,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
       GoRoute(path: '/followups', builder: (_, __) => const FollowupsScreen()),
+      GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/dialer/queue', builder: (_, __) => const QueueStarterScreen()),
       GoRoute(path: '/dialer', builder: (_, __) => const DialerScreen()),
     ],
@@ -103,8 +105,8 @@ final _routerProvider = Provider<GoRouter>((ref) {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('404', style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 72, color: AppColors.yellow)),
-            const Text('Page not found', style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w600, fontSize: 18)),
+            const Text('404', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 72, color: AppColors.yellow)),
+            const Text('Page not found', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w600, fontSize: 18)),
             const SizedBox(height: 20),
             ElevatedButton(onPressed: () => GoRouter.of(_).go('/'), child: const Text('Go Home')),
           ],
@@ -195,7 +197,7 @@ class _MainShellState extends ConsumerState<_MainShell>
       body: widget.child,
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: AppColors.black, width: 2)),
+          border: Border(top: BorderSide(color: AppColors.black, width: 1)),
         ),
         child: BottomNavigationBar(
           currentIndex: _idx,
@@ -213,14 +215,14 @@ class _MainShellState extends ConsumerState<_MainShell>
               padding: const EdgeInsets.only(bottom: 3),
               child: Container(
                 padding: EdgeInsets.all(_idx == e.key ? 4 : 0),
-                decoration: _idx == e.key ? BoxDecoration(color: AppColors.yellow, border: Border.all(color: AppColors.black, width: 1.5)) : null,
+                decoration: _idx == e.key ? BoxDecoration(color: AppColors.yellow, border: Border.all(color: AppColors.black, width: 1)) : null,
                 child: Icon(_idx == e.key ? e.value.activeIcon : e.value.icon, size: 20),
               ),
             ),
             label: e.value.label,
           )).toList(),
-          selectedLabelStyle: const TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 10),
-          unselectedLabelStyle: const TextStyle(fontFamily: 'DMSans', fontSize: 10),
+          selectedLabelStyle: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10),
+          unselectedLabelStyle: const TextStyle(fontFamily: 'Archivo', fontSize: 10),
         ),
       ),
     );

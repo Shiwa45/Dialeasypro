@@ -76,3 +76,146 @@
     Maintains conversation thread per lead.\n\n| Field | Type | Properties |\n|---|---|---|\n| created_at | DateTimeField | Blank |\n| updated_at | DateTimeField | Blank |\n| id | UUIDField | PK, Unique |\n| lead | ForeignKey | FK -> Lead |\n| sent_by | ForeignKey | Nullable, Blank, FK -> Agent |\n| direction | CharField |  |\n| message_type | CharField |  |\n| content | TextField | Blank |\n| template | ForeignKey | Nullable, Blank, FK -> WhatsAppTemplate |\n| provider | CharField |  |\n| provider_message_id | CharField | Blank |\n| status | CharField |  |\n| sent_at | DateTimeField | Nullable, Blank |\n| delivered_at | DateTimeField | Nullable, Blank |\n| read_at | DateTimeField | Nullable, Blank |\n| error_message | CharField | Blank |\n| media_url | CharField | Blank |\n| campaign | ForeignKey | Nullable, Blank, FK -> BulkCampaign |\n\n### BulkCampaign\n*Table: communications_bulkcampaign*\n> A bulk communication campaign targeting multiple leads.
     Supports WhatsApp, Email, and SMS channels.\n\n| Field | Type | Properties |\n|---|---|---|\n| whatsapp_messages | Reverse Relation | -> WhatsAppMessage |\n| recipients | Reverse Relation | -> CampaignRecipient |\n| emails | Reverse Relation | -> EmailLog |\n| sms_messages | Reverse Relation | -> SMSLog |\n| created_at | DateTimeField | Blank |\n| updated_at | DateTimeField | Blank |\n| id | UUIDField | PK, Unique |\n| name | CharField |  |\n| channel | CharField |  |\n| created_by | ForeignKey | Nullable, FK -> Agent |\n| audience_filters | JSONField |  |\n| estimated_recipients | PositiveIntegerField |  |\n| template | ForeignKey | Nullable, Blank, FK -> WhatsAppTemplate |\n| email_subject | CharField | Blank |\n| email_body | TextField | Blank |\n| sms_text | CharField | Blank |\n| sms_sender_id | CharField | Blank |\n| status | CharField |  |\n| scheduled_at | DateTimeField | Nullable, Blank |\n| started_at | DateTimeField | Nullable, Blank |\n| completed_at | DateTimeField | Nullable, Blank |\n| total_recipients | PositiveIntegerField |  |\n| sent_count | PositiveIntegerField |  |\n| delivered_count | PositiveIntegerField |  |\n| failed_count | PositiveIntegerField |  |\n| replied_count | PositiveIntegerField |  |\n| celery_task_id | CharField | Blank |\n\n### CampaignRecipient\n*Table: communications_campaignrecipient*\n> Per-lead row in a bulk campaign — tracks individual delivery status.\n\n| Field | Type | Properties |\n|---|---|---|\n| id | BigAutoField | PK, Unique, Blank |\n| campaign | ForeignKey | FK -> BulkCampaign |\n| lead | ForeignKey | FK -> Lead |\n| phone | CharField |  |\n| status | CharField |  |\n| error_message | CharField | Blank |\n| sent_at | DateTimeField | Nullable, Blank |\n| provider_message_id | CharField | Blank |\n\n### EmailLog\n*Table: communications_emaillog*\n> Record of a single email sent from the CRM.\n\n| Field | Type | Properties |\n|---|---|---|\n| created_at | DateTimeField | Blank |\n| updated_at | DateTimeField | Blank |\n| id | UUIDField | PK, Unique |\n| lead | ForeignKey | Nullable, Blank, FK -> Lead |\n| sent_by | ForeignKey | Nullable, Blank, FK -> Agent |\n| campaign | ForeignKey | Nullable, Blank, FK -> BulkCampaign |\n| to_email | CharField |  |\n| subject | CharField |  |\n| body | TextField |  |\n| status | CharField |  |\n| provider | CharField | Blank |\n| provider_message_id | CharField | Blank |\n| sent_at | DateTimeField | Nullable, Blank |\n| opened_at | DateTimeField | Nullable, Blank |\n| error_message | CharField | Blank |\n\n### SMSLog\n*Table: communications_smslog*\n> Record of a single SMS sent from the CRM.\n\n| Field | Type | Properties |\n|---|---|---|\n| created_at | DateTimeField | Blank |\n| updated_at | DateTimeField | Blank |\n| id | UUIDField | PK, Unique |\n| lead | ForeignKey | Nullable, Blank, FK -> Lead |\n| sent_by | ForeignKey | Nullable, Blank, FK -> Agent |\n| campaign | ForeignKey | Nullable, Blank, FK -> BulkCampaign |\n| phone_number | CharField |  |\n| message | CharField |  |\n| sender_id | CharField | Blank |\n| status | CharField |  |\n| provider | CharField | Blank |\n| provider_message_id | CharField | Blank |\n| sent_at | DateTimeField | Nullable, Blank |\n| delivered_at | DateTimeField | Nullable, Blank |\n| error_message | CharField | Blank |\n| cost_paise | PositiveIntegerField |  |\n\n## Integrations (apps.integrations)\n\n### LeadSourceConfig\n*Table: integrations_leadsourceconfig*\n> Per-tenant configuration for a lead source integration.
     Stores provider-specific credentials and options.\n\n| Field | Type | Properties |\n|---|---|---|\n| webhook_logs | Reverse Relation | -> WebhookLog |\n| id | BigAutoField | PK, Unique, Blank |\n| created_at | DateTimeField | Blank |\n| updated_at | DateTimeField | Blank |\n| source | CharField | Unique |\n| is_active | BooleanField |  |\n| status | CharField |  |\n| credentials | JSONField | Blank |\n| options | JSONField | Blank |\n| webhook_token | CharField | Blank |\n| total_leads_received | PositiveIntegerField |  |\n| last_received_at | DateTimeField | Nullable, Blank |\n| error_message | CharField | Blank |\n\n### WebhookLog\n*Table: integrations_webhooklog*\n> Log of every inbound webhook payload for debugging and replay.\n\n| Field | Type | Properties |\n|---|---|---|\n| created_at | DateTimeField | Blank |\n| updated_at | DateTimeField | Blank |\n| id | UUIDField | PK, Unique |\n| source | CharField |  |\n| config | ForeignKey | Nullable, FK -> LeadSourceConfig |\n| method | CharField |  |\n| headers | JSONField | Blank |\n| payload | JSONField | Blank |\n| processed | BooleanField |  |\n| leads_created | PositiveSmallIntegerField |  |\n| leads_updated | PositiveSmallIntegerField |  |\n| error | CharField | Blank |\n
+---
+
+## Recruitment / ATS (apps.recruitment)
+
+Tenant-schema models for the Recruitment add-on module (`ModuleKey.RECRUITMENT`).
+
+### JobOpening
+*Table: recruitment_jobopening*
+> A role being hired for. `openings` is how many people; `hired_count` counts
+> applications that reached HIRED, so `is_filled` is derived, never stored.
+
+| Field | Type | Notes |
+|---|---|---|
+| title | CharField | |
+| code | CharField | Unique, indexed |
+| department / location | CharField | Blank |
+| employment_type | CharField | Shares `hrms.EmploymentType` |
+| openings | PositiveIntegerField | Positions to fill |
+| min/max_experience_years | DecimalField | max nullable |
+| salary_min / salary_max | DecimalField | Nullable. Commercially sensitive — gated behind `ats.view` |
+| description | TextField | JD |
+| hiring_manager | FK → authentication.Agent | Nullable |
+| status | CharField | draft / open / on_hold / closed |
+| opened_on / closed_on | DateField | Nullable |
+
+### PipelineStage
+*Table: recruitment_pipelinestage*
+> Configurable per tenant, because every company names its stages differently.
+> `is_terminal` marks a stage nobody moves out of. Seeded lazily with six
+> defaults on first read (`services/pipeline.seed_pipeline`).
+
+| Field | Type | Notes |
+|---|---|---|
+| name | CharField | Unique |
+| order | PositiveIntegerField | Indexed; rewritten by the reorder endpoint |
+| is_terminal | BooleanField | Hired / Rejected |
+| is_active | BooleanField | Deactivated rather than deleted (applications PROTECT it) |
+
+### Candidate
+*Table: recruitment_candidate*
+> A PERSON, stored once, independent of the roles they apply for. That is what
+> makes "have we seen this person before?" answerable.
+
+| Field | Type | Notes |
+|---|---|---|
+| name / email / phone | CharField | All indexed; email+phone composite index for dedupe |
+| source | CharField | referral / job_board / linkedin / careers_page / agency / walk_in / other |
+| referred_by | FK → Agent | Nullable |
+| current_company / current_designation | CharField | Blank |
+| total_experience_years | DecimalField | |
+| current_ctc / expected_ctc | DecimalField | Nullable |
+| notice_period_days | PositiveIntegerField | |
+| skills | JSONField | List of strings |
+| resume | FileField | `recruitment/resumes/` |
+| is_active | BooleanField | Archive flag — never hard-deleted |
+
+### Application
+*Table: recruitment_application*
+> One candidate against one opening. **Unique on (candidate, opening)** — a
+> double-click on "Apply" must not create a second pipeline entry.
+
+| Field | Type | Notes |
+|---|---|---|
+| candidate | FK → Candidate | CASCADE |
+| opening | FK → JobOpening | CASCADE |
+| stage | FK → PipelineStage | PROTECT |
+| status | CharField | active / hired / rejected / withdrawn / on_hold — a hard enum, so reporting never depends on stage naming |
+| owner | FK → Agent | The recruiter driving it |
+| applied_on | DateField | |
+| rating | PositiveSmallIntegerField | Nullable, recruiter's own 1–5 |
+| stage_changed_at | DateTimeField | Drives `days_in_stage` |
+
+### ApplicationActivity
+*Table: recruitment_applicationactivity*
+> Append-only audit trail. Never updated or deleted — "who moved this candidate
+> to Rejected, and when?" gets asked months later.
+
+| Field | Type | Notes |
+|---|---|---|
+| application | FK → Application | CASCADE |
+| kind | CharField | created / stage_change / status_change / note / interview / feedback / offer |
+| summary / detail | CharField / TextField | |
+| actor | FK → Agent | Nullable (system actions) |
+
+### Interview
+*Table: recruitment_interview*
+
+| Field | Type | Notes |
+|---|---|---|
+| application | FK → Application | CASCADE |
+| round_number | PositiveSmallIntegerField | |
+| scheduled_at | DateTimeField | Indexed with status |
+| duration_minutes | PositiveSmallIntegerField | |
+| mode | CharField | phone / video / onsite |
+| interviewers | M2M → Agent | The panel |
+| status | CharField | scheduled / completed / cancelled / no_show |
+
+### InterviewFeedback
+*Table: recruitment_interviewfeedback*
+> **One row per interviewer**, unique on (interview, interviewer). A panel where
+> three people disagree is the interesting case; one shared row would lose it.
+
+| Field | Type | Notes |
+|---|---|---|
+| interview | FK → Interview | CASCADE |
+| interviewer | FK → Agent | CASCADE |
+| recommendation | CharField | strong_no … strong_yes (weighted 1–5 for averaging) |
+| scores | JSONField | Per-criterion scores |
+| strengths / concerns / comments | TextField | |
+
+### Offer
+*Table: recruitment_offer*
+> One-to-one with Application. `converted_employee` is what makes the HRMS
+> handover idempotent — a second click returns the same employee.
+
+| Field | Type | Notes |
+|---|---|---|
+| application | OneToOneField → Application | CASCADE |
+| annual_ctc | DecimalField | |
+| fixed_component / variable_component / joining_bonus | DecimalField | Fixed seeds the HRMS salary structure |
+| designation / department / employment_type | CharField | Copied to the Employee on conversion |
+| reporting_to | FK → hrms.Employee | Nullable |
+| joining_date / valid_until | DateField | |
+| offer_letter | FileField | `recruitment/offers/` |
+| status | CharField | draft → sent → accepted / declined / revoked |
+| converted_employee | FK → hrms.Employee | Nullable; set once onboarded |
+
+---
+
+## Roles & capabilities (apps.core)
+
+`AgentRole` gained two back-office roles that sit deliberately outside the CRM
+hierarchy, so a person can own a business module without being handed the CRM:
+
+| Role | Owns | Deliberately cannot |
+|---|---|---|
+| `hr` | HRMS end-to-end incl. payroll, Recruitment | Tenant settings, agent management, billing |
+| `accounts` | Sales & Billing incl. issuing/cancelling invoices | Payroll, tenant settings, agent management |
+
+Module access is decided by `apps/core/capabilities.py` (a role list per action),
+**not** by `AgentRole.HIERARCHY`. Endpoints declare `required_capability` and are
+guarded by `HasCapability` alongside the existing `HasFeatureAccess` plan gate.
+The same table is served to clients at `GET /api/v1/auth/capabilities/`.

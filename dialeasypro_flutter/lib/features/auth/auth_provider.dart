@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/services/notification_service.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
 import '../../data/models/models.dart';
@@ -64,6 +66,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await ApiClient.instance.saveTokens(access: res.access, refresh: res.refresh);
       await _cache(res.agent);
       state = AuthState(status: AuthStatus.authenticated, agent: res.agent);
+      // Arm this phone's follow-up reminders. Android then raises them at the
+      // right time whether or not the app is running or the network is up,
+      // which is the only delivery path that does not depend on push.
+      // Deliberately not awaited: a slow or failed sync must not hold up the
+      // login it follows.
+      unawaited(NotificationService.instance.syncFollowupReminders());
       return true;
     } catch (e) {
       state = AuthState(status: AuthStatus.unauthenticated, error: ApiClient.errorMessage(e));
@@ -72,6 +80,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
+    // Drop the reminders and the device registration before the token goes.
+    // Without this the next person to sign in on this handset keeps receiving
+    // the previous agent's follow-ups.
+    try {
+      await NotificationService.instance.cancelAll();
+      await NotificationsService.instance.registerDevice('');
+    } catch (_) {}
     await ApiClient.instance.clearTokens();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kAgentKey);

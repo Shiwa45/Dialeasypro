@@ -45,7 +45,7 @@ Widget _pill(String value) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: _statusColors[value] ?? AppColors.greyLight,
-        border: Border.all(color: AppColors.black, width: 1.5),
+        border: Border.all(color: AppColors.black, width: 1),
       ),
       child: Text(_pretty(value), style: AppTextStyles.h5.copyWith(fontSize: 9)),
     );
@@ -398,7 +398,7 @@ class _ApplyLeaveFormState extends State<_ApplyLeaveForm> {
       padding: const EdgeInsets.all(20),
       decoration: const BoxDecoration(
         color: AppColors.background,
-        border: Border(top: BorderSide(color: AppColors.black, width: 2)),
+        border: Border(top: BorderSide(color: AppColors.black, width: 1)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Apply for leave', style: AppTextStyles.h3),
@@ -570,7 +570,7 @@ class _ClaimExpenseFormState extends State<_ClaimExpenseForm> {
       padding: const EdgeInsets.all(20),
       decoration: const BoxDecoration(
         color: AppColors.background,
-        border: Border(top: BorderSide(color: AppColors.black, width: 2)),
+        border: Border(top: BorderSide(color: AppColors.black, width: 1)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Claim an expense', style: AppTextStyles.h3),

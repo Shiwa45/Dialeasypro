@@ -139,7 +139,7 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
             child: Row(children: [
               Container(
                 width: 44, height: 44,
-                decoration: BoxDecoration(color: AppColors.teal, border: Border.all(color: AppColors.black, width: 1.5)),
+                decoration: BoxDecoration(color: AppColors.teal, border: Border.all(color: AppColors.black, width: 1)),
                 child: const Icon(Icons.chat_bubble, color: AppColors.white, size: 20),
               ),
               const SizedBox(width: 12),
@@ -195,7 +195,7 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
               data: (templates) => templates.isEmpty
                   ? Container(
                       padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(color: AppColors.warningBg, border: Border.all(color: AppColors.warning, width: 1.5)),
+                      decoration: BoxDecoration(color: AppColors.warningBg, border: Border.all(color: AppColors.warning, width: 1)),
                       child: const Row(children: [
                         Icon(Icons.warning_amber_rounded, color: AppColors.warning),
                         SizedBox(width: 10),
@@ -240,9 +240,9 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
           if ((_useTemplate && _selectedTemplate != null) || _customCtrl.text.isNotEmpty) Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFE7FFDB),
-              border: Border.all(color: AppColors.success, width: 2),
-              boxShadow: const [BoxShadow(color: AppColors.black, offset: Offset(3, 3))],
+              color: AppColors.wonBg,
+              border: Border.all(color: AppColors.success, width: 1),
+              boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Row(children: [
@@ -296,13 +296,13 @@ class _ModeOption extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Icon(icon, size: 24, color: selected ? AppColors.white : color),
         const SizedBox(height: 8),
-        Text(label, style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 14, color: selected ? AppColors.white : AppColors.black)),
-        Text(subtitle, style: TextStyle(fontFamily: 'DMSans', fontSize: 10, color: selected ? AppColors.white.withOpacity(0.85) : AppColors.grey)),
+        Text(label, style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: selected ? AppColors.white : AppColors.black)),
+        Text(subtitle, style: TextStyle(fontFamily: 'Archivo', fontSize: 10, color: selected ? AppColors.white.withOpacity(0.85) : AppColors.grey)),
         const SizedBox(height: 6),
         if (selected) const Row(children: [
           Icon(Icons.check_circle, size: 14, color: AppColors.white),
           SizedBox(width: 4),
-          Text('ACTIVE', style: TextStyle(fontFamily: 'SpaceGrotesk', fontWeight: FontWeight.w700, fontSize: 9, color: AppColors.white, letterSpacing: 0.4)),
+          Text('ACTIVE', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9, color: AppColors.white, letterSpacing: 0.4)),
         ]),
       ]),
     );

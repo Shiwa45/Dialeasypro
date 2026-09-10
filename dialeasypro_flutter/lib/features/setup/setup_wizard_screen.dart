@@ -237,7 +237,7 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
                     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('${e.key + 1}. ',
                           style: const TextStyle(
-                              fontFamily: 'SpaceGrotesk',
+                              fontFamily: 'Archivo',
                               fontWeight: FontWeight.w700,
                               fontSize: 12.5)),
                       Expanded(child: Text(e.value, style: AppTextStyles.caption)),
@@ -251,7 +251,7 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
                 controlAffinity: ListTileControlAffinity.leading,
                 activeColor: AppColors.success,
                 title: const Text("I've turned on call recording",
-                    style: TextStyle(fontFamily: 'DMSans', fontSize: 13)),
+                    style: TextStyle(fontFamily: 'Archivo', fontSize: 13)),
               ),
             ]),
             action: ('Open Phone app settings', _openRecordingSettings),
@@ -357,13 +357,13 @@ class _Step extends StatelessWidget {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: done ? AppColors.success : AppColors.yellow,
-                  border: Border.all(color: AppColors.black, width: 2),
+                  border: Border.all(color: AppColors.black, width: 1),
                 ),
                 child: done
                     ? const Icon(Icons.check, size: 15, color: AppColors.white)
                     : Text('$index',
                         style: const TextStyle(
-                            fontFamily: 'SpaceGrotesk',
+                            fontFamily: 'Archivo',
                             fontWeight: FontWeight.w700,
                             fontSize: 12)),
               ),
@@ -385,7 +385,7 @@ class _Step extends StatelessWidget {
                           const SizedBox(width: 4),
                           Text(c.label,
                               style: const TextStyle(
-                                  fontFamily: 'DMSans', fontSize: 11.5)),
+                                  fontFamily: 'Archivo', fontSize: 11.5)),
                         ]))
                     .toList(),
               ),

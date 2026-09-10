@@ -29,17 +29,27 @@ USE_S3 = False
 DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
 
 # ---- Development: Django Debug Toolbar ---------------------
-try:
-    import debug_toolbar  # noqa: F401
-    INSTALLED_APPS += ["debug_toolbar"]  # noqa: F405
-    MIDDLEWARE.insert(1, "debug_toolbar.middleware.DebugToolbarMiddleware")  # noqa: F405
-    INTERNAL_IPS = ["127.0.0.1", "::1", "0.0.0.0"]
-    DEBUG_TOOLBAR_CONFIG = {
-        "SHOW_TOOLBAR_CALLBACK": lambda request: True,
-        "SHOW_COLLAPSED": True,
-    }
-except ImportError:
-    pass
+#
+# Guarded on DEBUG, not just on the import. The test suite loads this settings
+# module with DEBUG forced to False, and the middleware installed here was
+# still wrapping every request while config/urls.py — which registers the
+# toolbar's URLs under `if settings.DEBUG` — registered nothing. Every test
+# request then died on "NoReverseMatch: 'djdt' is not a registered namespace".
+#
+# The middleware and the URLs have to agree about when the toolbar exists;
+# config/urls.py now keys off this MIDDLEWARE entry so they cannot diverge.
+if DEBUG:
+    try:
+        import debug_toolbar  # noqa: F401
+        INSTALLED_APPS += ["debug_toolbar"]  # noqa: F405
+        MIDDLEWARE.insert(1, "debug_toolbar.middleware.DebugToolbarMiddleware")  # noqa: F405
+        INTERNAL_IPS = ["127.0.0.1", "::1", "0.0.0.0"]
+        DEBUG_TOOLBAR_CONFIG = {
+            "SHOW_TOOLBAR_CALLBACK": lambda request: True,
+            "SHOW_COLLAPSED": True,
+        }
+    except ImportError:
+        pass
 
 # ---- Development: Log SQL queries --------------------------
 LOGGING = {

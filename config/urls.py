@@ -37,6 +37,7 @@ urlpatterns = [
     path("api/v1/reports/", include(("apps.reports.api_urls", "reports"), namespace="api_reports")),
     path("api/v1/hrms/", include(("apps.hrms.api_urls", "hrms"), namespace="api_hrms")),
     path("api/v1/erp/", include(("apps.erp.api_urls", "erp"), namespace="api_erp")),
+    path("api/v1/recruitment/", include(("apps.recruitment.api_urls", "recruitment"), namespace="api_recruitment")),
     path("api/v1/ai/", include(("apps.ai.api_urls", "ai"), namespace="api_ai")),
 
     # ---- Health Check (used by load balancer) --------------
@@ -51,6 +52,12 @@ urlpatterns = [
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+
+    # DRF browsable API — a development convenience, so it belongs here.
+    urlpatterns += [
+        path("api-auth/", include("rest_framework.urls", namespace="rest_framework")),
+    ]
+
 else:
     urlpatterns += [
         re_path(
@@ -60,19 +67,19 @@ else:
         ),
     ]
 
-    # DRF Browsable API in debug mode
-    urlpatterns += [
-        path("api-auth/", include("rest_framework.urls", namespace="rest_framework")),
-    ]
-
-    # Django Debug Toolbar
-    try:
-        import debug_toolbar
-        urlpatterns = [
-            path("__debug__/", include(debug_toolbar.urls)),
-        ] + urlpatterns
-    except ImportError:
-        pass
+# ---- Django Debug Toolbar ------------------------------------
+#
+# Keyed off the middleware rather than DEBUG, because the toolbar breaks in
+# exactly one way: when one of the two is present without the other. Its
+# middleware reverses the "djdt" namespace on every response, so an installed
+# middleware with unregistered URLs turns every request in the process into a
+# 500 — "NoReverseMatch: 'djdt' is not a registered namespace". This block
+# used to sit under `if settings.DEBUG`, which is a different condition from
+# the one development.py installs the middleware on.
+if "debug_toolbar.middleware.DebugToolbarMiddleware" in settings.MIDDLEWARE:
+    urlpatterns = [
+        path("__debug__/", include("debug_toolbar.urls")),
+    ] + urlpatterns
 
 # ============================================================
 # WebSocket URL routing is handled in config/asgi.py

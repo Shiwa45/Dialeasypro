@@ -226,6 +226,26 @@ class BulkCampaignListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(status=status_filter)
         return qs
 
+    def create(self, request, *args, **kwargs):
+        """
+        Create, then answer with the full campaign.
+
+        BulkCampaignCreateSerializer lists only the writable fields, so the
+        201 came back without an id, a status or a recipient estimate — the
+        client was handed a copy of what it had just sent. Nothing could link
+        to the new campaign or tell whether it had become a draft or a
+        scheduled send without refetching the whole list.
+        """
+        write = self.get_serializer(data=request.data)
+        write.is_valid(raise_exception=True)
+        campaign = self.perform_create(write)
+        headers = self.get_success_headers(write.data)
+        return Response(
+            BulkCampaignSerializer(campaign).data,
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
     def perform_create(self, serializer):
         # The required feature depends on the campaign's channel, so it can't
         # be a static required_feature on the view.
@@ -249,6 +269,7 @@ class BulkCampaignListCreateView(generics.ListCreateAPIView):
             entity_repr=campaign.name,
             request=self.request,
         )
+        return campaign
 
 
 class BulkCampaignDetailView(generics.RetrieveAPIView):

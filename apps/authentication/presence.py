@@ -96,7 +96,12 @@ def touch_heartbeat(agent):
 def compute_today_totals(agent, now=None) -> dict:
     """Seconds spent in each online status since local midnight (incl. open interval)."""
     now = now or timezone.now()
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # timezone.now() is UTC, so replacing the time on it gives UTC midnight —
+    # 05:30 in Asia/Kolkata. "Today" therefore started this morning at half
+    # five and, for anyone looking before that, still included last night.
+    # Localise first so the day boundary is the tenant's, as the docstring
+    # has always claimed.
+    start = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
     totals = {
         AgentWorkStatus.AVAILABLE: 0,
         AgentWorkStatus.ON_CALL: 0,

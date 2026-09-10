@@ -6,7 +6,7 @@ tenant hasn't bought the AI Suite module) and scoped so a plain agent can only
 read insights for their own calls.
 """
 from django.db import connection
-from django.db.models import Count, Sum
+from django.db.models import Count, F, Sum
 from rest_framework import status
 from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
@@ -186,7 +186,18 @@ class InsightListView(ListAPIView):
         agent_id = self.request.query_params.get("agent")
         if agent_id:
             qs = qs.filter(call__agent_id=agent_id)
-        return qs.order_by("-generated_at")
+        # Failures and queued rows are worth finding on purpose, so let the
+        # caller ask for them rather than paging the whole queue looking.
+        insight_status = self.request.query_params.get("status")
+        if insight_status:
+            qs = qs.filter(status=insight_status)
+
+        # Postgres sorts NULLs above everything on a DESC, so a plain
+        # "-generated_at" put every not-yet-analysed row at the TOP of the
+        # queue. Queue a backfill of 50 and the manager's review list opens on
+        # 50 blank rows. Un-analysed rows belong at the end; the tiebreak on id
+        # keeps paging stable when several land in the same second.
+        return qs.order_by(F("generated_at").desc(nulls_last=True), "-id")
 
 
 # ============================================================

@@ -76,6 +76,25 @@ class CallLogListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(is_connected=connected.lower() == "true")
         if direction := params.get("direction"):
             qs = qs.filter(direction=direction)
+        if disposition := params.get("disposition"):
+            qs = qs.filter(disposition_id=disposition)
+
+        # Whether a recording exists. The call log shows a recording column,
+        # and "find me the calls I can actually listen back to" had no answer
+        # short of paging the whole log by eye.
+        has_recording = params.get("has_recording")
+        if has_recording is not None and has_recording != "":
+            qs = qs.filter(recording__isnull=has_recording.lower() != "true")
+
+        # Free text over the number and the lead's name. A call log without a
+        # search box means finding one call is a scroll, and the phone number
+        # is how anyone actually refers to a call.
+        if q := params.get("q", "").strip():
+            qs = qs.filter(
+                Q(phone_number__icontains=q)
+                | Q(lead__name__icontains=q)
+                | Q(agent__name__icontains=q)
+            )
 
         return qs
 
@@ -562,9 +581,12 @@ class CallStatsView(APIView):
                 "avg_duration_seconds": round(stats["avg_duration"] or 0),
                 "total_cost_rupees": (stats["total_cost_paise"] or 0) / 100,
             },
+            # is_positive comes back too. The client type has always declared
+            # it and the aggregation never selected it, so anything colouring
+            # a won outcome differently from a lost one was reading undefined.
             "by_disposition": list(
                 qs.filter(disposition__isnull=False)
-                .values("disposition__name")
+                .values("disposition__name", "disposition__is_positive")
                 .annotate(count=Count("id"))
                 .order_by("-count")
             ),

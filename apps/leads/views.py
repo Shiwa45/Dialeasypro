@@ -132,6 +132,27 @@ class LeadListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticatedAgent]
     pagination_class = StandardResultsSetPagination
 
+    def create(self, request, *args, **kwargs):
+        """
+        Create, then answer with the full lead.
+
+        LeadCreateSerializer lists only the writable fields, so the 201 came
+        back without an id — a copy of what the caller had just sent. The
+        mobile app parses the response into a Lead, whose id is a non-null
+        int, so every successful creation threw on the client and surfaced as
+        "An unexpected error occurred". The lead existed; the agent was told
+        it had failed, and retried, which is how duplicates get made.
+        """
+        write = self.get_serializer(data=request.data)
+        write.is_valid(raise_exception=True)
+        self.perform_create(write)
+        headers = self.get_success_headers(write.data)
+        return Response(
+            LeadDetailSerializer(write.instance, context=self.get_serializer_context()).data,
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
     def get_serializer_class(self):
         if self.request.method == "POST":
             return LeadCreateSerializer

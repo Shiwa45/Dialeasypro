@@ -254,7 +254,10 @@ class LeadCreateSerializer(serializers.ModelSerializer):
             "name", "phone", "alternate_phone", "email",
             "city", "state", "pincode",
             "source", "status", "priority",
-            "assigned_to", "budget", "requirement",
+            # deal_value was missing while both clients send it on the new-lead
+            # form, so an expected deal size typed at creation was accepted by
+            # the API and silently never stored.
+            "assigned_to", "budget", "deal_value", "requirement",
             "tags", "custom_fields",
         ]
 

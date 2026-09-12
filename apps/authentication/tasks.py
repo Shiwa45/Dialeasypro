@@ -222,6 +222,31 @@ def dispatch_followup_reminders(self):
 
 
 @shared_task(base=PublicSchemaTask, bind=True)
+def dispatch_overdue_followup_chasers(self):
+    """
+    Hourly: queue the overdue-follow-up chaser for every active tenant.
+
+    Separate from dispatch_followup_reminders because that one is about
+    arriving on time and fires once, while this one is about not letting a
+    missed follow-up go quiet.
+    """
+    from apps.core.utils import get_all_tenant_schemas
+
+    schemas = get_all_tenant_schemas()
+    logger.info(f"[Task] Chasing overdue follow-ups across {len(schemas)} tenants")
+    for schema_name in schemas:
+        try:
+            from apps.leads.tasks import chase_overdue_followups_for_tenant
+
+            chase_overdue_followups_for_tenant.apply_async(
+                args=[schema_name], queue="notifications"
+            )
+        except ImportError:
+            pass
+    return {"dispatched": len(schemas)}
+
+
+@shared_task(base=PublicSchemaTask, bind=True)
 def dispatch_performance_summaries(self):
     """
     Beat-scheduled dispatcher: triggers daily performance summary for every tenant.

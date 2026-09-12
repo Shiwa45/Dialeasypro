@@ -102,10 +102,24 @@ app.conf.beat_schedule = {
         "options": {"queue": "default"},
     },
 
-    # ---- Follow-up Reminders (every 10 min) ----------------
+    # ---- Follow-up reminders --------------------------------
+    # The comment here said "every 10 min" and the schedule said 03:00 UTC —
+    # once a day. The task looks for follow-ups due in the next few minutes,
+    # so running it daily meant the server only ever reminded anyone about
+    # follow-ups falling in one narrow morning window. Every other one passed
+    # unannounced.
     "dispatch-followup-reminders": {
         "task": "apps.authentication.tasks.dispatch_followup_reminders",
-        "schedule": crontab(hour=3, minute=0),
+        "schedule": timedelta(minutes=5),
+        "options": {"queue": "notifications"},
+    },
+
+    # Overdue follow-ups are chased once an hour until they are dealt with.
+    # Separate from the task above because that one fires once per follow-up
+    # and then sets reminder_sent; this one deliberately repeats.
+    "chase-overdue-followups": {
+        "task": "apps.authentication.tasks.dispatch_overdue_followup_chasers",
+        "schedule": crontab(minute=0),
         "options": {"queue": "notifications"},
     },
 

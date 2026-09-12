@@ -610,7 +610,10 @@ def send_followup_reminders_for_tenant(self, schema_name: str):
     from apps.leads.models import FollowUp
 
     now = timezone.now()
-    window_end = now + timedelta(minutes=30)
+    # Small enough that a reminder lands on time rather than half an hour
+    # early. It was 30 minutes because the dispatcher ran once a day and the
+    # window was the only thing catching anything at all.
+    window_end = now + timedelta(minutes=6)
     # How far back to look for follow-ups whose moment passed unannounced.
     # The old filter was `scheduled_at >= now`, so anything that came due
     # while the worker was down, or between two runs, was never mentioned
@@ -652,6 +655,75 @@ def send_followup_reminders_for_tenant(self, schema_name: str):
         f"({skipped} unassigned) in {schema_name}"
     )
     return {"notified": notified, "skipped_unassigned": skipped}
+
+
+# ============================================================
+# Overdue Follow-up Chaser
+# ============================================================
+
+# How long an overdue follow-up keeps being chased. Past this it is not a
+# reminder any more, it is noise, and the follow-up needs a person rather
+# than another notification.
+OVERDUE_CHASE_HOURS = 72
+
+
+@shared_task(base=TenantAwareTask, bind=True, max_retries=2)
+def chase_overdue_followups_for_tenant(self, schema_name: str):
+    """
+    Nudge once an hour about follow-ups that came due and were not dealt with.
+
+    send_followup_reminders_for_tenant fires once per follow-up and then sets
+    reminder_sent, which is right for the reminder itself and useless
+    afterwards: a follow-up that is now four hours late has already had its
+    one notification and will never be mentioned again.
+
+    Deduplication is by looking at what was already sent rather than by adding
+    a column: if this follow-up produced an overdue notification inside the
+    last hour, leave it alone. That keeps the hourly cadence even when the
+    beat schedule fires late or the task is run by hand.
+    """
+    from datetime import timedelta
+
+    from apps.authentication.models import Notification, NotificationKind
+    from apps.authentication.notifications import followup_due
+    from apps.leads.models import FollowUp
+
+    now = timezone.now()
+    cutoff = now - timedelta(hours=OVERDUE_CHASE_HOURS)
+    last_hour = now - timedelta(minutes=59)
+
+    overdue = FollowUp.objects.filter(
+        is_completed=False,
+        scheduled_at__lt=now,
+        scheduled_at__gte=cutoff,
+        assigned_to__isnull=False,
+    ).select_related("lead", "assigned_to")
+
+    # One query for everything already chased this hour, rather than one per
+    # follow-up. A busy tenant can easily have hundreds overdue.
+    recently_chased = set(
+        Notification.objects.filter(
+            kind=NotificationKind.FOLLOWUP_OVERDUE,
+            created_at__gte=last_hour,
+            followup_id_ref__isnull=False,
+        ).values_list("followup_id_ref", flat=True)
+    )
+
+    chased = 0
+    for fu in overdue:
+        if fu.pk in recently_chased:
+            continue
+        try:
+            followup_due(fu, overdue=True)
+            chased += 1
+        except Exception as exc:
+            logger.warning(f"[Task] Overdue chase failed for follow-up {fu.pk}: {exc}")
+
+    logger.info(
+        f"[Task] Overdue follow-ups chased: {chased} "
+        f"of {overdue.count()} open in {schema_name}"
+    )
+    return {"chased": chased}
 
 
 # ============================================================

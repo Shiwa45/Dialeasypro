@@ -126,27 +126,69 @@ def sync_attendance_for_date(day) -> int:
 
 
 def mark_check_in(employee: Employee, at=None) -> Attendance:
-    """Manual check-in. Promotes the row to MANUAL so auto-sync won't clobber it."""
+    """
+    Manual check-in. Promotes the row to MANUAL so auto-sync won't clobber it.
+
+    Sets the status, which is the whole point and is what was missing: the
+    model defaults status to ABSENT, this function never touched it, and it
+    was not even in update_fields. So an agent tapping "check in" created an
+    ABSENT row with a check-in time on it, and the CRM dutifully showed them
+    absent.
+
+    Promoting the row to MANUAL at the same time made it permanent —
+    sync_attendance_for refuses to recompute anything that is not AUTO, so
+    the derived path could never correct it either. The agent stayed absent
+    for the rest of the day no matter how long they worked.
+
+    Checking in claims presence for the day. Check-out recomputes from the
+    hours actually worked and will downgrade to half-day or absent if the
+    span does not justify it.
+    """
     at = at or timezone.now()
     day = timezone.localdate(at)
     row, _ = Attendance.objects.get_or_create(employee=employee, date=day)
+
+    # Approved leave is a decision somebody already made. If an agent on
+    # leave opens the app and taps check in, do not silently overturn it —
+    # return the row as it stands and let a human sort it out.
+    if row.status == AttendanceStatus.ON_LEAVE:
+        return row
+
     if row.check_in is None:
         row.check_in = at
+    row.status = AttendanceStatus.PRESENT
     row.source = AttendanceSource.MANUAL
-    row.save(update_fields=["check_in", "source", "updated_at"])
+    row.save(update_fields=["check_in", "status", "source", "updated_at"])
     return row
 
 
 def mark_check_out(employee: Employee, at=None) -> Attendance:
-    """Manual check-out. Worked time = check_out - check_in, minus recorded breaks."""
+    """
+    Manual check-out. Worked time = check_out - check_in, minus recorded breaks.
+
+    A check-out with no check-in falls back to the time derived from the
+    agent's status logs rather than leaving the row at its ABSENT default.
+    Somebody who dialled all morning and only remembered to press the button
+    on the way out should not be recorded as absent.
+    """
     at = at or timezone.now()
     day = timezone.localdate(at)
     row, _ = Attendance.objects.get_or_create(employee=employee, date=day)
+
+    if row.status == AttendanceStatus.ON_LEAVE:
+        return row
+
     row.check_out = at
     row.source = AttendanceSource.MANUAL
     if row.check_in:
         span = int((at - row.check_in).total_seconds())
         row.worked_seconds = max(0, span - row.break_seconds)
-        row.status = _status_for(row.worked_seconds, day, employee)
-    row.save(update_fields=["check_out", "source", "worked_seconds", "status", "updated_at"])
+    else:
+        worked, breaks = compute_worked_seconds(employee.agent, day)
+        row.worked_seconds = worked
+        row.break_seconds = breaks
+    row.status = _status_for(row.worked_seconds, day, employee)
+    row.save(update_fields=[
+        "check_out", "source", "worked_seconds", "break_seconds", "status", "updated_at",
+    ])
     return row

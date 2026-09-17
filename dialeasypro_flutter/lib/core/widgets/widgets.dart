@@ -26,12 +26,16 @@ class BrutalCard extends StatefulWidget {
     this.padding,
     this.color,
     this.borderColor,
+    // shadowOffset and shadowColor are kept because ~40 call sites pass
+    // them. They no longer position a hard block; a larger value now means a
+    // slightly deeper soft shadow, so an existing `shadowOffset: 6` still
+    // reads as "lift this one more" and nothing had to be rewritten.
     this.shadowOffset = 4,
     this.shadowColor = AppColors.black,
     this.onTap,
     this.onLongPress,
     this.borderRadius,
-    this.borderWidth = 2,
+    this.borderWidth = 1,
   });
 
   @override
@@ -45,28 +49,41 @@ class _BrutalCardState extends State<BrutalCard> {
   Widget build(BuildContext context) {
     final hasTap = widget.onTap != null || widget.onLongPress != null;
 
-    final card = AnimatedContainer(
+    // Pressing dips the card slightly instead of sliding it into its own
+    // shadow. The old translate only read as a press because a hard block
+    // sat behind it; with a soft shadow it just looks like a glitch.
+    final lift = (widget.shadowOffset / 4).clamp(0.5, 2.0);
+
+    final card = AnimatedScale(
+      scale: _pressed ? 0.985 : 1,
       duration: const Duration(milliseconds: 90),
-      transform: Matrix4.translationValues(
-        _pressed ? widget.shadowOffset / 2 : 0,
-        _pressed ? widget.shadowOffset / 2 : 0,
-        0,
-      ),
-      decoration: BoxDecoration(
-        color: widget.color ?? AppColors.white,
-        border: Border.all(color: widget.borderColor ?? AppColors.black, width: widget.borderWidth),
-        borderRadius: widget.borderRadius,
-        boxShadow: [
-          BoxShadow(
-            color: widget.shadowColor,
-            offset: Offset(
-              _pressed ? widget.shadowOffset / 2 : widget.shadowOffset,
-              _pressed ? widget.shadowOffset / 2 : widget.shadowOffset,
-            ),
+      curve: Curves.easeOut,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 90),
+        decoration: BoxDecoration(
+          color: widget.color ?? AppColors.white,
+          border: Border.all(
+            color: widget.borderColor ?? AppColors.line,
+            width: widget.borderWidth,
           ),
-        ],
+          borderRadius: widget.borderRadius ?? AppColors.radius,
+          boxShadow: _pressed
+              ? const [AppColors.brutalShadowSm]
+              : [
+                  AppColors.brutalShadowSm,
+                  BoxShadow(
+                    color: const Color(0x24111A16),
+                    offset: Offset(0, 6 * lift),
+                    blurRadius: 20 * lift,
+                    spreadRadius: -10 * lift,
+                  ),
+                ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: widget.padding != null
+            ? Padding(padding: widget.padding!, child: widget.child)
+            : widget.child,
       ),
-      child: widget.padding != null ? Padding(padding: widget.padding!, child: widget.child) : widget.child,
     );
 
     if (!hasTap) return card;
@@ -129,7 +146,7 @@ class BrutalButton extends StatefulWidget {
     super.key, required this.label, this.onPressed,
     this.isLoading = false, this.isFullWidth = false,
     this.icon, this.iconData, this.fontSize, this.padding, this.shadowOffset = 4,
-  }) : backgroundColor = AppColors.yellow, textColor = AppColors.black, gradient = null;
+  }) : backgroundColor = AppColors.brass, textColor = AppColors.white, gradient = null;
 
   const BrutalButton.success({
     super.key, required this.label, this.onPressed,
@@ -161,24 +178,28 @@ class _BrutalButtonState extends State<BrutalButton> {
       onTapUp: disabled ? null : (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: disabled ? null : widget.onPressed,
-      child: AnimatedContainer(
+      child: AnimatedScale(
+        scale: _pressed && !disabled ? 0.97 : 1,
+        duration: const Duration(milliseconds: 80),
+        curve: Curves.easeOut,
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 80),
         width: widget.isFullWidth ? double.infinity : null,
-        transform: Matrix4.translationValues(
-          _pressed ? widget.shadowOffset / 1.5 : 0,
-          _pressed ? widget.shadowOffset / 1.5 : 0, 0,
-        ),
         decoration: BoxDecoration(
           color: widget.gradient == null ? (disabled ? AppColors.greyLight : bg) : null,
           gradient: widget.gradient,
-          border: Border.all(color: AppColors.black, width: 1),
-          boxShadow: disabled ? [] : [BoxShadow(
-            color: AppColors.black,
-            offset: Offset(
-              _pressed ? widget.shadowOffset / 3 : widget.shadowOffset,
-              _pressed ? widget.shadowOffset / 3 : widget.shadowOffset,
-            ),
-          )],
+          // A filled button needs no outline; an outlined one (white fill,
+          // the .secondary constructor) gets the hairline. The old 1px
+          // near-black ring around every button was the loudest single thing
+          // left from the previous theme.
+          border: Border.all(
+            color: bg == AppColors.white || bg == AppColors.surface
+                ? AppColors.line2
+                : Colors.transparent,
+            width: 1,
+          ),
+          borderRadius: BorderRadius.circular(9),
+          boxShadow: disabled || _pressed ? [] : const [AppColors.brutalShadowSm],
         ),
         padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
         child: widget.isLoading
@@ -215,6 +236,7 @@ class _BrutalButtonState extends State<BrutalButton> {
                   ),
                 ],
               ),
+        ),
       ),
     );
   }
@@ -359,9 +381,11 @@ class StatusBadge extends StatelessWidget {
     final text = (label ?? status.replaceAll('_', ' ')).toUpperCase();
     return Container(
       padding: EdgeInsets.symmetric(horizontal: large ? 10 : 8, vertical: large ? 4 : 3),
+      // Rounded and unoutlined. A 1.5px ring around a 9px label was the old
+      // theme's idea of a chip, and it fights everything around it now.
       decoration: BoxDecoration(
         color: cs?.background ?? AppColors.greyLight,
-        border: Border.all(color: cs?.border ?? AppColors.grey, width: 1.5),
+        borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         text,
@@ -424,10 +448,10 @@ class ScoreBar extends StatelessWidget {
                 : score >= 40 ? AppColors.warning : AppColors.error;
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Container(
-        width: 56, height: 8,
+        width: 52, height: 6,
         decoration: BoxDecoration(
-          color: AppColors.greyLight,
-          border: Border.all(color: AppColors.black, width: 1),
+          color: const Color(0xFFE7EBE4),
+          borderRadius: BorderRadius.circular(3),
         ),
         child: FractionallySizedBox(
           alignment: Alignment.centerLeft,
@@ -463,8 +487,8 @@ class TagChip extends StatelessWidget {
     final w = Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: backgroundColor ?? AppColors.yellow,
-        border: Border.all(color: AppColors.black, width: 1),
+        color: backgroundColor ?? const Color(0xFFEDF0EA),
+        border: Border.all(color: AppColors.line, width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -473,11 +497,15 @@ class TagChip extends StatelessWidget {
             Icon(icon, size: 10, color: textColor ?? AppColors.black),
             const SizedBox(width: 4),
           ],
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9,
-              letterSpacing: 0.4, color: textColor ?? AppColors.black,
+          Flexible(
+            child: Text(
+              label.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9,
+                letterSpacing: 0.4, color: textColor ?? AppColors.black,
+              ),
             ),
           ),
         ],
@@ -693,8 +721,8 @@ class BrutalRefreshIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) => RefreshIndicator(
     onRefresh: onRefresh,
-    color: AppColors.black,
-    backgroundColor: AppColors.yellow,
+    color: AppColors.brand,
+    backgroundColor: AppColors.surface,
     strokeWidth: 2.5,
     child: child,
   );
@@ -818,9 +846,10 @@ class SectionHeader extends StatelessWidget {
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               color: AppColors.yellow,
-              border: Border.all(color: AppColors.black, width: 1),
+              border: Border.all(color: AppColors.yellow, width: 1),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Icon(icon, size: 14, color: AppColors.black),
+            child: Icon(icon, size: 14, color: AppColors.white),
           ),
           const SizedBox(width: 10),
         ],

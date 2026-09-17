@@ -41,11 +41,11 @@ class ReportsScreen extends ConsumerWidget {
 
             return ListView(padding: const EdgeInsets.all(16), children: [
               // Today's activity
-              BrutalCard(padding: const EdgeInsets.all(16), color: AppColors.dark, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              BrutalCard(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Row(children: [
-                  Icon(Icons.today, size: 18, color: AppColors.yellow),
+                  Icon(Icons.today, size: 18, color: AppColors.brand),
                   SizedBox(width: 8),
-                  Text("Today's Activity", style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow)),
+                  Text("Today's Activity", style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.brand)),
                 ]),
                 const SizedBox(height: 14),
                 Row(children: [
@@ -72,7 +72,7 @@ class ReportsScreen extends ConsumerWidget {
                     Expanded(child: Stack(children: [
                       Container(height: 12, decoration: BoxDecoration(color: AppColors.greyLight, border: Border.all(color: AppColors.black, width: 1))),
                       FractionallySizedBox(widthFactor: pct / 100,
-                        child: Container(height: 12, decoration: BoxDecoration(color: AppColors.yellow, border: Border.all(color: AppColors.black, width: 1)))),
+                        child: Container(height: 12, decoration: BoxDecoration(color: AppColors.yellow, borderRadius: BorderRadius.circular(3)))),
                     ])),
                     const SizedBox(width: 8),
                     SizedBox(width: 28, child: Text('${stage['count']}', style: AppTextStyles.h5, textAlign: TextAlign.right)),

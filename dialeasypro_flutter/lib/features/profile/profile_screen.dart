@@ -104,14 +104,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           // Avatar card
-          BrutalCard(padding: const EdgeInsets.all(18), color: AppColors.dark, child: Row(children: [
+          BrutalCard(padding: const EdgeInsets.all(18), child: Row(children: [
             BrutalAvatar(name: agent?.name ?? 'A', size: 64, backgroundColor: AppColors.yellow),
             const SizedBox(width: 16),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(agent?.name ?? '', style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.yellow)),
-              Text(agent?.email ?? '', style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.muted)),
+              Text(agent?.name ?? '', style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.brand)),
+              Text(agent?.email ?? '', style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.text2)),
               const SizedBox(height: 6),
-              TagChip(label: agent?.roleDisplay ?? agent?.role ?? '', backgroundColor: AppColors.yellow),
+              TagChip(label: agent?.roleDisplay ?? agent?.role ?? '',
+                  backgroundColor: AppColors.brand50, textColor: AppColors.brand),
             ])),
           ])).animate().fadeIn(),
 
@@ -129,8 +130,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
-                  color: AppColors.white,
-                  border: Border.all(color: AppColors.black, width: 1),
+                  color: AppColors.surface2,
+                  border: Border.all(color: AppColors.line, width: 1),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(children: [
                   Expanded(child: Text(
@@ -328,7 +330,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   'on in the Dialer app settings and grant "All files access" here. '
                   'Without one, the app records through the microphone; put the call '
                   'on speaker so both sides are captured.',
-                  style: TextStyle(fontFamily: 'Archivo', fontSize: 11.5, color: AppColors.dark, height: 1.4),
+                  style: TextStyle(fontFamily: 'Archivo', fontSize: 11.5, height: 1.4),
                 ),
               ),
               const SizedBox(height: 10),
@@ -376,7 +378,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       CallRecordingService.instance.lastError!,
                       style: const TextStyle(
                           fontFamily: 'Archivo', fontSize: 11.5,
-                          color: AppColors.dark, height: 1.4),
+ height: 1.4),
                     ),
                   ]),
                 ),

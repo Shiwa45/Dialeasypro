@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/colors.dart';
+import '../notifications/notification_bell.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
@@ -46,18 +47,15 @@ class DashboardScreen extends ConsumerWidget {
                   width: 36, height: 36,
                   decoration: BoxDecoration(
                     color: AppColors.yellow,
-                    border: Border.all(color: AppColors.black, width: 1),
+                    borderRadius: BorderRadius.circular(9),
                   ),
-                  child: const Center(child: Text('D', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18))),
+                  child: const Center(child: Text('D', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.white))),
                 ),
                 const SizedBox(width: 10),
                 const Text('DialEasypro', style: AppTextStyles.h3),
               ]),
               actions: [
-                IconButton(
-                  icon: const Icon(Icons.notifications_outlined, color: AppColors.black),
-                  onPressed: () {},
-                ),
+                const NotificationBell(),
                 Padding(
                   padding: const EdgeInsets.only(right: 12, top: 8, bottom: 8),
                   child: GestureDetector(
@@ -67,8 +65,8 @@ class DashboardScreen extends ConsumerWidget {
                 ),
               ],
               bottom: const PreferredSize(
-                preferredSize: Size.fromHeight(2),
-                child: Divider(height: 2, thickness: 2, color: AppColors.black),
+                preferredSize: Size.fromHeight(1),
+                child: Divider(height: 1, thickness: 1, color: AppColors.line),
               ),
             ),
 
@@ -204,22 +202,35 @@ class _Greeting extends StatelessWidget {
     final hour = DateTime.now().hour;
     final greet = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
     final emoji = hour < 12 ? '☀️' : hour < 17 ? '🌤️' : '🌙';
+    // This was an ink slab carrying `AppColors.yellow` text. That alias moved
+    // from brass to the brand green, so the greeting became dark green on
+    // near-black and the date, already in --text-2, was no more readable.
+    //
+    // A pale brand tint gives the greeting its own identity without going
+    // back to a black card, and every colour on it is now dark-on-light like
+    // the rest of the screen.
     return BrutalCard(
       padding: const EdgeInsets.all(16),
-      color: AppColors.dark,
+      color: AppColors.brand50,
+      borderColor: const Color(0xFFC9DED9),
       child: Row(children: [
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('$greet, ${agent?.name.split(' ').first ?? 'Agent'}! $emoji',
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.yellow)),
+              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.brand700)),
           const SizedBox(height: 3),
           Text(Fmt.date(DateTime.now().toIso8601String()),
-              style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.muted)),
+              style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.text2)),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(border: Border.all(color: AppColors.yellow, width: 1)),
+          decoration: BoxDecoration(
+            // Surface, not brand50 — the card behind it is brand50 now, and
+            // a pill the same colour as its ground is not a pill.
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(999),
+          ),
           child: Text((agent?.role ?? 'agent').toUpperCase(),
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.yellow, letterSpacing: 0.5)),
+              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.brand, letterSpacing: 0.5)),
         ),
       ]),
     );
@@ -243,20 +254,20 @@ class _AutoDialerCTA extends StatelessWidget {
             Container(
               width: 56, height: 56,
               decoration: BoxDecoration(
-                color: AppColors.black,
-                border: Border.all(color: AppColors.black, width: 1),
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.flash_on, color: AppColors.yellow, size: 30),
+              child: const Icon(Icons.flash_on, color: AppColors.brand, size: 30),
             ),
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
               Text('Auto-Dialer Queue',
-                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.black)),
+                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.white)),
               SizedBox(height: 2),
               Text('Dial leads one-by-one. No tap needed.',
-                  style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.dark)),
+                  style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: Color(0xCCFFFFFF))),
             ])),
-            const Icon(Icons.arrow_forward, color: AppColors.black),
+            const Icon(Icons.arrow_forward, color: AppColors.white),
           ]),
         ),
       ]),
@@ -303,32 +314,31 @@ class _TodayCallsCard extends StatelessWidget {
     final period = stats['period'] as Map<String, dynamic>? ?? {};
     return BrutalCard(
       padding: const EdgeInsets.all(16),
-      color: AppColors.dark,
       child: Row(children: [
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: AppColors.yellow,
-            border: Border.all(color: AppColors.black, width: 1),
+            color: AppColors.brand50,
+            borderRadius: BorderRadius.circular(9),
           ),
-          child: const Icon(Icons.phone_in_talk, color: AppColors.black, size: 22),
+          child: const Icon(Icons.phone_in_talk, color: AppColors.brand, size: 22),
         ),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('TODAY\'S CALLS',
-              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.muted, letterSpacing: 0.6)),
+              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.text3, letterSpacing: 0.6)),
           const SizedBox(height: 3),
           Text('${today['total'] ?? 0} total · ${today['connected'] ?? 0} connected',
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.yellow)),
+              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.text)),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: AppColors.yellow,
-            border: Border.all(color: AppColors.black, width: 1),
+            color: AppColors.brand,
+            borderRadius: BorderRadius.circular(6),
           ),
           child: Text('${period['connection_rate'] ?? 0}%',
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 13)),
+              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.white)),
         ),
       ]),
     );
@@ -359,10 +369,22 @@ class _PipelineCard extends StatelessWidget {
           child: Row(children: [
             SizedBox(width: 90, child: Text(e.$1, style: AppTextStyles.body)),
             Expanded(child: Stack(children: [
-              Container(height: 12, decoration: BoxDecoration(color: AppColors.greyLight, border: Border.all(color: AppColors.black, width: 1))),
+              Container(
+                height: 8,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE7EBE4),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
               if (total > 0) FractionallySizedBox(
                 widthFactor: e.$2 / total,
-                child: Container(height: 12, decoration: BoxDecoration(color: e.$3, border: Border.all(color: AppColors.black, width: 1))),
+                child: Container(
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: e.$3,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
               ),
             ])),
             const SizedBox(width: 8),
@@ -385,40 +407,59 @@ class _RecentLeadTile extends StatelessWidget {
     return BrutalCard(
       onTap: () => context.push('/leads/${lead.id}'),
       padding: EdgeInsets.zero,
-      child: Row(children: [
-        Container(width: 4, height: 72, color: statusColor),
-        Padding(
-          padding: const EdgeInsets.all(10),
-          child: BrutalAvatar(name: lead.name, size: 44),
-        ),
-        Expanded(child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-            Row(children: [
-              Expanded(child: Text(lead.name, style: AppTextStyles.h5, overflow: TextOverflow.ellipsis)),
-              const SizedBox(width: 6),
-              StatusBadge(status: lead.status, label: lead.statusDisplay),
-            ]),
-            const SizedBox(height: 3),
-            Row(children: [
-              Text(Fmt.displayPhone(lead.phone), style: AppTextStyles.mono),
-              if (lead.city.isNotEmpty) Text(' · ${lead.city}', style: AppTextStyles.caption),
-            ]),
-            const SizedBox(height: 5),
-            Row(children: [
-              TagChip(label: lead.sourceDisplay, backgroundColor: AppColors.greyLight),
-              const SizedBox(width: 6),
-              PriorityBadge(priority: lead.priority),
-              const Spacer(),
-              ScoreBar(score: lead.score),
-            ]),
-          ]),
-        )),
-        const Padding(
-          padding: EdgeInsets.only(right: 10),
-          child: Icon(Icons.chevron_right, size: 18, color: AppColors.grey),
-        ),
-      ]),
+      child: IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // The status rail runs the full height rather than a hardcoded 72,
+          // so it cannot leave a gap when the text wraps to a taller row.
+          Container(width: 3, color: statusColor),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+            child: BrutalAvatar(name: lead.name, size: 40),
+          ),
+          Expanded(child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(children: [
+                  Expanded(child: Text(lead.name, style: AppTextStyles.h5,
+                      maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  const SizedBox(width: 8),
+                  StatusBadge(status: lead.status, label: lead.statusDisplay),
+                ]),
+                const SizedBox(height: 4),
+                Row(children: [
+                  // The number is the identifier and keeps its width; the
+                  // city gives way first.
+                  Text(Fmt.displayPhone(lead.phone), style: AppTextStyles.mono),
+                  if (lead.city.isNotEmpty) Flexible(
+                    child: Text(' · ${lead.city}',
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.caption),
+                  ),
+                ]),
+                const SizedBox(height: 7),
+                Row(children: [
+                  // Only the source chip may shrink. Priority is short and
+                  // fixed, and the score bar is the thing being pushed off
+                  // the edge, so it keeps its width.
+                  Flexible(child: TagChip(label: lead.sourceDisplay)),
+                  const SizedBox(width: 6),
+                  PriorityBadge(priority: lead.priority),
+                  const SizedBox(width: 8),
+                  const Spacer(),
+                  ScoreBar(score: lead.score),
+                ]),
+              ],
+            ),
+          )),
+          const Padding(
+            padding: EdgeInsets.only(left: 4, right: 12),
+            child: Icon(Icons.chevron_right, size: 18, color: AppColors.text3),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -441,7 +482,7 @@ class _TasksCard extends StatelessWidget {
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: hasOverdue ? AppColors.error : AppColors.warning,
-            border: Border.all(color: AppColors.black, width: 1),
+            borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(
             hasOverdue ? Icons.warning_amber_rounded : Icons.event_available,

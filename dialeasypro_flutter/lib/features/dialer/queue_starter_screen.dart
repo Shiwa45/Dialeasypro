@@ -44,17 +44,16 @@ class QueueStarterScreen extends ConsumerWidget {
             children: [
               BrutalCard(
                 padding: const EdgeInsets.all(18),
-                color: AppColors.dark,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
                   Row(children: [
-                    Icon(Icons.flash_on, color: AppColors.yellow, size: 22),
+                    Icon(Icons.flash_on, color: AppColors.brand, size: 22),
                     SizedBox(width: 8),
-                    Text('Power Dialer', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.yellow)),
+                    Text('Power Dialer', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.brand)),
                   ]),
                   SizedBox(height: 6),
                   Text(
                     'Pick a queue assigned to you. Leads are dialed one after another — each call needs a disposition before the next. No lead repeats.',
-                    style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.muted, height: 1.5),
+                    style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.text2, height: 1.5),
                   ),
                 ]),
               ).animate().fadeIn(),
@@ -191,7 +190,7 @@ class _Tip extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: 2),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('▸ ', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.warning)),
-      Expanded(child: Text(text, style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.dark, height: 1.4))),
+      Expanded(child: Text(text, style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, height: 1.4))),
     ]),
   );
 }

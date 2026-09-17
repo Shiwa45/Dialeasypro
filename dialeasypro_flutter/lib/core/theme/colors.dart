@@ -61,11 +61,24 @@ class AppColors {
   // These are the old neo-brutalist names, kept because 418 call sites across
   // the app use them, and repointed at the new palette. They are NOT marked
   // @Deprecated on purpose: that would emit 418 analyzer warnings and bury
-  // anything real. Prefer the semantic names above in new code — `yellow` is
-  // brass now, `dark` is ink, and `black` is not black.
-  static const Color yellow      = brass;
-  static const Color yellowDark  = brass600;
-  static const Color yellowBg    = brass50;
+  // anything real. Prefer the semantic names above in new code — `dark` is
+  // ink, and `black` is not black.
+  //
+  // `yellow` points at the BRAND GREEN, not at brass.
+  //
+  // It was aimed at brass first, on the reasoning that gold is the nearest
+  // thing to the old yellow. That was the wrong question. Every place this
+  // name is used — focus rings, the logo tile, section-header icons, quick
+  // action tiles, the pull-to-refresh spinner, the default snackbar — is a
+  // PRIMARY position, and in the web theme every one of those is brand green.
+  // Aiming them at brass turned the login screen into a sheet of gold and
+  // left the app looking like the yellow theme it was supposed to replace.
+  //
+  // Brass survives as a sparing accent, and anything that genuinely wants it
+  // now names `brass` directly.
+  static const Color yellow      = brand;
+  static const Color yellowDark  = brand600;
+  static const Color yellowBg    = brand50;
   static const Color dark        = ink;
   static const Color muted       = text2;
   static const Color background  = paper;
@@ -125,7 +138,7 @@ class AppColors {
 
   // ---- Gradients -------------------------------------------
   static const LinearGradient yellowGradient = LinearGradient(
-    colors: [brass600, brass],
+    colors: [brand600, brand],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );

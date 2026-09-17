@@ -122,8 +122,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     : 'https://$workspace.${TenantConfig.defaultRootDomain}';
 
     return Scaffold(
-      backgroundColor: AppColors.yellow,
-      body: SafeArea(
+      backgroundColor: AppColors.brand700,
+      body: Container(
+        // Matches the web login: brand-700 into ink, on the diagonal.
+        decoration: const BoxDecoration(gradient: AppColors.darkGradient),
+        child: SafeArea(
         child: Stack(children: [
           Positioned.fill(child: CustomPaint(painter: _DotPainter())),
           SingleChildScrollView(
@@ -136,13 +139,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Container(
                     width: 72, height: 72,
                     decoration: BoxDecoration(
-                      color: AppColors.black,
-                      border: Border.all(color: AppColors.black, width: 2.5),
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(18),
                       boxShadow: const [BoxShadow(color: Color(0x33111A16), offset: Offset(0, 12), blurRadius: 28, spreadRadius: -14)],
                     ),
                     child: const Center(
                       child: Text('D',
-                          style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 34, color: AppColors.yellow)),
+                          style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 34, color: AppColors.brand)),
                     ),
                   ).animate().scale(begin: const Offset(0.6, 0.6), duration: 500.ms, curve: Curves.easeOutBack),
 
@@ -169,17 +172,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
                           decoration: const BoxDecoration(
-                            color: AppColors.dark,
-                            border: Border(bottom: BorderSide(color: AppColors.black, width: 1)),
+                            color: AppColors.surface2,
+                            border: Border(bottom: BorderSide(color: AppColors.line, width: 1)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: const [
                               Text('Sign in to your Workspace',
-                                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.yellow)),
+                                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.text)),
                               SizedBox(height: 2),
                               Text('Enter your workspace and credentials.',
-                                  style: TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.muted)),
+                                  style: TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.text2)),
                             ],
                           ),
                         ),
@@ -294,6 +297,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ),
         ]),
+        ),
       ),
     );
   }
@@ -398,7 +402,8 @@ class _WorkspaceField extends StatelessWidget {
 class _DotPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = AppColors.black.withValues(alpha: 0.07)..style = PaintingStyle.fill;
+    // Light dots, because the ground behind them is dark now.
+    final paint = Paint()..color = AppColors.white.withValues(alpha: 0.10)..style = PaintingStyle.fill;
     const spacing = 22.0;
     for (double x = 0; x < size.width; x += spacing) {
       for (double y = 0; y < size.height; y += spacing) {

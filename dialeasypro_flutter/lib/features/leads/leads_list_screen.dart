@@ -231,16 +231,15 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
           ? Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               decoration: const BoxDecoration(
-                color: AppColors.dark,
                 border: Border(top: BorderSide(color: AppColors.black, width: 1)),
               ),
               child: SafeArea(
                 child: Row(children: [
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                     Text('${_selectedIds.length} leads',
-                        style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.yellow)),
+                        style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.brand)),
                     const Text('selected for queue',
-                        style: TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.muted)),
+                        style: TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.text2)),
                   ])),
                   BrutalButton(
                     label: 'START DIALING →',
@@ -322,18 +321,30 @@ class _LeadTile extends StatelessWidget {
             ]),
             const SizedBox(height: 3),
             Row(children: [
+              // The number is the identifier and keeps its full width; the
+              // city gives way first.
               Text(Fmt.displayPhone(lead.phone), style: AppTextStyles.mono),
-              if (lead.city.isNotEmpty) Text(' · ${lead.city}', style: AppTextStyles.caption),
+              if (lead.city.isNotEmpty) Flexible(
+                child: Text(' · ${lead.city}',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.caption),
+              ),
             ]),
             const SizedBox(height: 5),
             Row(children: [
-              TagChip(label: lead.sourceDisplay, backgroundColor: AppColors.greyLight),
+              // Only the source chip is allowed to shrink. Priority and DND
+              // are short and fixed, and the score bar is the thing being
+              // pushed off the edge, so it keeps its width.
+              Flexible(
+                child: TagChip(label: lead.sourceDisplay, backgroundColor: AppColors.greyLight),
+              ),
               const SizedBox(width: 6),
               PriorityBadge(priority: lead.priority),
               if (lead.isDnd) ...[
                 const SizedBox(width: 6),
                 const TagChip(label: 'DND', backgroundColor: AppColors.error, textColor: AppColors.white),
               ],
+              const SizedBox(width: 6),
               const Spacer(),
               ScoreBar(score: lead.score),
             ]),
@@ -346,12 +357,16 @@ class _LeadTile extends StatelessWidget {
                   color: lead.followupOverdue ? AppColors.error : AppColors.grey,
                 ),
                 const SizedBox(width: 3),
-                Text(
-                  Fmt.relative(lead.nextFollowupAt),
-                  style: TextStyle(
-                    fontFamily: 'Archivo', fontSize: 10,
-                    color: lead.followupOverdue ? AppColors.error : AppColors.grey,
-                    fontWeight: lead.followupOverdue ? FontWeight.w600 : FontWeight.w400,
+                Flexible(
+                  child: Text(
+                    Fmt.relative(lead.nextFollowupAt),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Archivo', fontSize: 10,
+                      color: lead.followupOverdue ? AppColors.error : AppColors.grey,
+                      fontWeight: lead.followupOverdue ? FontWeight.w600 : FontWeight.w400,
+                    ),
                   ),
                 ),
               ]),
@@ -469,11 +484,11 @@ class _ActiveFiltersBar extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: const BoxDecoration(
-        color: AppColors.yellow,
-        border: Border(bottom: BorderSide(color: AppColors.black, width: 1)),
+        color: AppColors.surface2,
+        border: Border(bottom: BorderSide(color: AppColors.line, width: 1)),
       ),
       child: Row(children: [
-        const Text('FILTERS:', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.5)),
+        const Text('FILTERS:', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.5, color: AppColors.text3)),
         const SizedBox(width: 8),
         Expanded(child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,

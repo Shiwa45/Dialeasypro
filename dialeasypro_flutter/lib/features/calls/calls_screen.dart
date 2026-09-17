@@ -41,7 +41,6 @@ class CallsScreen extends ConsumerWidget {
               return Container(
                 padding: const EdgeInsets.all(16),
                 decoration: const BoxDecoration(
-                  color: AppColors.dark,
                   border: Border(bottom: BorderSide(color: AppColors.black, width: 1)),
                 ),
                 child: Row(children: [

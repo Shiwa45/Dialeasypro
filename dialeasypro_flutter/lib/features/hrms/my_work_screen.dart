@@ -14,6 +14,7 @@ import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/addon_models.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/addon_services.dart';
 import '../features_provider.dart';
 
@@ -130,8 +131,13 @@ class _AttendanceTab extends ConsumerWidget {
       if (context.mounted) {
         AppToast.show(context, checkIn ? 'Checked in' : 'Checked out', isSuccess: true);
       }
-    } catch (_) {
-      if (context.mounted) AppToast.show(context, 'Could not record attendance', isError: true);
+    } catch (e) {
+      // The server says why it refused — most often "not_enrolled", meaning
+      // this agent has no Employee record yet. Swallowing that left them
+      // tapping a button that was never going to work, with nothing to act on.
+      if (context.mounted) {
+        AppToast.show(context, ApiClient.errorMessage(e), isError: true);
+      }
     }
   }
 

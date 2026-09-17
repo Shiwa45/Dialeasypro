@@ -8,6 +8,7 @@ import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
+import 'lead_custom_fields.dart';
 import '../../data/services/services.dart';
 import '../auth/auth_provider.dart';
 import '../dialer/dialer_state.dart';
@@ -275,6 +276,12 @@ class _OverviewTab extends StatelessWidget {
           const Divider(), InfoRow(label: 'Next F/U', value: lead.nextFollowupAt != null ? Fmt.dateTime(lead.nextFollowupAt) : '—'),
           const Divider(), InfoRow(label: 'Created', value: Fmt.date(lead.createdAt)),
         ])).animate().fadeIn(delay: 100.ms),
+        // Custom fields: what the team qualifies on. Sent by the server on
+        // this endpoint all along and never shown.
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: LeadCustomFields(lead: lead),
+        ),
         if (lead.requirement.isNotEmpty) ...[
           const SizedBox(height: 12),
           BrutalCard(padding: const EdgeInsets.all(16), color: AppColors.cream, borderColor: AppColors.yellow,

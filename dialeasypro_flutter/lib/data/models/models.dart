@@ -39,6 +39,25 @@ class Agent {
   String get initials => name.split(' ').map((n) => n.isNotEmpty ? n[0] : '').take(2).join().toUpperCase();
 }
 
+/// One custom field's value on a lead, as LeadDetailSerializer sends it:
+/// {"field": 1, "field_key": "property_type", "field_name": "Property Type",
+///  "value": "Villa"}
+class LeadCustomField {
+  final int fieldId;
+  final String key, name, value;
+
+  const LeadCustomField({
+    required this.fieldId, required this.key, required this.name, required this.value,
+  });
+
+  factory LeadCustomField.fromJson(Map<String, dynamic> j) => LeadCustomField(
+    fieldId: (j['field'] as num?)?.toInt() ?? 0,
+    key: j['field_key'] as String? ?? '',
+    name: j['field_name'] as String? ?? '',
+    value: (j['value'] ?? '').toString(),
+  );
+}
+
 class Lead {
   final int id;
   final String name, phone, alternatePhone, email, city, state;
@@ -54,6 +73,21 @@ class Lead {
   final List<String> tags;
   final String createdAt;
 
+  /// Custom field values. The app never parsed these, so every tenant's
+  /// custom fields — imported from CSV, set on the web, the fields a sales
+  /// team actually qualifies on — were sent by the server and dropped here,
+  /// before any screen had a chance to show them.
+  final List<LeadCustomField> customFields;
+
+  /// Whether the response this lead came from carried custom fields at all.
+  ///
+  /// Not the same as "has none". The list endpoint omits the key to stay
+  /// light, so a lead taken from the list reads as having no custom fields
+  /// when it simply was not told. The dialer queue started from the leads
+  /// list is exactly that case, and uses this to fetch the full lead before
+  /// showing the agent an empty panel as if it were the truth.
+  final bool customFieldsLoaded;
+
   const Lead({
     required this.id, required this.name, required this.phone,
     this.alternatePhone = '', this.email = '', this.city = '', this.state = '',
@@ -64,10 +98,15 @@ class Lead {
     this.budget, this.dealValue, this.nextFollowupAt, this.lastContactedAt,
     this.requirement = '', this.followupOverdue = false, this.isDnd = false,
     this.contactCount = 0, this.tags = const [], required this.createdAt,
+    this.customFields = const [], this.customFieldsLoaded = false,
   });
 
   factory Lead.fromJson(Map<String, dynamic> j) => Lead(
-    id: j['id'] as int,
+    // Every other field here tolerates a missing key; `id` did not, so one
+    // absent field in a response turned into a TypeError the UI reported as
+    // "An unexpected error occurred" — which is exactly how a create that had
+    // actually succeeded looked like a failure.
+    id: (j['id'] as num?)?.toInt() ?? 0,
     name: j['name'] as String? ?? '',
     phone: j['phone'] as String? ?? '',
     alternatePhone: j['alternate_phone'] as String? ?? '',
@@ -92,6 +131,11 @@ class Lead {
     isDnd: j['is_dnd'] as bool? ?? false,
     contactCount: j['contact_count'] as int? ?? 0,
     tags: (j['tags'] as List?)?.cast<String>() ?? [],
+    customFields: [
+      for (final v in (j['custom_field_values'] as List? ?? const []))
+        if (v is Map) LeadCustomField.fromJson(v.cast<String, dynamic>()),
+    ],
+    customFieldsLoaded: j.containsKey('custom_field_values'),
     createdAt: j['created_at'] as String? ?? '',
   );
 

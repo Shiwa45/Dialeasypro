@@ -173,28 +173,55 @@ class ApiClient {
   /// invalid choice on EVERY submit went unexplained: the server said exactly
   /// what was wrong and the app threw it away. Field errors are named here so
   /// the next mismatch is legible instead of mysterious.
+  /// "phone: A lead with this phone number already exists."
+  ///
+  /// Two entries at most: a toast is not a form, and the first rejection is
+  /// almost always the actionable one.
+  static String _fieldErrors(Map data, {Set<String> skip = const {}}) {
+    final out = <String>[];
+    data.forEach((key, value) {
+      if (skip.contains(key)) return;
+      final text = value is List
+          ? value.map((v) => v.toString()).join(' ')
+          : value.toString();
+      if (text.isEmpty || text == '{}' || text == '[]') return;
+      // non_field_errors has no useful label to put in front of it.
+      out.add(key == 'non_field_errors' ? text : '$key: $text');
+    });
+    return out.take(2).join('\n');
+  }
+
+  /// Turn an API failure into something worth showing a person.
+  ///
+  /// The field errors are read FIRST. The backend wraps a 400 as
+  ///
+  ///   {"error": "validation_error",
+  ///    "message": "Validation failed.",
+  ///    "detail": {"phone": ["A lead with this phone number already exists."]}}
+  ///
+  /// and this used to return data['message'] before looking any further — so
+  /// every rejected form said "Validation failed." and nothing else. An agent
+  /// adding a lead that already existed had no way to find that out, and the
+  /// one line that would have told them was sitting in `detail`, unread.
   static String errorMessage(dynamic error) {
     if (error is DioException) {
       final data = error.response?.data;
       if (data is Map) {
+        // `detail` is a map of field -> messages on a validation error, and a
+        // plain string on most other failures. Only the map form is unpacked.
+        final detail = data['detail'];
+        if (detail is Map) {
+          final fields = _fieldErrors(detail);
+          if (fields.isNotEmpty) return fields;
+        }
+
+        // Field errors sent at the top level rather than under `detail`.
+        final topLevel = _fieldErrors(data, skip: const {'error', 'message', 'detail'});
+        if (topLevel.isNotEmpty) return topLevel;
+
         final direct = data['message'] as String? ?? data['detail'] as String?;
         if (direct != null && direct.isNotEmpty) return direct;
 
-        final fieldErrors = <String>[];
-        data.forEach((key, value) {
-          if (key == 'message' || key == 'detail') return;
-          final text = value is List
-              ? value.map((v) => v.toString()).join(' ')
-              : value.toString();
-          if (text.isEmpty) return;
-          // non_field_errors has no useful label to show.
-          fieldErrors.add(key == 'non_field_errors' ? text : '$key: $text');
-        });
-        if (fieldErrors.isNotEmpty) {
-          // Two at most — a toast is not a form, and the first error is
-          // almost always the actionable one.
-          return fieldErrors.take(2).join('\n');
-        }
         return 'An error occurred.';
       }
       if (error.type == DioExceptionType.connectionTimeout) return 'Connection timeout. Check your internet.';

@@ -10,6 +10,7 @@ import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
+import '../leads/lead_custom_fields.dart';
 import '../../data/services/services.dart';
 import 'dialer_state.dart';
 
@@ -83,7 +84,6 @@ class _TopBar extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: const BoxDecoration(
-        color: AppColors.dark,
         border: Border(bottom: BorderSide(color: AppColors.black, width: 1)),
       ),
       child: Row(children: [
@@ -114,10 +114,10 @@ class _TopBar extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
             color: AppColors.yellow,
-            border: Border.all(color: AppColors.black, width: 1),
+            borderRadius: BorderRadius.circular(5),
           ),
           child: const Text('AUTO-DIALER',
-              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.6)),
+              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.6, color: AppColors.white)),
         ),
         const Spacer(),
         if (state.phase == DialerPhase.inCall || state.phase == DialerPhase.dialing)
@@ -313,6 +313,9 @@ class _PreCallView extends ConsumerWidget {
 
         const SizedBox(height: 28),
 
+        LeadCustomFields(lead: lead, compact: true, title: 'What we know'),
+        const SizedBox(height: 16),
+
         if (lead.requirement.isNotEmpty) ...[
           BrutalCard(
             padding: const EdgeInsets.all(14),
@@ -458,6 +461,12 @@ class _InCallViewState extends ConsumerState<_InCallView> {
             ),
 
             const SizedBox(height: 20),
+
+            // While the call is live. This is where the agent needs the lead's
+            // answers most — in front of them mid-conversation, not on a
+            // screen they would have to leave the call to reach.
+            LeadCustomFields(lead: lead, compact: true, title: 'What we know'),
+            const SizedBox(height: 12),
 
             // Quick notes
             BrutalCard(
@@ -662,19 +671,18 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
         // Call summary
         BrutalCard(
           padding: const EdgeInsets.all(14),
-          color: AppColors.dark,
           child: Row(children: [
             Container(
               width: 50, height: 50,
               decoration: BoxDecoration(
-                color: AppColors.yellow,
-                border: Border.all(color: AppColors.black, width: 1),
+                color: AppColors.hot,
+                borderRadius: BorderRadius.circular(11),
               ),
-              child: const Icon(Icons.call_end, color: AppColors.black, size: 24),
+              child: const Icon(Icons.call_end, color: AppColors.white, size: 24),
             ),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(lead.name, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.white)),
+              Text(lead.name, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.text)),
               const SizedBox(height: 2),
               Row(children: [
                 Text(

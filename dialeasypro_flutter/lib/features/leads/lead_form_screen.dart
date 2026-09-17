@@ -177,11 +177,11 @@ class _Section extends StatelessWidget {
     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: const BoxDecoration(color: AppColors.dark, border: Border(bottom: BorderSide(color: AppColors.black, width: 1))),
+        decoration: const BoxDecoration( border: Border(bottom: BorderSide(color: AppColors.black, width: 1))),
         child: Row(children: [
-          Icon(icon, size: 16, color: AppColors.yellow),
+          Icon(icon, size: 16, color: AppColors.brand),
           const SizedBox(width: 8),
-          Text(title, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow)),
+          Text(title, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.brand)),
         ]),
       ),
       Padding(padding: const EdgeInsets.all(14), child: Column(children: children)),

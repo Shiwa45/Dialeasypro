@@ -107,6 +107,27 @@
             android:exported="false"
             android:stopWithTask="true"
             android:foregroundServiceType="microphone"/>
+
+        <!-- Follow-up reminders are alarms held by Android, not by the app.
+             Without these two receivers every scheduled reminder is silently
+             dropped on reboot and on a timezone change — the permissions
+             above are necessary but on their own do nothing.
+             flutter_local_notifications ships both; they just have to be
+             declared. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false" />
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- ═══ INTENT QUERIES (Android 11+ package visibility) ═══ -->

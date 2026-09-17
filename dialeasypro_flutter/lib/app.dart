@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'core/services/notification_service.dart';
 import 'core/services/call_recording_service.dart';
 import 'core/services/setup_service.dart';
 import 'core/theme/app_theme.dart';
@@ -28,10 +31,38 @@ import 'features/setup/setup_wizard_screen.dart';
 final _rootKey = GlobalKey<NavigatorState>();
 final _shellKey = GlobalKey<NavigatorState>();
 
+/// Routes a tapped notification once the router exists.
+///
+/// The tap can arrive before the first frame — Android launches the app to
+/// deliver it — so this holds the route until there is a navigator to send it
+/// to, rather than dropping it.
+StreamSubscription<String>? _notificationTapSub;
+String? _pendingNotificationRoute;
+
+void _bindNotificationTaps(GoRouter router) {
+  _notificationTapSub?.cancel();
+  _notificationTapSub = NotificationService.instance.onOpenRoute.listen((route) {
+    if (route.isEmpty) return;
+    final nav = _rootKey.currentState;
+    if (nav == null) {
+      _pendingNotificationRoute = route;
+      return;
+    }
+    router.push(route);
+  });
+
+  // Anything that arrived before the router was ready.
+  final pending = _pendingNotificationRoute;
+  if (pending != null) {
+    _pendingNotificationRoute = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) => router.push(pending));
+  }
+}
+
 final _routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
 
-  return GoRouter(
+  final router = GoRouter(
     navigatorKey: _rootKey,
     initialLocation: '/',
     refreshListenable: ValueNotifier(authState.status),
@@ -114,6 +145,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
     ),
   );
+
+  _bindNotificationTaps(router);
+  ref.onDispose(() => _notificationTapSub?.cancel());
+  return router;
 });
 
 // ─── BOTTOM NAV SHELL ───────────────────────────────────────
@@ -197,7 +232,8 @@ class _MainShellState extends ConsumerState<_MainShell>
       body: widget.child,
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: AppColors.black, width: 1)),
+          color: AppColors.surface,
+          border: Border(top: BorderSide(color: AppColors.line, width: 1)),
         ),
         child: BottomNavigationBar(
           currentIndex: _idx,
@@ -206,16 +242,26 @@ class _MainShellState extends ConsumerState<_MainShell>
             context.go(tabs[i].path);
           },
           backgroundColor: AppColors.white,
-          selectedItemColor: AppColors.black,
-          unselectedItemColor: AppColors.grey,
+          selectedItemColor: AppColors.brand,
+          unselectedItemColor: AppColors.text3,
           type: BottomNavigationBarType.fixed,
           elevation: 0,
           items: tabs.asMap().entries.map((e) => BottomNavigationBarItem(
             icon: Padding(
               padding: const EdgeInsets.only(bottom: 3),
-              child: Container(
-                padding: EdgeInsets.all(_idx == e.key ? 4 : 0),
-                decoration: _idx == e.key ? BoxDecoration(color: AppColors.yellow, border: Border.all(color: AppColors.black, width: 1)) : null,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.symmetric(
+                  horizontal: _idx == e.key ? 14 : 0,
+                  vertical: _idx == e.key ? 4 : 0,
+                ),
+                decoration: _idx == e.key
+                    ? BoxDecoration(
+                        color: AppColors.brand50,
+                        borderRadius: BorderRadius.circular(999),
+                      )
+                    : null,
                 child: Icon(_idx == e.key ? e.value.activeIcon : e.value.icon, size: 20),
               ),
             ),
@@ -236,11 +282,54 @@ class _Tab {
 }
 
 // ─── ROOT APP ───────────────────────────────────────────────
-class DialEasyproApp extends ConsumerWidget {
+class DialEasyproApp extends ConsumerStatefulWidget {
   const DialEasyproApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DialEasyproApp> createState() => _DialEasyproAppState();
+}
+
+class _DialEasyproAppState extends ConsumerState<DialEasyproApp>
+    with WidgetsBindingObserver {
+  /// Don't re-sync on every glance at the phone. Coming back from a ten
+  /// second detour does not change what is scheduled.
+  static const _minResyncGap = Duration(minutes: 10);
+  DateTime? _lastSync;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+
+    // Reminders were armed once, at login. An app left open for days keeps
+    // firing alarms for follow-ups that have since been completed or moved,
+    // and never learns about one scheduled from the web this morning.
+    // Resuming is the natural moment to reconcile: it is when the agent is
+    // about to look at their day anyway.
+    if (!ref.read(authProvider).isAuthenticated) return;
+
+    final now = DateTime.now();
+    if (_lastSync != null && now.difference(_lastSync!) < _minResyncGap) return;
+    _lastSync = now;
+
+    // Not awaited: a slow or failed sync must not hold up the first frame
+    // after a resume. It logs its own failures.
+    unawaited(NotificationService.instance.syncFollowupReminders());
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(_routerProvider);
     return MaterialApp.router(
       title: 'DialEasypro',

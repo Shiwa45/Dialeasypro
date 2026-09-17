@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,27 +29,40 @@ void main() async {
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
 
-  // Hive (local cache)
-  await Hive.initFlutter();
-
-  // Tenant config — MUST load before any API call
-  await TenantConfig.instance.load();
-
-  // Phone service — listens to system call state
-  await PhoneService.instance.init();
-
-  // First-run flag, read before the router builds its first route.
-  await SetupService.instance.preload();
-
-  // Notifications. Sets up the Android channel and asks for the post-
-  // notifications permission Android 13+ requires before anything can be
-  // shown. Reminders themselves are armed after login, once there is a token
-  // to fetch follow-ups with.
+  // Everything below is local setup: preferences, a cache, a stream
+  // subscription. None of it may block on a person, and none of it is worth
+  // an unusable app if it fails — an uncaught throw here shows the same black
+  // screen as a hang, with no clue which line did it.
   try {
-    await NotificationService.instance.init();
-  } catch (_) {
-    // A phone that refuses notifications must still get an app.
+    // Hive (local cache)
+    await Hive.initFlutter();
+
+    // Tenant config — MUST load before any API call
+    await TenantConfig.instance.load();
+
+    // Phone service — listens to system call state
+    await PhoneService.instance.init();
+
+    // First-run flag, read before the router builds its first route.
+    await SetupService.instance.preload();
+  } catch (e, st) {
+    debugPrint('[main] startup step failed, continuing: $e');
+    debugPrint('$st');
   }
+
+  // Notifications: wiring only, and deliberately NOT awaited.
+  //
+  // This used to await the full init, which included the permission prompts.
+  // requestExactAlarmsPermission opens a system settings screen, so the app
+  // hung on a black screen waiting for a prompt behind a UI that had not
+  // been drawn. Nothing before runApp may wait on a person.
+  //
+  // The prompts now live in requestPermissions(), called by the setup wizard
+  // and after login. Every other entry point on the service calls init()
+  // itself, so a notification arriving before this finishes still works.
+  unawaited(NotificationService.instance.init().catchError((Object e) {
+    debugPrint('[main] notification init failed: $e');
+  }));
 
   // Cloudinary — load saved config (if user has set it in Profile)
   try {

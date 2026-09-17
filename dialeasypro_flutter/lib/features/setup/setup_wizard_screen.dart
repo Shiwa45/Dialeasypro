@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/services/call_recording_service.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/services/setup_service.dart';
 import '../../core/theme/colors.dart';
 import '../../core/widgets/widgets.dart';
@@ -100,6 +101,11 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
 
   Future<void> _grantCore() async {
     await [Permission.phone, Permission.microphone, Permission.notification].request();
+
+    // Exact alarms live outside permission_handler. Asking here rather than
+    // at startup: this call can open a system settings screen, and doing
+    // that before the first frame is what left the app on a black screen.
+    await NotificationService.instance.requestPermissions();
     await _refresh();
     if (!mounted) return;
     if (!_phoneOk || !_micOk) {

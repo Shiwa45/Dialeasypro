@@ -71,6 +71,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // which is the only delivery path that does not depend on push.
       // Deliberately not awaited: a slow or failed sync must not hold up the
       // login it follows.
+      unawaited(NotificationService.instance.requestPermissions());
       unawaited(NotificationService.instance.syncFollowupReminders());
       return true;
     } catch (e) {
@@ -85,6 +86,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // the previous agent's follow-ups.
     try {
       await NotificationService.instance.cancelAll();
+      await NotificationService.instance.clearAnnounced();
       await NotificationsService.instance.registerDevice('');
     } catch (_) {}
     await ApiClient.instance.clearTokens();

@@ -16,6 +16,11 @@ from apps.leads.views import (
     FollowUpListCreateView,
     MyFollowUpsView,
     LeadActivityListView,
+    LeadBatchDetailView,
+    LeadBatchDistributeView,
+    LeadBatchListView,
+    LeadBatchStatsView,
+    LeadBatchStatusView,
     LeadBulkAssignView,
     LeadDistributeView,
     LeadFlushView,
@@ -40,6 +45,15 @@ urlpatterns = [
     path("queues/release/", QueueReleaseView.as_view(), name="api_queue_release"),
     path("queues/<int:pk>/", CallQueueDetailView.as_view(), name="api_queue_detail"),
     path("queues/<int:pk>/pull/", QueuePullNextView.as_view(), name="api_queue_pull"),
+
+    # ---- Lead batches --------------------------------------
+    # Declared BEFORE "<int:pk>/" — otherwise "batches" is captured by the
+    # lead-detail route and every batch request dies on an int coercion.
+    path("batches/", LeadBatchListView.as_view(), name="api_lead_batches"),
+    path("batches/distribute/", LeadBatchDistributeView.as_view(), name="api_lead_batch_distribute"),
+    path("batches/<int:pk>/", LeadBatchDetailView.as_view(), name="api_lead_batch_detail"),
+    path("batches/<int:pk>/status/", LeadBatchStatusView.as_view(), name="api_lead_batch_status"),
+    path("batches/<int:pk>/stats/", LeadBatchStatsView.as_view(), name="api_lead_batch_stats"),
 
     # ---- Lead CRUD -----------------------------------------
     path("", LeadListCreateView.as_view(), name="api_lead_list"),

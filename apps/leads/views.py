@@ -23,7 +23,7 @@ import logging
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.parsers import MultiPartParser
@@ -49,6 +49,7 @@ from apps.leads.serializers import (
     CustomFieldSerializer,
     FollowUpCreateSerializer,
     FollowUpSerializer,
+    LeadBatchSerializer,
     LeadBulkAssignSerializer,
     LeadCreateSerializer,
     LeadDetailSerializer,
@@ -160,7 +161,7 @@ class LeadListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         # Role-based visibility (agents see only their assigned leads).
-        qs = leads_visible_to(self.request.user).select_related("assigned_to")
+        qs = leads_visible_to(self.request.user).select_related("assigned_to", "batch")
 
         # ---- Query param filters ----
         params = self.request.query_params
@@ -176,6 +177,8 @@ class LeadListCreateView(generics.ListCreateAPIView):
 
         if assigned_to := params.get("assigned_to"):
             qs = qs.filter(assigned_to_id=assigned_to)
+        if batch := params.get("batch"):
+            qs = qs.filter(batch_id=batch)
 
         if city := params.get("city"):
             qs = qs.filter(city__icontains=city)
@@ -402,6 +405,8 @@ class LeadDistributeView(APIView):
         agents = d["agent_ids"]  # validated → list of Agent objects
 
         qs = Lead.objects.filter(is_deleted=False)
+        if d.get("batch_ids"):
+            qs = qs.filter(batch_id__in=d["batch_ids"])
         if d.get("only_unassigned"):
             qs = qs.filter(assigned_to__isnull=True)
         if d.get("statuses"):
@@ -416,34 +421,31 @@ class LeadDistributeView(APIView):
                 Q(name__icontains=term) | Q(phone__icontains=term) | Q(email__icontains=term)
             )
 
-        qs = qs.order_by("created_at")
+        # created_at, not pk, so an equal split gives each agent a
+        # time-coherent slice and a re-run produces the same plan.
+        qs = qs.order_by("created_at", "id")
         if d.get("limit"):
             qs = qs[: d["limit"]]
 
         lead_ids = list(qs.values_list("id", flat=True))
         if not lead_ids:
             return Response(
-                {"distributed": 0, "per_agent": {}, "message": "No leads matched the filter."},
+                {"distributed": 0, "unassigned": 0, "per_agent": {},
+                 "message": "No leads matched the filter."},
                 status=status.HTTP_200_OK,
             )
 
-        # Round-robin split across agents.
-        from collections import defaultdict
-        buckets = defaultdict(list)
-        for i, lead_id in enumerate(lead_ids):
-            buckets[agents[i % len(agents)].pk].append(lead_id)
+        # The shared engine, so this path and the import task's auto-assign can
+        # never drift apart — the round-robin used to live inline here, which
+        # is exactly why the import path could not reuse it.
+        from apps.leads.services import distribution as dist
 
-        now = timezone.now()
-        per_agent = {}
-        for agent in agents:
-            ids = buckets.get(agent.pk, [])
-            if ids:
-                # Update in chunks to keep the IN clause reasonable.
-                for start in range(0, len(ids), 1000):
-                    Lead.objects.filter(pk__in=ids[start:start + 1000]).update(
-                        assigned_to=agent, assigned_at=now
-                    )
-            per_agent[agent.name] = len(ids)
+        result = dist.distribute(
+            lead_ids, agents,
+            method=d.get("method") or dist.Method.ROUND_ROBIN,
+            max_per_agent=d.get("max_per_agent"),
+            actor=request.user,
+        )
 
         AuditLog.log(
             action=AuditAction.BULK_ACTION,
@@ -451,14 +453,14 @@ class LeadDistributeView(APIView):
             actor_id=request.user.pk,
             actor_email=request.user.email,
             entity_type="Lead",
-            description=f"Distributed {len(lead_ids)} leads across {len(agents)} agent(s)",
+            description=(
+                f"Distributed {result['distributed']} leads across "
+                f"{len(agents)} agent(s) using {result['method']}"
+            ),
             request=request,
         )
 
-        return Response(
-            {"distributed": len(lead_ids), "per_agent": per_agent},
-            status=status.HTTP_200_OK,
-        )
+        return Response(result, status=status.HTTP_200_OK)
 
 
 class LeadFlushView(APIView):
@@ -722,6 +724,55 @@ class LeadImportView(APIView):
         if assigned_id := request.data.get("assigned_to"):
             assigned_to = Agent.objects.filter(pk=assigned_id, is_active=True).first()
 
+        # ---- Batch & auto-assign options --------------------
+        # `auto_assign` arrives from multipart form data, so it is the STRING
+        # "true"/"false" — `bool("false")` is True, which would silently turn
+        # auto-assign on for everyone who explicitly turned it off.
+        raw_auto = str(request.data.get("auto_assign", "")).strip().lower()
+        auto_assign = raw_auto in ("true", "1", "yes", "on")
+
+        assign_to_agents = []
+        if raw_agents := request.data.get("assign_to_agents"):
+            try:
+                parsed = json.loads(raw_agents) if isinstance(raw_agents, str) else raw_agents
+                if isinstance(parsed, list):
+                    # Keep the admin's order; round robin starts with their
+                    # first pick. Validate against active agents so a stale id
+                    # from the browser cannot silently shrink the rotation.
+                    wanted = [int(x) for x in parsed]
+                    live = set(
+                        Agent.objects.filter(pk__in=wanted, is_active=True)
+                        .values_list("pk", flat=True)
+                    )
+                    assign_to_agents = [pk for pk in wanted if pk in live]
+            except (json.JSONDecodeError, TypeError, ValueError):
+                assign_to_agents = []
+
+        from apps.leads.services.distribution import Method
+
+        assign_method = str(request.data.get("assign_method") or Method.ROUND_ROBIN)
+        if assign_method not in Method.ALL:
+            assign_method = Method.ROUND_ROBIN
+
+        max_per_agent = None
+        if raw_cap := request.data.get("assign_max_per_agent"):
+            try:
+                max_per_agent = max(1, int(raw_cap))
+            except (TypeError, ValueError):
+                max_per_agent = None
+
+        if auto_assign and not assign_to_agents:
+            return Response(
+                {
+                    "error": "agents_required",
+                    "message": (
+                        "Auto-assign is on but no active agents were selected. "
+                        "Pick at least one agent, or turn auto-assign off."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Create import job
         job = LeadImportJob.objects.create(
             imported_by=request.user,
@@ -729,8 +780,17 @@ class LeadImportView(APIView):
             original_filename=file.name,
             column_mapping=column_mapping,
             duplicate_action=request.data.get("duplicate_action", "skip"),
-            default_assigned_to=assigned_to or request.user,
+            # When auto-assign is on, leads must land UNASSIGNED so the
+            # distributor has something to place. Defaulting them to the
+            # importing admin first would make every lead look assigned and
+            # the distribution a no-op.
+            default_assigned_to=None if auto_assign else (assigned_to or request.user),
             default_source=request.data.get("source", "manual"),
+            batch_name=str(request.data.get("batch_name") or "").strip()[:150],
+            auto_assign=auto_assign,
+            assign_method=assign_method,
+            assign_to_agents=assign_to_agents,
+            assign_max_per_agent=max_per_agent,
         )
 
         # Kick off Celery task
@@ -1049,6 +1109,8 @@ class LeadExportView(APIView):
             qs = qs.filter(status=status_filter)
         if assigned_to := params.get("assigned_to"):
             qs = qs.filter(assigned_to_id=assigned_to)
+        if batch := params.get("batch"):
+            qs = qs.filter(batch_id=batch)
         if date_from := params.get("date_from"):
             qs = qs.filter(created_at__date__gte=date_from)
         if date_to := params.get("date_to"):
@@ -1237,3 +1299,202 @@ class QueueReleaseView(APIView):
         lead.release_lock()
 
         return Response({"released": True, "lead_id": lead.pk})
+
+
+# ============================================================
+# Lead batches
+# ============================================================
+
+class LeadBatchListView(generics.ListAPIView):
+    """
+    GET /api/v1/leads/batches/
+
+    Filters: status, source, kind, q (matches the name or the number).
+    Ordered newest batch first, which is the one an admin almost always wants.
+    """
+
+    serializer_class = LeadBatchSerializer
+    permission_classes = [IsManagerOrAdmin]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        from apps.leads.models import LeadBatch
+
+        qs = LeadBatch.objects.select_related("created_by", "import_job")
+        p = self.request.query_params
+        if status_filter := p.get("status"):
+            qs = qs.filter(status=status_filter)
+        if source := p.get("source"):
+            qs = qs.filter(source=source)
+        if kind := p.get("kind"):
+            qs = qs.filter(kind=kind)
+        if p.get("has_unassigned") == "true":
+            # Batches with at least one lead still to place — the working set
+            # for someone who has come here to distribute.
+            qs = qs.filter(leads__is_deleted=False, leads__assigned_to__isnull=True).distinct()
+        if q := p.get("q"):
+            cond = Q(name__icontains=q)
+            if q.strip().isdigit():
+                cond |= Q(number=int(q.strip()))
+            qs = qs.filter(cond)
+        return qs.order_by("-number")
+
+
+class LeadBatchDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE /api/v1/leads/batches/{id}/
+
+    PATCH accepts `name` and `notes` only — everything else about a batch is
+    decided by the system (see LeadBatchSerializer.read_only_fields).
+
+    DELETE detaches the leads and removes the batch; it never deletes leads.
+    Deleting a consignment record must not delete the people in it.
+    """
+
+    serializer_class = LeadBatchSerializer
+    permission_classes = [IsManagerOrAdmin]
+
+    def get_queryset(self):
+        from apps.leads.models import LeadBatch
+
+        return LeadBatch.objects.select_related("created_by", "import_job")
+
+    def perform_destroy(self, instance):
+        instance.leads.update(batch=None)
+        instance.delete()
+
+
+class LeadBatchStatusView(APIView):
+    """POST /api/v1/leads/batches/{id}/status/ {"status": "closed"|"open"}"""
+
+    permission_classes = [IsManagerOrAdmin]
+
+    def post(self, request, pk):
+        from apps.leads.models import LeadBatch
+
+        batch = LeadBatch.objects.filter(pk=pk).first()
+        if batch is None:
+            return Response({"error": "not_found"}, status=status.HTTP_404_NOT_FOUND)
+
+        wanted = (request.data.get("status") or "").strip()
+        if wanted == LeadBatch.STATUS_CLOSED:
+            batch.close()
+        elif wanted == LeadBatch.STATUS_OPEN:
+            batch.reopen()
+        else:
+            return Response(
+                {"error": "invalid_status", "message": "status must be 'open' or 'closed'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(LeadBatchSerializer(batch).data)
+
+
+class LeadBatchDistributeView(APIView):
+    """
+    POST /api/v1/leads/batches/distribute/
+
+    Distribute the leads in one or more batches across agents. This is the
+    endpoint the Batches screen calls: an admin ticks batch 1 and batch 3,
+    picks four agents and a method, and only those batches are touched.
+
+    Methods live in apps/leads/services/distribution.py and are shared with the
+    import task's auto-assign, so a batch distributed by hand and one
+    distributed on import split identically.
+    """
+
+    permission_classes = [IsManagerOrAdmin]
+
+    def post(self, request):
+        from apps.leads.models import LeadBatch
+        from apps.leads.serializers import LeadBatchDistributeSerializer
+        from apps.leads.services import distribution as dist
+
+        serializer = LeadBatchDistributeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        agents = d["agent_ids"]  # validated → Agent objects, caller order kept
+
+        lead_ids = dist.leads_for_batches(
+            d["batch_ids"],
+            only_unassigned=d.get("only_unassigned", True),
+            limit=d.get("limit"),
+        )
+        if not lead_ids:
+            return Response({
+                "distributed": 0,
+                "unassigned": 0,
+                "per_agent": {},
+                "message": (
+                    "Nothing to distribute — every lead in the selected batch(es) "
+                    "is already assigned."
+                    if d.get("only_unassigned", True)
+                    else "The selected batch(es) contain no leads."
+                ),
+            })
+
+        result = dist.distribute(
+            lead_ids, agents,
+            method=d["method"],
+            max_per_agent=d.get("max_per_agent"),
+            actor=request.user,
+        )
+
+        labels = [
+            b.label for b in LeadBatch.objects.filter(pk__in=d["batch_ids"])
+        ]
+        result["batches"] = labels
+
+        AuditLog.log(
+            action=AuditAction.BULK_ACTION,
+            actor_type="tenant_admin",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            entity_type="Lead",
+            description=(
+                f"Distributed {result['distributed']} lead(s) from "
+                f"{len(d['batch_ids'])} batch(es) across {len(agents)} agent(s) "
+                f"using {d['method']}"
+            ),
+            request=request,
+        )
+        return Response(result)
+
+
+class LeadBatchStatsView(APIView):
+    """
+    GET /api/v1/leads/batches/{id}/stats/
+
+    Per-agent breakdown and status mix for one batch — what an admin looks at
+    after distributing, to check the split landed the way they meant.
+    """
+
+    permission_classes = [IsManagerOrAdmin]
+
+    def get(self, request, pk):
+        from apps.leads.models import Lead, LeadBatch
+
+        batch = LeadBatch.objects.filter(pk=pk).first()
+        if batch is None:
+            return Response({"error": "not_found"}, status=status.HTTP_404_NOT_FOUND)
+
+        leads = Lead.objects.filter(batch=batch, is_deleted=False)
+        by_agent = list(
+            leads.filter(assigned_to__isnull=False)
+            .values("assigned_to")
+            .annotate(n=Count("id"), name=F("assigned_to__name"))
+            .order_by("-n")
+        )
+        by_status = dict(
+            leads.values_list("status").annotate(n=Count("id")).values_list("status", "n")
+        )
+
+        return Response({
+            "batch": LeadBatchSerializer(batch).data,
+            "total": leads.count(),
+            "unassigned": leads.filter(assigned_to__isnull=True).count(),
+            "by_agent": [
+                {"agent_id": r["assigned_to"], "name": r["name"], "leads": r["n"]}
+                for r in by_agent
+            ],
+            "by_status": by_status,
+        })

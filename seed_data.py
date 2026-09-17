@@ -184,10 +184,65 @@ def seed():
                     notes="Good conversation."
                 )
 
+        # 9. Back-office module masters
+        #
+        # A fresh tenant with the HRMS or Recruitment module and none of these
+        # is unusable on first open: no leave types means nobody can apply for
+        # leave, and no pipeline stages means no candidate can be applied to a
+        # role at all. Seeding them is what makes the modules work out of the box.
+        seed_backoffice()
+
     print("✅ Sample data seeding complete!")
     print(f"Tenant Domain: http://demo.localhost:8000/crm/")
     print(f"Tenant Admin Login: admin@democorp.in / password123")
     print(f"Agent Login: agent1@democorp.in / password123")
+
+def seed_backoffice():
+    """Masters for the HRMS, Sales & Billing and Recruitment modules."""
+    from decimal import Decimal
+
+    from apps.hrms.models import Holiday, IncentiveRule, LeaveType
+    from apps.recruitment.services.pipeline import seed_pipeline
+
+    # ---- Leave types ----
+    leave_types = [
+        {"name": "Casual Leave",   "annual_quota_days": Decimal("12.0"), "is_paid": True,  "carry_forward": False},
+        {"name": "Sick Leave",     "annual_quota_days": Decimal("6.0"),  "is_paid": True,  "carry_forward": False},
+        {"name": "Earned Leave",   "annual_quota_days": Decimal("15.0"), "is_paid": True,  "carry_forward": True},
+        {"name": "Loss of Pay",    "annual_quota_days": Decimal("0.0"),  "is_paid": False, "carry_forward": False},
+    ]
+    for lt in leave_types:
+        LeaveType.objects.get_or_create(name=lt["name"], defaults=lt)
+    print(f"Leave types: {LeaveType.objects.count()}")
+
+    # ---- Holidays (national, so they hold for any Indian tenant) ----
+    year = timezone.localdate().year
+    holidays = [
+        (f"{year}-01-26", "Republic Day"),
+        (f"{year}-08-15", "Independence Day"),
+        (f"{year}-10-02", "Gandhi Jayanti"),
+    ]
+    for iso, name in holidays:
+        Holiday.objects.get_or_create(date=iso, defaults={"name": name})
+    print(f"Holidays: {Holiday.objects.count()}")
+
+    # ---- One incentive rule, so the engine has something to compute ----
+    IncentiveRule.objects.get_or_create(
+        name="Conversion bonus",
+        defaults={
+            "metric": "converted_leads",
+            "per_unit_amount": Decimal("500.00"),
+            "min_units": Decimal("5"),
+            "applies_to_roles": ["agent", "senior_agent"],
+            "is_active": True,
+        },
+    )
+    print(f"Incentive rules: {IncentiveRule.objects.count()}")
+
+    # ---- Recruitment pipeline ----
+    created = seed_pipeline()
+    print(f"Pipeline stages: {'seeded ' + str(created) if created else 'already present'}")
+
 
 if __name__ == '__main__':
     seed()

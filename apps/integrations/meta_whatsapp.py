@@ -549,10 +549,20 @@ def _resolve_lead(message: InboundMessage, config, conversation_referral: dict):
     enforce_lead_quota(1)
 
     assigned_to = getattr(config, "inbound_assign_to", None) if config else None
+
+    # Today's batch for this source. A CTWA lead and an organic WhatsApp lead
+    # land in DIFFERENT batches because they carry different sources — which is
+    # the point: ad traffic and walk-in traffic are distributed differently.
+    from apps.leads.models import LeadBatch
+
+    lead_source = LeadSource.META_CTWA if conversation_referral else LeadSource.WHATSAPP
+    batch = LeadBatch.open_for_source(lead_source)
+
     lead = Lead.objects.create(
+        batch=batch,
         name=(message.profile_name or "WhatsApp Lead")[:200],
         phone=phone,
-        source=LeadSource.META_CTWA if conversation_referral else LeadSource.WHATSAPP,
+        source=lead_source,
         status=LeadStatus.NEW,
         priority=LeadPriority.WARM,
         assigned_to=assigned_to,
@@ -568,6 +578,8 @@ def _resolve_lead(message: InboundMessage, config, conversation_referral: dict):
         },
     )
     note_leads_created(1)
+    if batch is not None:
+        batch.note_leads_added(1)
     return lead, True
 
 

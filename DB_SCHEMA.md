@@ -219,3 +219,73 @@ Module access is decided by `apps/core/capabilities.py` (a role list per action)
 **not** by `AgentRole.HIERARCHY`. Endpoints declare `required_capability` and are
 guarded by `HasCapability` alongside the existing `HasFeatureAccess` plan gate.
 The same table is served to clients at `GET /api/v1/auth/capabilities/`.
+
+---
+
+## Lead batches (apps.leads)
+
+### LeadBatch
+*Table: leads_leadbatch*
+> A named consignment of leads that arrived together — the unit admins
+> distribute by. Two things create one: a CSV/Excel import (one batch per job),
+> or a webhook/API source (one batch per SOURCE PER DAY, opened on first
+> arrival and reused for the rest of that day).
+>
+> Per-day for webhooks because leads trickle in one at a time: a batch per lead
+> is meaningless, and one rolling batch grows unbounded until somebody
+> remembers to close it. A day is the unit people already think in when they
+> look at ad spend.
+
+| Field | Type | Notes |
+|---|---|---|
+| number | PositiveIntegerField | Unique, nullable. Seeded from the row's own **pk**, so it is monotonic and **never reused after a delete** — `max(number)+1` would hand a deleted batch's number to the next one, and an admin's note saying "distribute batch 2" would then point at a different consignment. Null only between INSERT and that update. |
+| name | CharField | Admin's label. Blank → see `label`. |
+| label | *property* | `name` if set; else source + date for webhook batches; else "Batch &lt;n&gt;". |
+| kind | CharField | import / webhook / manual |
+| source | CharField | LeadSource — indexed with collection_date |
+| status | CharField | open / closed |
+| collection_date | DateField | The day a webhook batch collects. Null for imports. |
+| import_job | OneToOne → LeadImportJob | Null for webhook batches |
+| total_leads | PositiveIntegerField | Denormalised; `recount()` repairs drift |
+
+**Constraint** `uniq_webhook_batch_per_source_day` — a partial unique index on
+(source, collection_date) where kind='webhook'. This is what makes
+`open_for_source` safe when two webhook deliveries land in the same
+millisecond, which for an active ad campaign is routine.
+
+`Lead.batch` is a nullable FK with its own index — the filter behind every
+distribute-by-batch action.
+
+### LeadImportJob — batch & auto-assign fields
+
+| Field | Type | Notes |
+|---|---|---|
+| batch_name | CharField | Admin's label, chosen at upload time |
+| auto_assign | BooleanField | Distribute when the import finishes |
+| assign_method | CharField | round_robin / equal_split / least_loaded |
+| assign_to_agents | JSONField | Agent ids; **order is respected** by round robin |
+| assign_max_per_agent | PositiveIntegerField | Ceiling on an agent's TOTAL open leads. Null = no cap. |
+| assignment_result | JSONField | What the distribution actually did, for the UI |
+
+---
+
+## Distribution engine (apps/leads/services/distribution.py)
+
+One module shared by the import task's auto-assign, the manual Distribute
+action and the batch-scoped distribute. The round-robin used to live inline in
+`LeadDistributeView`, which is precisely why the import path could not reuse it.
+
+| Method | Behaviour |
+|---|---|
+| `round_robin` | One at a time in agent order. Skips a capped agent rather than stalling the rotation. |
+| `equal_split` | Contiguous blocks — useful when the file is ordered by something the admin cares about. |
+| `least_loaded` | Fewest open leads first, re-evaluated per lead so one agent doesn't take everything. |
+
+`plan()` is pure — same inputs, same split — so a preview cannot disagree with
+what actually happens. It returns leftovers rather than force-assigning them:
+when every agent is at the cap, those leads stay unassigned and visible, and
+the API says how many.
+
+"Open" excludes converted, lost, duplicate **and not_interested**: counting
+finished work would mean the agent who closes the most deals stops receiving
+any new ones.

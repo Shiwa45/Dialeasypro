@@ -9,6 +9,8 @@ LeadNote       : Free-text note attached to a lead (log of interactions).
 CustomField    : Tenant-defined extra fields on leads (up to plan limit).
 CustomFieldValue: Value store for custom fields per lead.
 LeadImportJob  : Tracks CSV/Excel import operations with row-level results.
+LeadBatch      : A named consignment of leads — one CSV import, or one day's
+                 intake from a webhook source. The unit admins distribute by.
 LeadActivity   : Immutable activity feed for each lead (calls, messages, status changes).
 """
 import uuid
@@ -174,6 +176,17 @@ class Lead(SoftDeleteModel, TimeStampedModel):
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name="leads",
+    )
+    # The consignment this lead arrived in. Distinct from import_job: a batch
+    # also covers webhook intake, which has no file and no job. This is the
+    # handle admins actually distribute by — "assign batch 3 to these four
+    # agents" — so it is indexed for exactly that filter.
+    batch = models.ForeignKey(
+        "LeadBatch",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="leads",
+        db_index=True,
     )
 
     # ---- Tags ---------------------------------------------
@@ -792,6 +805,230 @@ class CustomFieldValue(models.Model):
 # Lead Import Job
 # ============================================================
 
+# ============================================================
+# Lead batches — the unit of distribution
+# ============================================================
+
+class LeadBatch(TimeStampedModel):
+    """
+    A named consignment of leads that arrived together.
+
+    Two things create one:
+      * a CSV/Excel import — one batch per import job, named by the admin;
+      * a webhook/API source — one batch per SOURCE PER DAY, opened on first
+        arrival and reused for the rest of that day.
+
+    Why per-day for webhooks: leads trickle in one at a time, so batching per
+    lead would be meaningless and batching them all into one rolling batch
+    grows unbounded until somebody remembers to close it. A day is the unit
+    people already think in when they look at ad spend — "yesterday's Meta
+    leads" is a question with an answer.
+
+    `number` is a per-tenant running counter so an admin can say "batch 7" out
+    loud. It is seeded from the row's own primary key, which in a
+    schema-per-tenant layout is already a per-tenant Postgres sequence: that
+    makes it monotonic, concurrency-safe without any locking, and — the part
+    that matters — never REUSED after a batch is deleted.
+
+    Deriving it from max(number)+1 looked equivalent and was not: delete batch
+    2 of 3, and the next import becomes batch 2 as well. An admin who wrote
+    "distribute batch 2" on a sticky note would then be pointing at an entirely
+    different consignment, and the unique constraint cannot catch it because
+    the original row is gone.
+    """
+
+    STATUS_OPEN = "open"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open — still receiving leads"),
+        (STATUS_CLOSED, "Closed"),
+    ]
+
+    KIND_IMPORT = "import"
+    KIND_WEBHOOK = "webhook"
+    KIND_MANUAL = "manual"
+    KIND_CHOICES = [
+        (KIND_IMPORT, "File import"),
+        (KIND_WEBHOOK, "Webhook / API"),
+        (KIND_MANUAL, "Manually created"),
+    ]
+
+    number = models.PositiveIntegerField(
+        unique=True, null=True, blank=True, db_index=True,
+        help_text=(
+            "Per-tenant running batch number, shown to admins as 'Batch 7'. "
+            "Seeded from the row's own pk so it is monotonic and never reused. "
+            "Null only for the instant between INSERT and that update."
+        ),
+    )
+    name = models.CharField(
+        max_length=150, blank=True, default="",
+        help_text="Admin-chosen label. Falls back to a generated one — see `label`.",
+    )
+    kind = models.CharField(max_length=15, choices=KIND_CHOICES, default=KIND_IMPORT)
+    source = models.CharField(
+        max_length=50, choices=LeadSource.CHOICES, default=LeadSource.CSV_IMPORT, db_index=True,
+    )
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True,
+    )
+
+    # For webhook batches: the day this batch collects. Null for imports, which
+    # are bounded by the file rather than by a date.
+    collection_date = models.DateField(null=True, blank=True, db_index=True)
+
+    import_job = models.OneToOneField(
+        "LeadImportJob", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="batch",
+    )
+    created_by = models.ForeignKey(
+        "authentication.Agent", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_lead_batches",
+    )
+
+    # Denormalised counter. Kept because the batch list renders a count per row
+    # and a COUNT(*) subquery per batch is the obvious way to make that list
+    # slow. `recount()` is the repair path if it ever drifts.
+    total_leads = models.PositiveIntegerField(default=0)
+
+    notes = models.CharField(max_length=300, blank=True, default="")
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Lead Batch"
+        verbose_name_plural = "Lead Batches"
+        ordering = ["-number"]
+        indexes = [
+            models.Index(fields=["source", "collection_date"], name="lead_batch_src_date_idx"),
+            models.Index(fields=["status", "-number"], name="lead_batch_status_num_idx"),
+        ]
+        constraints = [
+            # One open webhook batch per source per day. This is what makes
+            # `open_for_source` safe under concurrent webhook deliveries: two
+            # requests racing to open today's Meta batch cannot both win.
+            models.UniqueConstraint(
+                fields=["source", "collection_date"],
+                condition=models.Q(kind="webhook"),
+                name="uniq_webhook_batch_per_source_day",
+            ),
+        ]
+
+    def __str__(self):
+        return self.label
+
+    @property
+    def label(self) -> str:
+        """What the admin sees. Their name if they gave one, else a generated one."""
+        if self.name:
+            return self.name
+        if self.kind == self.KIND_WEBHOOK and self.collection_date:
+            return f"{self.get_source_display()} — {self.collection_date:%d %b %Y}"
+        return f"Batch {self.number if self.number is not None else self.pk}"
+
+    @property
+    def assigned_count(self) -> int:
+        return self.leads.filter(is_deleted=False, assigned_to__isnull=False).count()
+
+    @property
+    def unassigned_count(self) -> int:
+        return self.leads.filter(is_deleted=False, assigned_to__isnull=True).count()
+
+    # ---- Creation ------------------------------------------
+
+    @classmethod
+    def _create_numbered(cls, **fields):
+        """
+        Insert a batch and stamp its number from its own pk.
+
+        Two statements, one transaction. `number` is unique but nullable, and
+        Postgres permits many NULLs in a unique index, so concurrent inserts
+        never collide in the window before the update lands. No table lock is
+        needed — the pk sequence already serialises this for us.
+        """
+        from django.db import transaction
+
+        with transaction.atomic():
+            obj = cls.objects.create(number=None, **fields)
+            obj.number = obj.pk
+            obj.save(update_fields=["number"])
+            return obj
+
+    @classmethod
+    def create_for_import(cls, *, import_job, name: str = "", created_by=None, source=None):
+        """One batch for one import job."""
+        return cls._create_numbered(
+            name=name.strip()[:150],
+            kind=cls.KIND_IMPORT,
+            source=source or LeadSource.CSV_IMPORT,
+            import_job=import_job,
+            created_by=created_by,
+            status=cls.STATUS_OPEN,
+        )
+
+    @classmethod
+    def open_for_source(cls, source: str, *, on_date=None):
+        """
+        Today's batch for a webhook source, creating it on first arrival.
+
+        Called on every inbound lead, so the happy path is a single indexed
+        SELECT. The create path is guarded by the partial unique constraint,
+        because two webhook deliveries arriving in the same millisecond is not
+        hypothetical for an active ad campaign — it is Tuesday.
+        """
+        from django.db import IntegrityError, transaction
+
+        day = on_date or timezone.localdate()
+        existing = cls.objects.filter(
+            source=source, collection_date=day, kind=cls.KIND_WEBHOOK,
+        ).first()
+        if existing is not None:
+            return existing
+
+        try:
+            with transaction.atomic():
+                return cls._create_numbered(
+                    kind=cls.KIND_WEBHOOK,
+                    source=source,
+                    collection_date=day,
+                    status=cls.STATUS_OPEN,
+                )
+        except IntegrityError:
+            # Lost the race — the constraint did its job. Read the winner.
+            # Must be outside the failed atomic block, hence the re-query here.
+            return cls.objects.filter(
+                source=source, collection_date=day, kind=cls.KIND_WEBHOOK,
+            ).first()
+
+    # ---- Maintenance ---------------------------------------
+
+    def note_leads_added(self, n: int = 1):
+        """Bump the denormalised counter without reading it first."""
+        if n:
+            type(self).objects.filter(pk=self.pk).update(
+                total_leads=models.F("total_leads") + n, updated_at=timezone.now(),
+            )
+
+    def recount(self) -> int:
+        """Repair `total_leads` from the leads actually pointing here."""
+        actual = self.leads.filter(is_deleted=False).count()
+        if actual != self.total_leads:
+            type(self).objects.filter(pk=self.pk).update(total_leads=actual)
+            self.total_leads = actual
+        return actual
+
+    def close(self):
+        if self.status != self.STATUS_CLOSED:
+            self.status = self.STATUS_CLOSED
+            self.closed_at = timezone.now()
+            self.save(update_fields=["status", "closed_at", "updated_at"])
+
+    def reopen(self):
+        if self.status != self.STATUS_OPEN:
+            self.status = self.STATUS_OPEN
+            self.closed_at = None
+            self.save(update_fields=["status", "closed_at", "updated_at"])
+
+
 class LeadImportJob(TimeStampedUUIDModel):
     """
     Tracks a CSV/Excel import operation.
@@ -840,6 +1077,33 @@ class LeadImportJob(TimeStampedUUIDModel):
     default_source = models.CharField(
         max_length=50, choices=LeadSource.CHOICES, default=LeadSource.MANUAL
     )
+
+    # ---- Batch & auto-assign -------------------------------
+    # The admin names the consignment at upload time; the batch row itself is
+    # created by the import task, so a job that never runs leaves no orphan
+    # batch sitting in the list.
+    batch_name = models.CharField(
+        max_length=150, blank=True, default="",
+        help_text="Label for this import's batch. Blank → 'Batch <n>'.",
+    )
+    auto_assign = models.BooleanField(
+        default=False,
+        help_text="Distribute the imported leads across agents when the import finishes.",
+    )
+    assign_method = models.CharField(
+        max_length=20, default="round_robin",
+        help_text="round_robin | equal_split | least_loaded — see services/distribution.py.",
+    )
+    assign_to_agents = models.JSONField(
+        default=list, blank=True,
+        help_text="Agent ids to distribute across. Order is respected by round robin.",
+    )
+    assign_max_per_agent = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Optional ceiling on an agent's TOTAL open leads. Null = no cap.",
+    )
+    # Filled in by the task so the UI can report the split without recomputing.
+    assignment_result = models.JSONField(default=dict, blank=True)
 
     # Results
     total_rows = models.PositiveIntegerField(default=0)

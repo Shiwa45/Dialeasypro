@@ -11,6 +11,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action, display
 
 from apps.leads.models import (
+    LeadBatch,
     CustomField,
     CustomFieldValue,
     FollowUp,
@@ -163,3 +164,15 @@ class LeadImportJobAdmin(ModelAdmin):
             '<div style="width:{}%;background:{};height:8px;border-radius:4px"></div>'
             '</div> {}%', pct, color, pct,
         )
+
+
+@admin.register(LeadBatch)
+class LeadBatchAdmin(admin.ModelAdmin):
+    list_display = [
+        "number", "label", "kind", "source", "status",
+        "total_leads", "collection_date", "created_at",
+    ]
+    list_filter = ["status", "kind", "source"]
+    search_fields = ["name", "number"]
+    readonly_fields = ["number", "kind", "source", "collection_date", "import_job", "total_leads"]
+    ordering = ["-number"]

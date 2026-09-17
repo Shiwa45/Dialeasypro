@@ -36,7 +36,7 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
     import csv
     import io
     from apps.leads.models import (
-        CustomField, CustomFieldValue, Lead, LeadActivity, LeadImportJob, LeadNote,
+        CustomField, CustomFieldValue, Lead, LeadActivity, LeadBatch, LeadImportJob, LeadNote,
     )
     from apps.core.constants import LeadSource
     from apps.core.utils import normalize_indian_phone
@@ -72,6 +72,19 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
 
     job.total_rows = len(rows)
     job.save(update_fields=["total_rows"])
+
+    # --- Batch -----------------------------------------------
+    # Created only once the file has parsed: a job that dies on an unreadable
+    # file must not leave an empty batch sitting in the admin's list.
+    batch = getattr(job, "batch", None)
+    if batch is None:
+        batch = LeadBatch.create_for_import(
+            import_job=job,
+            name=job.batch_name,
+            created_by=job.imported_by,
+            source=job.default_source or LeadSource.CSV_IMPORT,
+        )
+    logger.info(f"[Import] job={job.pk} → batch #{batch.number} ({batch.label})")
 
     # --- Mapping of column names → Lead fields ---------------
     column_mapping = job.column_mapping or {}
@@ -165,6 +178,7 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
                 "source": job.default_source or LeadSource.MANUAL,
                 "assigned_to": job.default_assigned_to,
                 "import_job": job,
+                "batch": batch,
             }
             # Budget parsing
             budget_str = row.get("budget", "").strip().replace(",", "").replace("₹", "")
@@ -269,19 +283,84 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
             failed += len(leads_to_create)
             row_errors.append({"row": "bulk", "error": str(exc)})
 
+    # --- Batch counter & auto-assign -------------------------
+    # recount() rather than trusting `successful`: the "update existing"
+    # duplicate mode counts rows as successful that were never added to this
+    # batch, so incrementing by `successful` would overstate it. Reading the
+    # leads actually pointing at the batch is the only figure that is true.
+    batch.recount()
+
+    if job.auto_assign and job.assign_to_agents:
+        try:
+            from apps.authentication.models import Agent
+            from apps.leads.services import distribution as dist
+
+            # Preserve the admin's chosen order — round robin starts with the
+            # first agent they picked, which is what they expect to see.
+            by_pk = {
+                a.pk: a for a in Agent.objects.filter(
+                    pk__in=job.assign_to_agents, is_active=True,
+                )
+            }
+            agents = [by_pk[pk] for pk in job.assign_to_agents if pk in by_pk]
+
+            if not agents:
+                job.assignment_result = {
+                    "distributed": 0,
+                    "message": "Auto-assign was on, but none of the selected agents are active.",
+                }
+            else:
+                method = job.assign_method or dist.Method.ROUND_ROBIN
+                if method not in dist.Method.ALL:
+                    method = dist.Method.ROUND_ROBIN
+                lead_ids = dist.leads_for_batches(
+                    [batch.pk], only_unassigned=True,
+                )
+                job.assignment_result = dist.distribute(
+                    lead_ids, agents,
+                    method=method,
+                    max_per_agent=job.assign_max_per_agent,
+                    actor=job.imported_by,
+                )
+                logger.info(
+                    f"[Import] job={job.pk} auto-assigned "
+                    f"{job.assignment_result.get('distributed', 0)} lead(s)"
+                )
+        except Exception as exc:
+            # A failed distribution must never fail the import. The leads are
+            # already safely in the batch; the admin can distribute manually
+            # from the Batches screen, and the reason is recorded here.
+            logger.error(f"[Import] job={job.pk} auto-assign failed: {exc}", exc_info=True)
+            job.assignment_result = {
+                "distributed": 0,
+                "error": str(exc),
+                "message": (
+                    "Leads imported successfully, but auto-assign failed. "
+                    "Distribute this batch manually."
+                ),
+            }
+
     # --- Finalize -------------------------------------------
     job.successful_rows = successful
     job.failed_rows = failed
     job.duplicate_rows = duplicates
     job.processed_rows = job.total_rows
     job.row_errors = row_errors[:500]  # Cap error list size
+    job.save(update_fields=["assignment_result"])
     job.mark_completed()
 
     logger.info(
         f"[Import] Job {import_job_id} done: "
         f"{successful} ok / {failed} failed / {duplicates} dupes"
     )
-    return {"successful": successful, "failed": failed, "duplicates": duplicates}
+    return {
+        "successful": successful,
+        "failed": failed,
+        "duplicates": duplicates,
+        "batch_id": batch.pk,
+        "batch_number": batch.number,
+        "assigned": job.assignment_result.get("distributed", 0),
+    }
 
 
 def _parse_import_file(file_content: bytes, filename: str) -> list | None:

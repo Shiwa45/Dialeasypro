@@ -188,7 +188,16 @@ class BaseWebhookView(View):
         # tenant's max_leads / max_leads_per_day caps.
         enforce_lead_quota(1)
 
+        # Today's batch for this source, opened on first arrival and reused
+        # for the rest of the day. Webhook leads trickle in one at a time, so
+        # a batch per lead would be meaningless — a day is the unit people
+        # already think in when they look at a source's output.
+        from apps.leads.models import LeadBatch
+
+        batch = LeadBatch.open_for_source(self.source or LeadSource.WEBHOOK)
+
         lead = Lead.objects.create(
+            batch=batch,
             phone=phone,
             name=lead_data.get("name", "Unknown"),
             email=lead_data.get("email", ""),
@@ -206,6 +215,8 @@ class BaseWebhookView(View):
             assigned_to=assigned_to,
         )
         note_leads_created(1)
+        if batch is not None:
+            batch.note_leads_added(1)
 
         # Persist any mapped custom-field values.
         self._save_custom_values(lead, lead_data.get("custom_values"))

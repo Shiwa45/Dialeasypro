@@ -68,6 +68,32 @@ Per-Tenant Schema (one PostgreSQL schema per client)
   - **Meta Click-to-WhatsApp** turns an inbound WhatsApp conversation started from a Meta ad into a lead with its ad attribution — no Lead Form involved. Setup: [META_WHATSAPP_SETUP.md](META_WHATSAPP_SETUP.md) · [client guide](META_WHATSAPP_CLIENT_GUIDE.md) · [troubleshooting](META_WHATSAPP_TROUBLESHOOTING.md)
 - `apps/reports` — Agent performance, lead source breakdown, call analytics, conversion funnel, daily activity ticker — all Redis-cached
 
+### Lead batches & distribution
+Every lead now arrives in a **batch** — the unit admins distribute by.
+
+- A CSV import creates one batch, named by the admin at upload time (blank → "Batch 7").
+- A webhook/API source (Meta Lead Ads, Click-to-WhatsApp, IndiaMART, …) opens one batch
+  **per source per day** on first arrival and reuses it for the rest of that day, so leads
+  that land at 3am are already grouped when someone opens the app in the morning.
+- Batch numbers are seeded from the row's primary key: monotonic, concurrency-safe without
+  locking, and never reused after a delete — so a note saying "distribute batch 2" always
+  points at the same consignment.
+
+The import screen offers a batch name, an **auto-assign** toggle, an agent picker, a
+distribution method and an optional per-agent cap; assignment happens inside the same
+Celery task, so agents see their leads the moment the import finishes.
+`apps/leads/services/distribution.py` is shared by auto-assign, the manual Distribute
+action and the batch-scoped distribute, so all three split identically:
+
+| Method | Behaviour |
+|---|---|
+| Round robin | One at a time in the order the agents were picked |
+| Equal split | Contiguous blocks — one continuous slice each |
+| Least loaded | Agents with the fewest open leads get more, so the team self-balances |
+
+With a cap set, agents already at their limit are skipped and any remainder stays
+**unassigned and reported** rather than piling onto someone who is full.
+
 ### Phase 4 — Back-office suite (sellable add-on modules)
 - `apps/hrms` — Employee, Attendance (derived nightly from dialer sessions, with manual check-in and admin correction), Leave (types, balances, requests, bulk annual allocation), Expense claims with receipts, the Incentive engine (the CRM → payroll bridge), Salary structures and Payroll runs producing draft → finalized → paid payslips
 - `apps/erp` — Customers, Products, Quotation → Sales order → Invoice with server-side GST from HSN/SAC and place of supply, locked document numbering, payments ledger, receivables ageing, Tally/Zoho export and a GSTR-1-shaped GST summary
@@ -179,6 +205,9 @@ Access at: `http://acme-realty.localhost:8000/crm/`
 /api/v1/leads/stats/            → Dashboard KPIs
 /api/v1/leads/import/           → Upload import file
 /api/v1/leads/export/           → CSV export (streaming)
+/api/v1/leads/batches/          → Lead batches (one per import, one per source per day)
+/api/v1/leads/batches/distribute/    → Distribute selected batches across agents
+/api/v1/leads/batches/{id}/stats/    → Per-agent and per-status breakdown of a batch
 /api/v1/calls/                  → Call log
 /api/v1/calls/click-to-call/    → Initiate call
 /api/v1/calls/stats/            → Call analytics

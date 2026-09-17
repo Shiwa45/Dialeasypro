@@ -17,6 +17,7 @@ from apps.leads.models import (
     FollowUp,
     Lead,
     LeadActivity,
+    LeadBatch,
     LeadImportJob,
     LeadNote,
 )
@@ -146,6 +147,8 @@ class LeadListSerializer(serializers.ModelSerializer):
     source_display = serializers.CharField(source="get_source_display", read_only=True)
     followup_overdue = serializers.BooleanField(read_only=True)
     phone = serializers.SerializerMethodField()
+    batch_label = serializers.SerializerMethodField()
+    batch_number = serializers.IntegerField(source="batch.number", read_only=True, default=None)
 
     class Meta:
         model = Lead
@@ -158,8 +161,13 @@ class LeadListSerializer(serializers.ModelSerializer):
             "last_contacted_at", "contact_count",
             "deal_value", "pipeline_stage",
             "campaign_name", "ad_name",
+            "batch", "batch_number", "batch_label",
             "tags", "is_dnd", "created_at",
         ]
+
+    def get_batch_label(self, obj) -> str | None:
+        # `label` is a property, so it cannot be reached with a source path.
+        return obj.batch.label if obj.batch_id and obj.batch else None
 
     def get_phone(self, obj):
         """Mask phone number for non-admin agents."""
@@ -395,6 +403,15 @@ class LeadDistributeSerializer(serializers.Serializer):
         child=serializers.IntegerField(), min_length=1, max_length=200,
     )
     only_unassigned = serializers.BooleanField(default=True)
+    # Restrict to specific consignments. Combines with the other filters, so
+    # "batch 3, only the hot ones" is expressible.
+    batch_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, default=list, max_length=100,
+    )
+    method = serializers.CharField(default="round_robin")
+    max_per_agent = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=100000, default=None,
+    )
     statuses = serializers.ListField(child=serializers.CharField(), required=False, default=list)
     priorities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
     sources = serializers.ListField(child=serializers.CharField(), required=False, default=list)
@@ -412,10 +429,24 @@ class LeadDistributeSerializer(serializers.Serializer):
             raise serializers.ValidationError("No valid active agents provided.")
         return agents
 
+    def validate_method(self, value):
+        from apps.leads.services.distribution import Method
+
+        if value not in Method.ALL:
+            raise serializers.ValidationError(
+                f"Unknown method '{value}'. One of: {', '.join(Method.ALL)}."
+            )
+        return value
+
 
 class LeadImportJobSerializer(serializers.ModelSerializer):
     imported_by_name = serializers.CharField(source="imported_by.name", read_only=True)
     progress_percent = serializers.IntegerField(read_only=True)
+    # The batch this import created, so the client can link straight to it
+    # when the job finishes. Null until the file has parsed.
+    batch_id = serializers.IntegerField(source="batch.id", read_only=True, default=None)
+    batch_number = serializers.IntegerField(source="batch.number", read_only=True, default=None)
+    batch_label = serializers.SerializerMethodField()
 
     class Meta:
         model = LeadImportJob
@@ -424,12 +455,19 @@ class LeadImportJobSerializer(serializers.ModelSerializer):
             "total_rows", "processed_rows", "successful_rows",
             "failed_rows", "duplicate_rows", "progress_percent",
             "duplicate_action", "created_at", "completed_at",
+            "batch_name", "batch_id", "batch_number", "batch_label",
+            "auto_assign", "assign_method", "assign_to_agents",
+            "assign_max_per_agent", "assignment_result",
         ]
         read_only_fields = [
             "id", "status", "total_rows", "processed_rows",
             "successful_rows", "failed_rows", "duplicate_rows",
-            "completed_at", "created_at",
+            "completed_at", "created_at", "assignment_result",
         ]
+
+    def get_batch_label(self, obj) -> str | None:
+        batch = getattr(obj, "batch", None)
+        return batch.label if batch else None
 
 
 # ============================================================
@@ -510,3 +548,84 @@ class CallQueueSummarySerializer(serializers.ModelSerializer):
         if not agent:
             return 0
         return obj.eligible_leads(agent).count()
+
+
+# ============================================================
+# Lead batches
+# ============================================================
+
+class LeadBatchSerializer(serializers.ModelSerializer):
+    """
+    A batch as the admin sees it. `label` is the display name — their own name
+    if they set one, otherwise a generated one — so the client never has to
+    reimplement that fallback.
+    """
+
+    label = serializers.CharField(read_only=True)
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.name", read_only=True, default=None)
+    assigned_count = serializers.IntegerField(read_only=True)
+    unassigned_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = LeadBatch
+        fields = [
+            "id", "number", "name", "label", "kind", "source", "source_display",
+            "status", "collection_date", "import_job", "created_by", "created_by_name",
+            "total_leads", "assigned_count", "unassigned_count",
+            "notes", "closed_at", "created_at",
+        ]
+        # Everything except the label and notes is decided by the system — a
+        # client must not be able to renumber a batch or restate its counts.
+        read_only_fields = [
+            "id", "number", "kind", "source", "status", "collection_date",
+            "import_job", "created_by", "total_leads", "closed_at", "created_at",
+        ]
+
+
+class LeadBatchDistributeSerializer(serializers.Serializer):
+    """Distribute the leads in one or more batches across agents."""
+
+    batch_ids = serializers.ListField(
+        child=serializers.IntegerField(), min_length=1, max_length=100,
+    )
+    agent_ids = serializers.ListField(
+        child=serializers.IntegerField(), min_length=1, max_length=200,
+    )
+    method = serializers.CharField(default="round_robin")
+    only_unassigned = serializers.BooleanField(default=True)
+    max_per_agent = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=100000, default=None,
+    )
+    limit = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=50000, default=None,
+    )
+
+    def validate_method(self, value):
+        from apps.leads.services.distribution import Method
+
+        if value not in Method.ALL:
+            raise serializers.ValidationError(
+                f"Unknown method '{value}'. One of: {', '.join(Method.ALL)}."
+            )
+        return value
+
+    def validate_agent_ids(self, value):
+        from apps.authentication.models import Agent
+
+        # Caller order is preserved — round robin starts with the first agent
+        # the admin picked, which is what they expect to see in the result.
+        valid = {a.pk: a for a in Agent.objects.filter(pk__in=value, is_active=True)}
+        agents = [valid[pk] for pk in value if pk in valid]
+        if not agents:
+            raise serializers.ValidationError("No valid active agents provided.")
+        return agents
+
+    def validate_batch_ids(self, value):
+        from apps.leads.models import LeadBatch
+
+        found = set(LeadBatch.objects.filter(pk__in=value).values_list("pk", flat=True))
+        missing = [pk for pk in value if pk not in found]
+        if missing:
+            raise serializers.ValidationError(f"Batch(es) not found: {missing}.")
+        return value

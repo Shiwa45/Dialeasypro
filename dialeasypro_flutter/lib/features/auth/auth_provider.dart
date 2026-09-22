@@ -73,6 +73,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // login it follows.
       unawaited(NotificationService.instance.requestPermissions());
       unawaited(NotificationService.instance.syncFollowupReminders());
+      // Whatever is already unread is history this agent is about to see in
+      // the app. Record it as told so the shade carries what arrives NEXT,
+      // rather than a stack of the backlog a minute after signing in.
+      unawaited(NotificationService.instance.syncServerNotifications(silent: true));
       return true;
     } catch (e) {
       state = AuthState(status: AuthStatus.unauthenticated, error: ApiClient.errorMessage(e));

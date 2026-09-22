@@ -296,20 +296,64 @@ class _DialEasyproAppState extends ConsumerState<DialEasyproApp>
   static const _minResyncGap = Duration(minutes: 10);
   DateTime? _lastSync;
 
+  /// How often to ask whether the server has raised anything.
+  ///
+  /// Separate from the reminder re-sync above, and much more frequent: a
+  /// follow-up someone books on your lead is news now, and with no push
+  /// configured the only way this phone learns of it is by asking. Each ask
+  /// costs one small unread-count request when there is nothing new.
+  ///
+  /// It keeps running while the app is in the background — that is the whole
+  /// point, since an agent looking at the app does not need the shade — but
+  /// more slowly, because there it is a background app spending someone's
+  /// battery. Android freezing the process eventually stops it either way;
+  /// the scheduled alarms are what survive that, and FCM is what would fix
+  /// it properly (apps/authentication/push.py).
+  static const _serverPollTick = Duration(minutes: 1);
+  static const _foregroundPollGap = Duration(minutes: 1);
+  static const _backgroundPollGap = Duration(minutes: 5);
+
+  Timer? _serverPoll;
+  DateTime? _lastServerPull;
+  AppLifecycleState _lifecycle = AppLifecycleState.resumed;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _serverPoll = Timer.periodic(_serverPollTick, (_) => _pullServerNotifications());
   }
 
   @override
   void dispose() {
+    _serverPoll?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
+  /// Raise anything the server has for this agent in the Android shade.
+  ///
+  /// Lives at app level rather than on the bell: the bell is only mounted on
+  /// the dashboard, so an agent sitting on any other screen would be told
+  /// nothing.
+  void _pullServerNotifications({bool force = false}) {
+    if (!ref.read(authProvider).isAuthenticated) return;
+
+    final now = DateTime.now();
+    final gap = _lifecycle == AppLifecycleState.resumed
+        ? _foregroundPollGap
+        : _backgroundPollGap;
+    if (!force && _lastServerPull != null && now.difference(_lastServerPull!) < gap) {
+      return;
+    }
+    _lastServerPull = now;
+
+    unawaited(NotificationService.instance.syncServerNotifications());
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
     if (state != AppLifecycleState.resumed) return;
 
     // Reminders were armed once, at login. An app left open for days keeps
@@ -318,6 +362,10 @@ class _DialEasyproAppState extends ConsumerState<DialEasyproApp>
     // Resuming is the natural moment to reconcile: it is when the agent is
     // about to look at their day anyway.
     if (!ref.read(authProvider).isAuthenticated) return;
+
+    // Regardless of the gaps above: picking the phone up is the moment the
+    // badge and the shade are most likely to be behind.
+    _pullServerNotifications(force: true);
 
     final now = DateTime.now();
     if (_lastSync != null && now.difference(_lastSync!) < _minResyncGap) return;

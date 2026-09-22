@@ -31,6 +31,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/models.dart';
 import '../../data/services/services.dart';
 import 'reminder_plan.dart';
+import 'server_alert_plan.dart';
 
 class NotificationService {
   NotificationService._();
@@ -244,7 +245,11 @@ class NotificationService {
       alreadyAnnounced: previously,
     );
 
-    await _plugin.cancelAll();
+    // Clear only the alarms still waiting to fire, not the whole shade.
+    // cancelAll() also dismisses notifications Android has already DELIVERED,
+    // so a sync on resume wiped the overdue alert and every server alert the
+    // agent had not read yet — the app quietly tidying away its own messages.
+    await _cancelPendingReminders();
 
     // Ring the newly-overdue ones now. show() rather than a scheduled alarm:
     // a zonedSchedule for "now" can be dropped as already past.
@@ -276,11 +281,99 @@ class NotificationService {
     return armed;
   }
 
+  /// Drop the alarms that have not fired yet, leaving delivered ones alone.
+  ///
+  /// Reminder ids are non-negative (reminder_plan.occurrenceId); ids raised
+  /// for server notifications are negative, so this cannot cancel those.
+  Future<void> _cancelPendingReminders() async {
+    try {
+      for (final p in await _plugin.pendingNotificationRequests()) {
+        if (p.id >= 0) await _plugin.cancel(p.id);
+      }
+    } catch (e) {
+      debugPrint('[Notifications] could not list pending reminders: $e');
+    }
+  }
+
+  // ---- Notifications the SERVER raised -------------------------------
+
+  static const _serverAnnouncedKey = 'notifications.server_announced';
+
+  /// Put anything the server has raised for this agent into the Android
+  /// notification shade.
+  ///
+  /// The server writes a Notification row when someone schedules a follow-up
+  /// on your lead, when one falls due and hourly while one stays overdue. The
+  /// app fetched those rows for the bell and the notifications screen and
+  /// stopped there, so they appeared INSIDE the app and nowhere else: an
+  /// agent not already looking at the app was told nothing. Local reminders
+  /// covered only what the phone had synced, and only at the scheduled time.
+  ///
+  /// Push (FCM) is still not configured — see apps/authentication/push.py —
+  /// so this reaches the shade while the app is running. The scheduled alarms
+  /// remain the path that works with the app closed.
+  ///
+  /// [silent] records what is already unread as told without showing any of
+  /// it. Used at login: that backlog is history the agent is about to see in
+  /// the app anyway, and a stack of it in the shade a minute after signing in
+  /// is noise, not news.
+  ///
+  /// Returns how many alerts were raised, or -1 if the fetch failed.
+  Future<int> syncServerNotifications({bool silent = false}) async {
+    await init();
+
+    List<AppNotification> unread;
+    try {
+      // Cheap first: the common answer is "nothing new", and that costs one
+      // small request rather than a page of rows.
+      if (await NotificationsService.instance.unreadCount() == 0) return 0;
+      unread = await NotificationsService.instance.list(unreadOnly: true, pageSize: 30);
+    } catch (e) {
+      debugPrint('[Notifications] server notification sync failed: $e');
+      return -1;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final previously = (prefs.getStringList(_serverAnnouncedKey) ?? const [])
+        .map(int.tryParse)
+        .whereType<int>()
+        .toSet();
+
+    // What to raise is decided by planServerAlerts (server_alert_plan.dart),
+    // which is pure and unit-tested. This method only fetches, shows and
+    // persists.
+    final plan = planServerAlerts(
+      unread,
+      alreadyAnnounced: previously,
+      now: DateTime.now(),
+      silent: silent,
+    );
+
+    var shown = 0;
+    for (final alert in plan.show) {
+      try {
+        await show(id: alert.id, title: alert.title, body: alert.body, route: alert.route);
+        shown++;
+      } catch (e) {
+        debugPrint('[Notifications] could not show server alert ${alert.id}: $e');
+      }
+    }
+
+    await prefs.setStringList(
+      _serverAnnouncedKey,
+      [for (final id in boundAnnounced(plan.announced)) '$id'],
+    );
+
+    if (shown > 0) debugPrint('[Notifications] raised $shown server alert(s)');
+    return shown;
+  }
+
   /// Forget which overdue follow-ups were announced. For logout, so the next
   /// agent on this handset is alerted about their own rather than inheriting
   /// the previous agent's "already told" state.
   Future<void> clearAnnounced() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_announcedKey);
+    await prefs.remove(_serverAnnouncedKey);
   }
 }

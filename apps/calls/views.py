@@ -26,6 +26,7 @@ from apps.authentication.permissions import (
     IsActiveAgent,
     IsAuthenticatedAgent,
     IsManagerOrAdmin,
+    IsTenantAdmin,
 )
 from apps.calls.models import CallDisposition, CallLog, CallRecording
 from apps.calls.serializers import (
@@ -441,13 +442,69 @@ def _call_via_mcube(agent_phone: str, lead_phone: str) -> dict:
     raise NotImplementedError("MCUBE integration not configured")
 
 
-class CallDispositionListView(generics.ListAPIView):
-    """GET /api/v1/calls/dispositions/ — Available call dispositions."""
+class CallDispositionListView(generics.ListCreateAPIView):
+    """
+    GET  /api/v1/calls/dispositions/  — Available call dispositions.
+    POST /api/v1/calls/dispositions/  — Add one (tenant admin).
 
-    permission_classes = [IsAuthenticatedAgent]
+    Every tenant starts on the seeded set and every team's outcomes differ, so
+    the list has to be editable from the CRM; until this existed the only way
+    to add one was a management command on the server.
+
+    Agents see active dispositions only — an outcome switched off should not
+    still be offered mid-call. `?include_inactive=true` returns the whole set
+    for the settings screen, which has to show what can be switched back on.
+    """
+
     serializer_class = CallDispositionSerializer
-    queryset = CallDisposition.objects.filter(is_active=True).order_by("sort_order")
     pagination_class = None  # Return all dispositions (short list)
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsTenantAdmin()]
+        return [IsAuthenticatedAgent()]
+
+    def get_queryset(self):
+        qs = CallDisposition.objects.all()
+        if self.request.query_params.get("include_inactive") not in ("true", "1"):
+            qs = qs.filter(is_active=True)
+        return qs.order_by("sort_order", "name")
+
+
+class CallDispositionDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE /api/v1/calls/dispositions/{id}/ — (tenant admin)
+
+    DELETE switches an outcome off once calls have been logged against it
+    rather than removing it. The call's disposition is SET_NULL, so deleting
+    a used one would blank the outcome on every past call that carried it —
+    losing the history the reports and the AI insights are built on.
+    """
+
+    permission_classes = [IsTenantAdmin]
+    serializer_class = CallDispositionSerializer
+    queryset = CallDisposition.objects.all()
+
+    def destroy(self, request, *args, **kwargs):
+        disposition = self.get_object()
+
+        if disposition.calls.exists():
+            if disposition.is_active:
+                disposition.is_active = False
+                disposition.save(update_fields=["is_active", "updated_at"])
+            return Response(
+                {
+                    "deactivated": True,
+                    "detail": (
+                        f'"{disposition.name}" is used by calls already logged, so it '
+                        "was switched off instead of deleted. Those calls keep their outcome."
+                    ),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        disposition.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CallProviderWebhookView(APIView):

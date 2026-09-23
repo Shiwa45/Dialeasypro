@@ -97,6 +97,17 @@ class Tenant(TenantMixin, TimeStampedModel):
         default=SubscriptionStatus.TRIAL,
         db_index=True,
     )
+    max_agents_override = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Agent seat cap (override)",
+        help_text=(
+            "Cap on ACTIVE agents for this tenant only. Leave blank to use the "
+            "plan's limit. Set it to sell extra seats without moving the tenant "
+            "to a bigger plan, or to hold one below their plan's allowance. "
+            "0 blocks any new agent."
+        ),
+    )
     trial_ends_at = models.DateTimeField(null=True, blank=True)
 
     # ---- Platform Status -----------------------------------
@@ -167,6 +178,24 @@ class Tenant(TenantMixin, TimeStampedModel):
     @property
     def is_trial(self) -> bool:
         return self.subscription_status == SubscriptionStatus.TRIAL
+
+    def agent_limit(self) -> int | None:
+        """
+        How many active agents this tenant may have. None = no cap.
+
+        The per-tenant override wins over the plan when it is set, including
+        when it is 0 — "this tenant gets no more seats" is a decision someone
+        made, not a missing value, which is why the field is nullable rather
+        than defaulting to zero.
+
+        Reads the plan off the tenant row. Enforcement at request time
+        resolves the plan from the active subscription instead (see
+        apps/core/quotas.py) — normally the same plan, and the override is
+        read from here either way.
+        """
+        if self.max_agents_override is not None:
+            return self.max_agents_override
+        return getattr(self.plan, "max_agents", None) or None
 
     @property
     def is_trial_expired(self) -> bool:

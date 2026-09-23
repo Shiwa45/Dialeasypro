@@ -69,6 +69,76 @@ def current_plan():
     return Plan.objects.filter(pk=plan_id).first()
 
 
+def current_tenant():
+    """
+    The Tenant row for the current schema, or None in the public schema.
+
+    Not cached: this is read on seat changes, which happen a handful of times
+    in a tenant's life. A stale cap here would be a support ticket — "I raised
+    their limit and it still refuses" — for no measurable gain.
+    """
+    schema = connection.schema_name
+    if not schema or schema == "public":
+        return None
+
+    from apps.tenants.models import Tenant
+
+    return Tenant.objects.filter(schema_name=schema).first()
+
+
+def agent_limit() -> int | None:
+    """
+    How many ACTIVE agents this tenant may have. None = no cap.
+
+    The tenant's own override wins over the plan, so a seat count can be sold,
+    raised or frozen for one customer from the super admin without inventing a
+    new plan for them. 0 is a real answer — "no further agents" — which is why
+    the override is nullable rather than defaulting to zero.
+    """
+    tenant = current_tenant()
+    if tenant is not None and tenant.max_agents_override is not None:
+        return tenant.max_agents_override
+
+    plan = current_plan()
+    # A plan with max_agents unset (or 0) is not a plan that allows nobody in;
+    # it is one that never said, and seats are then unlimited.
+    return getattr(plan, "max_agents", None) or None
+
+
+def active_agent_count() -> int:
+    """Agents currently holding a seat. Deactivated agents do not."""
+    from apps.authentication.models import Agent
+
+    return Agent.objects.filter(is_active=True).count()
+
+
+def agent_quota_error(count: int = 1) -> PlanLimitExceededException | None:
+    """
+    The exception to raise if `count` more active agents would breach the cap,
+    else None.
+
+    Unlike the lead quota, this does not fail open on an unexpected error: the
+    callers used to swallow every exception around this check, so anything
+    going wrong silently handed out a free seat.
+    """
+    limit = agent_limit()
+    if limit is None:
+        return None
+
+    current = active_agent_count()
+    if current + count > limit:
+        return PlanLimitExceededException(
+            limit_type="agents", current=current, max_allowed=limit,
+        )
+    return None
+
+
+def enforce_agent_quota(count: int = 1):
+    """Raise PlanLimitExceededException (402) if the seat cap would be breached."""
+    if exc := agent_quota_error(count):
+        raise exc
+
+
 def _lead_counts() -> tuple[int, int]:
     """(total non-deleted leads, leads created today) — cached for COUNT_TTL."""
     schema = connection.schema_name

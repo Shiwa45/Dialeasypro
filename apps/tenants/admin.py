@@ -38,6 +38,7 @@ class TenantAdmin(ModelAdmin):
         "primary_contact_email",
         "subscription_status_badge",
         "plan_name",
+        "agent_cap",
         "total_agents",
         "total_leads",
         "trial_days_left",
@@ -225,6 +226,7 @@ class TenantAdmin(ModelAdmin):
             {
                 "fields": (
                     "plan",
+                    "max_agents_override",
                     "subscription_status",
                     "trial_ends_at",
                     "is_active",
@@ -308,6 +310,25 @@ class TenantAdmin(ModelAdmin):
         if obj.plan:
             return obj.plan.name
         return format_html('<span style="color:#9CA3AF">—</span>')
+
+    @display(description="Agent Cap")
+    def agent_cap(self, obj):
+        """
+        The seat limit this tenant is actually held to, and where it comes
+        from. A super admin raising a cap needs to see at a glance whether
+        this customer is on the plan's number or their own.
+        """
+        limit = obj.agent_limit()
+        if limit is None:
+            return format_html('<span style="color:#9CA3AF">unlimited</span>')
+
+        if obj.max_agents_override is not None:
+            return format_html(
+                '<span style="font-weight:600">{}</span>'
+                '<span style="color:#F59E0B"> override</span>',
+                limit,
+            )
+        return format_html('<span>{}</span>', limit)
 
     @display(description="Trial Days")
     def trial_days_left(self, obj):

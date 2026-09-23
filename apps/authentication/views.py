@@ -64,6 +64,7 @@ from apps.authentication.tokens import (
 )
 from apps.core.constants import AgentRole, FeatureKey
 from apps.core.exceptions import InvalidCredentialsException, PlanLimitExceededException
+from apps.core.quotas import agent_limit, enforce_agent_quota
 from apps.core.pagination import StandardResultsSetPagination
 from apps.superadmin.models import AuditLog
 from apps.core.constants import AuditAction
@@ -440,29 +441,10 @@ class AgentListAPIView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        # Check plan limit
-        from apps.plans.models import Subscription
-        from django.db import connection
-
-        # Check max_agents limit
-        current_count = Agent.objects.filter(is_active=True).count()
-
-        try:
-            from apps.plans.models import Subscription
-            from apps.core.constants import SubscriptionStatus
-            sub = Subscription.objects.filter(
-                status__in=SubscriptionStatus.ACTIVE_STATUSES
-            ).select_related("plan").first()
-            if sub and current_count >= sub.plan.max_agents:
-                raise PlanLimitExceededException(
-                    limit_type="agents",
-                    current=current_count,
-                    max_allowed=sub.plan.max_agents,
-                )
-        except PlanLimitExceededException:
-            raise
-        except Exception:
-            pass  # If we can't check, allow creation
+        # The seat cap: the tenant's own override if the super admin set one,
+        # otherwise the plan's max_agents. Resolved in apps/core/quotas.py so
+        # this and the reactivate path cannot drift apart.
+        enforce_agent_quota()
 
         agent = serializer.save()
         AuditLog.log(
@@ -520,9 +502,9 @@ class AgentReactivateAPIView(APIView):
     """
     POST /api/v1/auth/agents/{id}/reactivate/
     Restores a deactivated agent's access. Blocked with 402 if the tenant is
-    already at its plan's max_agents with currently-active agents — the same
-    limit enforced when creating a brand-new agent, so reactivating can't be
-    used to quietly exceed it.
+    already at its seat cap with currently-active agents — the same limit
+    enforced when creating a brand-new agent, so reactivating can't be used to
+    quietly exceed it.
     """
 
     permission_classes = [IsTenantAdmin]
@@ -536,24 +518,9 @@ class AgentReactivateAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from apps.plans.models import Subscription
-        from apps.core.constants import SubscriptionStatus
-
-        current_count = Agent.objects.filter(is_active=True).count()
-        try:
-            sub = Subscription.objects.filter(
-                status__in=SubscriptionStatus.ACTIVE_STATUSES
-            ).select_related("plan").first()
-            if sub and current_count >= sub.plan.max_agents:
-                raise PlanLimitExceededException(
-                    limit_type="agents",
-                    current=current_count,
-                    max_allowed=sub.plan.max_agents,
-                )
-        except PlanLimitExceededException:
-            raise
-        except Exception:
-            pass  # If we can't check, allow reactivation
+        # Same cap as creating one — otherwise deactivate/reactivate is a way
+        # to hold more agents than the tenant is allowed.
+        enforce_agent_quota()
 
         agent.is_active = True
         agent.save(update_fields=["is_active"])
@@ -661,7 +628,10 @@ class TenantFeaturesAPIView(APIView):
                 "slug": plan.slug,
                 "name": plan.name,
                 "limits": {
-                    "max_agents": plan.max_agents,
+                    # The effective cap, not the plan's headline number: a
+                    # tenant with an override would otherwise be shown a seat
+                    # count the API refuses to let them reach.
+                    "max_agents": agent_limit() or plan.max_agents,
                     "max_leads": plan.max_leads,
                     "max_leads_per_day": plan.max_leads_per_day,
                     "max_whatsapp_bulk_per_day": plan.max_whatsapp_bulk_per_day,

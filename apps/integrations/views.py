@@ -60,6 +60,21 @@ class BaseWebhookView(View):
     def post(self, request, *args, **kwargs):
         config = self._get_config()
         if config and not config.is_active:
+            # Recorded, not merely refused: "we turned IndiaMART off and leads
+            # kept arriving" and "we turned it off and cannot see that anything
+            # was sent" are both answered by a row in the webhook log.
+            WebhookLog.objects.create(
+                source=self.source or "webhook",
+                config=config,
+                method="POST",
+                headers=dict(request.headers),
+                payload={"raw": request.body.decode("utf-8", errors="replace")[:5000]},
+                error="Integration is switched off — delivery rejected.",
+            )
+            logger.info(
+                "[Integration] Delivery rejected, %s is switched off | schema=%s",
+                self.source, connection.schema_name,
+            )
             return HttpResponse("Integration disabled", status=403)
 
         # Log raw payload immediately (before any processing)
@@ -133,11 +148,22 @@ class BaseWebhookView(View):
         raise NotImplementedError
 
     def _get_config(self):
-        # .first() (not .get()) — a duplicate active config for the same source
-        # would raise MultipleObjectsReturned and 500 every webhook delivery.
+        """
+        This source's config, switched on or off.
+
+        Deliberately NOT filtered to is_active: filtering here made a disabled
+        integration look like an unconfigured one, so `if config and not
+        config.is_active` could never fire and switching an integration off in
+        the CRM did nothing at all — deliveries kept creating leads, minus the
+        field mapping and assignment rules the config carries.
+
+        .first() (not .get()) — a duplicate config for the same source would
+        raise MultipleObjectsReturned and 500 every webhook delivery. Active
+        first, so an active config still wins if a duplicate ever exists.
+        """
         return (
-            LeadSourceConfig.objects.filter(source=self.source, is_active=True)
-            .order_by("id")
+            LeadSourceConfig.objects.filter(source=self.source)
+            .order_by("-is_active", "id")
             .first()
         )
 
@@ -516,6 +542,46 @@ class GenericWebhookView(BaseWebhookView):
 # Integration Config API
 # ============================================================
 
+def check_may_activate(request, source, *, exclude_pk=None, enforce_cap=True):
+    """
+    May this tenant have `source` switched on right now?
+
+    The FEATURE gate applies wherever an integration starts running, creation
+    or switch-on alike. A downgrade leaves the config row behind, and without
+    this, switching it back on quietly resumes a source the tenant no longer
+    pays for.
+
+    The COUNT cap (`enforce_cap`) applies on creation only. Applying it to a
+    switch-on strands anyone whose active integrations already outnumber their
+    plan's cap — which is not hypothetical: a plan's limit can be lowered after
+    the fact, and a tenant in that state who switched one off to look at
+    something could not put it back. Nothing new is added to the account by
+    restoring a config the tenant already has, and the cap still governs
+    adding one.
+
+    Raises what the create path raises: 402 for a source the plan does not
+    include, 402 for one integration too many.
+    """
+    if feature_key := LeadSource.FEATURE_MAP.get(source):
+        require_feature(request, feature_key)
+
+    if not enforce_cap:
+        return
+
+    plan = getattr(request, "tenant_plan", None)
+    if plan and plan.lead_sources_limit:
+        active = LeadSourceConfig.objects.filter(is_active=True)
+        if exclude_pk is not None:
+            active = active.exclude(pk=exclude_pk)
+        count = active.count()
+        if count >= plan.lead_sources_limit:
+            raise PlanLimitExceededException(
+                limit_type="lead source integrations",
+                current=count,
+                max_allowed=plan.lead_sources_limit,
+            )
+
+
 class IntegrationConfigListView(generics.ListCreateAPIView):
     """
     GET  /api/v1/integrations/configs/  → List all configured integrations
@@ -535,29 +601,18 @@ class IntegrationConfigListView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         source = serializer.validated_data.get("source")
-
-        # Gate on the feature for this specific source (per-source pricing).
-        if feature_key := LeadSource.FEATURE_MAP.get(source):
-            require_feature(self.request, feature_key)
-
-        # Enforce the plan's cap on simultaneously-active integrations.
-        plan = getattr(self.request, "tenant_plan", None)
-        if plan and plan.lead_sources_limit:
-            active = LeadSourceConfig.objects.filter(is_active=True).count()
-            if active >= plan.lead_sources_limit:
-                raise PlanLimitExceededException(
-                    limit_type="lead source integrations",
-                    current=active,
-                    max_allowed=plan.lead_sources_limit,
-                )
-
+        check_may_activate(self.request, source)
         serializer.save()
 
 
 class IntegrationConfigDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     GET/PATCH/DELETE /api/v1/integrations/configs/{id}/
-    Update or disable an integration.
+
+    Switch an integration on or off, change its options, or remove it.
+    Switching off is the reversible one: the credentials, field mapping and
+    webhook token are kept, and inbound deliveries are refused until it is
+    switched back on.
     """
 
     permission_classes = [IsTenantAdmin]
@@ -565,6 +620,17 @@ class IntegrationConfigDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return LeadSourceConfig.objects.all()
+
+    def perform_update(self, serializer):
+        config = self.get_object()
+        turning_on = serializer.validated_data.get("is_active") and not config.is_active
+        if turning_on:
+            # Feature gate only: restoring a config the tenant already owns is
+            # not the same as adding one. See check_may_activate.
+            check_may_activate(
+                self.request, config.source, exclude_pk=config.pk, enforce_cap=False,
+            )
+        serializer.save()
 
 
 class MetaFormFieldsView(APIView):

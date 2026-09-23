@@ -82,6 +82,19 @@ class LeadSourceConfig(TimeStampedModel):
         if not self.webhook_token:
             import secrets
             self.webhook_token = secrets.token_urlsafe(32)
+
+        # Keep `status` in step with the switch. It is what the UI and the API
+        # read, and it used to sit at "active" on an integration that had been
+        # switched off — the one thing an admin checks to confirm the change
+        # took. "error" is left alone: a broken integration that is also off
+        # should still say what is broken about it.
+        if not self.is_active and self.status == "active":
+            self.status = "inactive"
+        elif self.is_active and self.status == "inactive":
+            self.status = "active"
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"status"}
+
         super().save(*args, **kwargs)
 
     @property

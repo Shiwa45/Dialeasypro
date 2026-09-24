@@ -1,13 +1,14 @@
 """TeleCRM Backend — apps/communications/api_urls.py"""
 from django.urls import path
 from apps.communications.views import (
-    WhatsAppTemplateListView, WhatsAppMessageListView,
+    WhatsAppTemplateListView, WhatsAppTemplateDetailView, WhatsAppMessageListView,
     SendWhatsAppView, SendSMSView,
     BulkCampaignListCreateView, BulkCampaignDetailView,
     BulkCampaignLaunchView, BulkCampaignPauseView,
     WhatsAppWebhookView, TemplateMediaUploadView,
     WhatsAppConfigView, WhatsAppConfigTestView,
     WhatsAppVerifyTokenView, WhatsAppConversationListView,
+    CampaignAudiencePreviewView,
 )
 
 urlpatterns = [
@@ -16,11 +17,14 @@ urlpatterns = [
     path("whatsapp/webhook-token/", WhatsAppVerifyTokenView.as_view(), name="api_wa_verify_token"),
     path("whatsapp/conversations/", WhatsAppConversationListView.as_view(), name="api_wa_conversations"),
     path("whatsapp/templates/", WhatsAppTemplateListView.as_view(), name="api_wa_templates"),
+    path("whatsapp/templates/<int:pk>/", WhatsAppTemplateDetailView.as_view(), name="api_wa_template_detail"),
     path("template-media/", TemplateMediaUploadView.as_view(), name="api_template_media"),
     path("whatsapp/messages/", WhatsAppMessageListView.as_view(), name="api_wa_messages"),
     path("whatsapp/send/", SendWhatsAppView.as_view(), name="api_wa_send"),
     path("sms/send/", SendSMSView.as_view(), name="api_sms_send"),
     path("campaigns/", BulkCampaignListCreateView.as_view(), name="api_campaigns"),
+    # Literal before "<uuid:pk>/" so it is not read as a campaign id.
+    path("campaigns/preview-audience/", CampaignAudiencePreviewView.as_view(), name="api_campaign_preview_audience"),
     path("campaigns/<uuid:pk>/", BulkCampaignDetailView.as_view(), name="api_campaign_detail"),
     path("campaigns/<uuid:pk>/launch/", BulkCampaignLaunchView.as_view(), name="api_campaign_launch"),
     path("campaigns/<uuid:pk>/pause/", BulkCampaignPauseView.as_view(), name="api_campaign_pause"),

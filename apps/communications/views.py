@@ -67,6 +67,38 @@ class WhatsAppTemplateListView(generics.ListCreateAPIView):
         return qs.order_by("name")
 
 
+class WhatsAppTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE /api/v1/comms/whatsapp/templates/{id}/
+
+    Templates could be created and never touched again. In particular nothing
+    could mark one APPROVED, and a bulk campaign only accepts approved
+    templates — so every template a tenant wrote sat at "pending" forever and
+    the campaign form's template list was permanently empty.
+
+    Approval happens in Meta's Business Manager or the provider's console, not
+    here; this is where an admin records the answer they were given.
+
+    DELETE deactivates rather than removes: campaigns and sent messages point
+    at the template, and deleting one would take the record of what was sent
+    with it.
+    """
+
+    serializer_class = WhatsAppTemplateSerializer
+
+    def get_permissions(self):
+        if self.request.method in ("PATCH", "PUT", "DELETE"):
+            return [IsTenantAdmin()]
+        return [IsAuthenticatedAgent()]
+
+    def get_queryset(self):
+        return WhatsAppTemplate.objects.all()
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+
+
 class TemplateMediaUploadView(APIView):
     """
     POST /api/v1/comms/template-media/   (multipart: file)
@@ -270,6 +302,49 @@ class BulkCampaignListCreateView(generics.ListCreateAPIView):
             request=self.request,
         )
         return campaign
+
+
+class CampaignAudiencePreviewView(APIView):
+    """
+    POST /api/v1/comms/campaigns/preview-audience/
+    Body: {"audience_filters": {...}}  →  {"count": 412}
+
+    How many leads a set of filters actually reaches, before a campaign is
+    created. The form had no way to ask: an admin picked filters, saved the
+    campaign, and only then found out whether it was addressing 4 people or
+    4,000 — with a launch button next to the answer.
+
+    Deliberately runs the same _resolve_campaign_audience the send uses, so
+    the number shown and the number messaged cannot drift apart.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def post(self, request):
+        filters = request.data.get("audience_filters") or {}
+        if not isinstance(filters, dict):
+            return Response(
+                {"error": "invalid_filters", "message": "audience_filters must be an object."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.communications.tasks import _resolve_campaign_audience
+
+        # A stand-in campaign: the resolver only reads audience_filters, and
+        # this must not create a row just to count.
+        preview = BulkCampaign(audience_filters=filters)
+        audience = _resolve_campaign_audience(preview)
+
+        with_phone = sum(1 for lead in audience if (lead.phone or "").strip())
+        with_email = sum(1 for lead in audience if (lead.email or "").strip())
+
+        return Response({
+            "count": len(audience),
+            # Channel matters: an audience of 400 leads with 12 email
+            # addresses is not a 400-recipient email campaign.
+            "with_phone": with_phone,
+            "with_email": with_email,
+        })
 
 
 class BulkCampaignDetailView(generics.RetrieveAPIView):

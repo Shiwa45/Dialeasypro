@@ -237,6 +237,29 @@ class BulkCampaignCreateSerializer(serializers.ModelSerializer):
             "sms_text", "sms_sender_id", "scheduled_at",
         ]
 
+    def validate_template(self, template):
+        """
+        A template the provider will actually accept.
+
+        Any template id used to pass. A bulk send with one Meta has not
+        approved is rejected per recipient at send time, so the campaign ran
+        to completion with every message failed — the failure arriving long
+        after the admin had left the screen.
+        """
+        if template is None:
+            return template
+        if not template.is_active:
+            raise serializers.ValidationError(
+                f'"{template.name}" is switched off. Switch it back on to send with it.'
+            )
+        if template.status != "approved":
+            raise serializers.ValidationError(
+                f'"{template.name}" is marked {template.get_status_display().lower()}. '
+                "WhatsApp only delivers bulk sends on an approved template — mark it "
+                "approved once Meta has approved it."
+            )
+        return template
+
     def validate(self, data):
         channel = data.get("channel")
         if channel == "whatsapp" and not data.get("template"):

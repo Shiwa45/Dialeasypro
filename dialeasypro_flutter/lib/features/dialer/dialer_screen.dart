@@ -84,7 +84,7 @@ class _TopBar extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.black, width: 1)),
+        border: Border(bottom: BorderSide(color: AppColors.line, width: 1)),
       ),
       child: Row(children: [
         IconButton(
@@ -117,7 +117,7 @@ class _TopBar extends ConsumerWidget {
             borderRadius: BorderRadius.circular(5),
           ),
           child: const Text('AUTO-DIALER',
-              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.6, color: AppColors.white)),
+              style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.6, color: AppColors.white)),
         ),
         const Spacer(),
         if (state.phase == DialerPhase.inCall || state.phase == DialerPhase.dialing)
@@ -140,14 +140,14 @@ class _TopBar extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
               decoration: BoxDecoration(
                 color: state.onBreak ? AppColors.success : AppColors.purple,
-                border: Border.all(color: AppColors.black, width: 1),
+                border: Border.all(color: AppColors.line, width: 1),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(state.onBreak ? Icons.play_arrow : Icons.free_breakfast,
                     size: 14, color: AppColors.white),
                 const SizedBox(width: 4),
                 Text(state.onBreak ? 'END BREAK' : 'BREAK',
-                    style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.white, letterSpacing: 0.4)),
+                    style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.white, letterSpacing: 0.4)),
               ]),
             ),
           ),
@@ -169,7 +169,7 @@ class _TopBar extends ConsumerWidget {
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
                 color: state.phase == DialerPhase.paused ? AppColors.success : AppColors.warning,
-                border: Border.all(color: AppColors.black, width: 1),
+                border: Border.all(color: AppColors.line, width: 1),
               ),
               child: Icon(
                 state.phase == DialerPhase.paused ? Icons.play_arrow : Icons.pause,
@@ -193,7 +193,7 @@ class _LivePulse extends StatelessWidget {
       ).animate(onPlay: (c) => c.repeat()).fade(begin: 1, end: 0.3, duration: 800.ms),
       const SizedBox(width: 6),
       const Text('LIVE',
-          style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 11, color: AppColors.error, letterSpacing: 0.5)),
+          style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 11, color: AppColors.error, letterSpacing: 0.5)),
     ]);
   }
 }
@@ -209,13 +209,13 @@ class _QueueProgress extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
         color: AppColors.white,
-        border: Border(bottom: BorderSide(color: AppColors.black, width: 1.5)),
+        border: Border(bottom: BorderSide(color: AppColors.line, width: 1)),
       ),
       child: Column(children: [
         Row(children: [
           Text(
             '${state.currentIndex + 1} / ${state.totalCalls}',
-            style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14),
+            style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 14),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -223,7 +223,7 @@ class _QueueProgress extends StatelessWidget {
               height: 10,
               decoration: BoxDecoration(
                 color: AppColors.greyLight,
-                border: Border.all(color: AppColors.black, width: 1),
+                border: Border.all(color: AppColors.line, width: 1),
               ),
               child: FractionallySizedBox(
                 alignment: Alignment.centerLeft,
@@ -234,7 +234,7 @@ class _QueueProgress extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Text('${(state.progress * 100).toInt()}%',
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.grey)),
+              style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.grey)),
         ]),
       ]),
     );
@@ -287,7 +287,7 @@ class _PreCallView extends ConsumerWidget {
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             gradient: AppColors.yellowGradient,
-            border: Border.all(color: AppColors.black, width: 2.5),
+            border: Border.all(color: AppColors.line, width: 1),
             boxShadow: const [BoxShadow(color: Color(0x33111A16), offset: Offset(0, 12), blurRadius: 28, spreadRadius: -14)],
           ),
           child: Column(children: [
@@ -296,7 +296,7 @@ class _PreCallView extends ConsumerWidget {
             Text(lead.name, style: AppTextStyles.h1, textAlign: TextAlign.center),
             const SizedBox(height: 4),
             Text(Fmt.displayPhone(lead.phone),
-                style: const TextStyle(fontFamily: 'IBMPlexMono', fontWeight: FontWeight.w700, fontSize: 16, letterSpacing: 0.3)),
+                style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 16, letterSpacing: 0.3)),
             const SizedBox(height: 12),
             Wrap(
               alignment: WrapAlignment.center,
@@ -342,7 +342,7 @@ class _PreCallView extends ConsumerWidget {
               const SizedBox(width: 10),
               Text(
                 'Dialing ${Fmt.displayPhone(lead.phone)}…',
-                style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.success),
+                style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.success),
               ),
             ]),
           ).animate(onPlay: (c) => c.repeat(reverse: true)).fade(begin: 1, end: 0.5, duration: 1.seconds),
@@ -435,7 +435,7 @@ class _InCallViewState extends ConsumerState<_InCallView> {
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 gradient: AppColors.successGradient,
-                border: Border.all(color: AppColors.black, width: 2.5),
+                border: Border.all(color: AppColors.line, width: 1),
                 boxShadow: const [BoxShadow(color: Color(0x33111A16), offset: Offset(0, 12), blurRadius: 28, spreadRadius: -14)],
               ),
               child: Column(children: [
@@ -443,20 +443,20 @@ class _InCallViewState extends ConsumerState<_InCallView> {
                   Icon(Icons.phone_in_talk, color: AppColors.white, size: 18),
                   SizedBox(width: 8),
                   Text('ON CALL',
-                      style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.white, letterSpacing: 1.2)),
+                      style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.white, letterSpacing: 1.2)),
                 ]),
                 const SizedBox(height: 12),
                 Text(
                   Fmt.timer(duration),
                   style: const TextStyle(
-                    fontFamily: 'IBMPlexMono', fontWeight: FontWeight.w700, fontSize: 48,
+                    fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 48,
                     color: AppColors.white, letterSpacing: 2,
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(lead.name, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.white)),
+                Text(lead.name, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.white)),
                 Text(Fmt.displayPhone(lead.phone),
-                    style: TextStyle(fontFamily: 'IBMPlexMono', fontSize: 13, color: AppColors.white.withOpacity(0.85))),
+                    style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 13, color: AppColors.white.withOpacity(0.85))),
               ]),
             ),
 
@@ -480,10 +480,10 @@ class _InCallViewState extends ConsumerState<_InCallView> {
                   maxLines: 3,
                   minLines: 2,
                   onChanged: (v) => ref.read(dialerProvider.notifier).updateCallNotes(v),
-                  style: const TextStyle(fontFamily: 'Archivo', fontSize: 14),
+                  style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 14),
                   decoration: const InputDecoration(
                     hintText: 'Type notes during the call…',
-                    hintStyle: TextStyle(fontFamily: 'Archivo', color: AppColors.grey, fontSize: 13),
+                    hintStyle: TextStyle(fontFamily: 'PlusJakartaSans', color: AppColors.grey, fontSize: 13),
                     border: InputBorder.none,
                     contentPadding: EdgeInsets.zero,
                   ),
@@ -536,7 +536,7 @@ class _InCallViewState extends ConsumerState<_InCallView> {
                   child: const Row(children: [
                     Icon(Icons.check_circle, size: 14, color: AppColors.success),
                     SizedBox(width: 6),
-                    Text('Voice note recorded', style: TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.success)),
+                    Text('Voice note recorded', style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 11, color: AppColors.success)),
                   ]),
                 ),
               ),
@@ -661,7 +661,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
             SizedBox(width: 10),
             Expanded(child: Text(
               'Disposition required before next call',
-              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF96650B)),
+              style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFFB24A09)),
             )),
           ]),
         ),
@@ -682,12 +682,12 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
             ),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(lead.name, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.text)),
+              Text(lead.name, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.text)),
               const SizedBox(height: 2),
               Row(children: [
                 Text(
                   Fmt.duration(call.durationSec),
-                  style: const TextStyle(fontFamily: 'IBMPlexMono', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow),
+                  style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow),
                 ),
                 const SizedBox(width: 10),
                 if (_wasConnected)
@@ -733,7 +733,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
                 child: Text(
                   'No dispositions configured. Ask admin to seed them.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.grey),
+                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.grey),
                 ),
               );
             }
@@ -748,7 +748,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
                     color: selected
                         ? (d.isPositive ? AppColors.success : AppColors.error)
                         : AppColors.white,
-                    border: Border.all(color: AppColors.black, width: 1),
+                    border: Border.all(color: AppColors.line, width: 1),
                     boxShadow: selected
                         ? const [BoxShadow(color: Color(0x14111A16), offset: Offset(0, 2), blurRadius: 8, spreadRadius: -4)]
                         : const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
@@ -763,7 +763,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
                     Text(
                       d.name,
                       style: TextStyle(
-                        fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 12,
+                        fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 12,
                         color: selected ? AppColors.white : AppColors.black,
                       ),
                     ),
@@ -844,7 +844,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
                     const SizedBox(width: 4),
                     Text(
                       Fmt.dateTime(_followupDate!.toIso8601String()),
-                      style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.warning),
+                      style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.warning),
                     ),
                   ]),
                 ),
@@ -929,7 +929,7 @@ class _CompletedView extends ConsumerWidget {
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             gradient: AppColors.successGradient,
-            border: Border.all(color: AppColors.black, width: 2.5),
+            border: Border.all(color: AppColors.line, width: 1),
             boxShadow: const [BoxShadow(color: Color(0x33111A16), offset: Offset(0, 12), blurRadius: 28, spreadRadius: -14)],
           ),
           child: Column(children: const [
@@ -937,7 +937,7 @@ class _CompletedView extends ConsumerWidget {
             SizedBox(height: 12),
             Text(
               'QUEUE COMPLETE',
-              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 22, color: AppColors.white, letterSpacing: 0.5),
+              style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 22, color: AppColors.white, letterSpacing: 0.5),
             ),
           ]),
         ).animate().scale(begin: const Offset(0.7, 0.7), curve: Curves.easeOutBack),

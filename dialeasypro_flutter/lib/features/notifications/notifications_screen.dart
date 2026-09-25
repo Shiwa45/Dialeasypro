@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
+import '../../core/theme/colors.dart';
 import '../../core/services/notification_service.dart';
 import '../../data/models/models.dart';
 import '../../data/services/services.dart';
@@ -136,11 +137,11 @@ class _Row extends StatelessWidget {
   // Each kind gets the colour that already means that thing elsewhere in the
   // app rather than a decorative one.
   (IconData, Color) get _look => switch (notification.kind) {
-        'followup_overdue' => (Icons.warning_amber_rounded, const Color(0xFFCE3A22)),
-        'followup_due' => (Icons.schedule, const Color(0xFFCF8A06)),
-        'followup_scheduled' => (Icons.event_available, const Color(0xFF0B5F55)),
-        'lead_assigned' => (Icons.person_add_alt, const Color(0xFF6244B8)),
-        _ => (Icons.info_outline, const Color(0xFF5C6A62)),
+        'followup_overdue' => (Icons.warning_amber_rounded, AppColors.hot),
+        'followup_due' => (Icons.schedule, AppColors.warm),
+        'followup_scheduled' => (Icons.event_available, AppColors.brand),
+        'lead_assigned' => (Icons.person_add_alt, AppColors.visit),
+        _ => (Icons.info_outline, AppColors.text2),
       };
 
   @override
@@ -176,7 +177,7 @@ class _Row extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(timeago.format(at),
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF8B968F))),
+                  style: const TextStyle(fontSize: 11, color: AppColors.text3)),
             ),
         ],
       ),
@@ -205,7 +206,7 @@ class _Blank extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 36),
           child: Text(text,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13.5, color: Color(0xFF5C6A62), height: 1.6)),
+              style: const TextStyle(fontSize: 13.5, color: AppColors.text2, height: 1.6)),
         ),
         if (action != null)
           Padding(

@@ -25,8 +25,9 @@ void main() async {
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
-    systemNavigationBarColor: Color(0xFFF5F4F0),
-    systemNavigationBarIconBrightness: Brightness.dark,
+    // Deep green, so the phone's own nav bar continues the bottom bar.
+    systemNavigationBarColor: Color(0xFF062A20),
+    systemNavigationBarIconBrightness: Brightness.light,
   ));
 
   // Everything below is local setup: preferences, a cache, a stream

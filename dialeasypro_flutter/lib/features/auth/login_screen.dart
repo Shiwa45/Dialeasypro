@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/services/tenant_config.dart';
 import '../../core/theme/colors.dart';
+import '../../core/widgets/brand.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/services/api_client.dart';
 import 'auth_provider.dart';
@@ -136,35 +137,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    width: 72, height: 72,
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: const [BoxShadow(color: Color(0x33111A16), offset: Offset(0, 12), blurRadius: 28, spreadRadius: -14)],
-                    ),
-                    child: const Center(
-                      child: Text('D',
-                          style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 34, color: AppColors.brand)),
-                    ),
-                  ).animate().scale(begin: const Offset(0.6, 0.6), duration: 500.ms, curve: Curves.easeOutBack),
+                  const BrandMark(size: 72, onDark: true)
+                      .animate().scale(begin: const Offset(0.6, 0.6), duration: 500.ms, curve: Curves.easeOutBack),
 
-                  const SizedBox(height: 14),
-                  const Text('DialEasypro',
-                      style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 28, color: AppColors.black, letterSpacing: -0.5))
+                  const SizedBox(height: 12),
+                  const BrandWordmark(onDark: true, size: 32)
                       .animate().fadeIn(delay: 200.ms),
-                  const SizedBox(height: 2),
-                  const Text('Auto-dialer CRM for Sales Closers',
-                      style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w500, fontSize: 12, color: AppColors.dark))
+                  const SizedBox(height: 10),
+                  const Text('Auto-dialer CRM for sales closers',
+                      style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w500, fontSize: 13, color: Color(0xFFB5D6C7)))
                       .animate().fadeIn(delay: 300.ms),
 
                   const SizedBox(height: 28),
 
                   Container(
+                    clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
                       color: AppColors.white,
-                      border: Border.all(color: AppColors.black, width: 2.5),
-                      boxShadow: const [BoxShadow(color: Color(0x33111A16), offset: Offset(0, 12), blurRadius: 28, spreadRadius: -14)],
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: const [BoxShadow(color: Color(0x66000000), offset: Offset(0, 18), blurRadius: 40, spreadRadius: -16)],
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -179,10 +170,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: const [
                               Text('Sign in to your Workspace',
-                                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.text)),
+                                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w800, fontSize: 18, color: AppColors.text)),
                               SizedBox(height: 2),
                               Text('Enter your workspace and credentials.',
-                                  style: TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.text2)),
+                                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 11, color: AppColors.text2)),
                             ],
                           ),
                         ),
@@ -219,11 +210,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                   decoration: BoxDecoration(
                                     color: AppColors.greyLight,
-                                    border: Border.all(color: AppColors.black, width: 1),
+                                    border: Border.all(color: AppColors.line, width: 1),
                                   ),
                                   child: Text(
                                     'Resolves to: $resolvedUrl',
-                                    style: const TextStyle(fontFamily: 'IBMPlexMono', fontSize: 10, color: AppColors.greyDark),
+                                    style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: AppColors.greyDark),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 )),
@@ -282,14 +273,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: AppColors.dark,
-                      border: Border.all(color: AppColors.black, width: 1),
+                      border: Border.all(color: AppColors.line, width: 1),
                       boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
                     ),
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Text('⚡', style: TextStyle(fontSize: 13)),
                       SizedBox(width: 7),
                       Text("Don't know your workspace? Ask your admin.",
-                          style: TextStyle(fontFamily: 'Archivo', fontSize: 10, color: AppColors.muted)),
+                          style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: AppColors.muted)),
                     ]),
                   ).animate().fadeIn(delay: 500.ms),
                 ],
@@ -328,12 +319,12 @@ class _WorkspaceField extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         const Expanded(child: Text('WORKSPACE',
-            style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.8, color: AppColors.greyDark))),
+            style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.8, color: AppColors.greyDark))),
         GestureDetector(
           onTap: onToggleAdvanced,
           child: Text(
             advancedOpen ? '× Hide advanced' : '⚙ Advanced',
-            style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.info, decoration: TextDecoration.underline),
+            style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.info, decoration: TextDecoration.underline),
           ),
         ),
       ]),
@@ -341,8 +332,8 @@ class _WorkspaceField extends StatelessWidget {
       Container(
         decoration: BoxDecoration(
           color: AppColors.white,
+          borderRadius: AppColors.radiusBtn,
           border: Border.all(color: errorText != null ? AppColors.error : AppColors.line2, width: 1),
-          boxShadow: [BoxShadow(color: errorText != null ? AppColors.error : AppColors.black, offset: const Offset(3, 3))],
         ),
         child: Row(children: [
           const Padding(
@@ -356,10 +347,10 @@ class _WorkspaceField extends StatelessWidget {
               textInputAction: TextInputAction.next,
               autocorrect: false,
               enableSuggestions: false,
-              style: const TextStyle(fontFamily: 'Archivo', fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w500),
+              style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w500),
               decoration: const InputDecoration(
                 hintText: 'demo or demo.url.com',
-                hintStyle: TextStyle(fontFamily: 'Archivo', color: AppColors.grey, fontSize: 14),
+                hintStyle: TextStyle(fontFamily: 'PlusJakartaSans', color: AppColors.grey, fontSize: 14),
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 14),
               ),
@@ -381,7 +372,7 @@ class _WorkspaceField extends StatelessWidget {
                 '.$rootDomain',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontFamily: 'IBMPlexMono', fontWeight: FontWeight.w600, fontSize: 11, color: AppColors.greyDark),
+                style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w600, fontSize: 11, color: AppColors.greyDark),
               ),
             ),
           ),
@@ -392,7 +383,7 @@ class _WorkspaceField extends StatelessWidget {
         child: Row(children: [
           const Icon(Icons.error_outline, size: 12, color: AppColors.error),
           const SizedBox(width: 4),
-          Expanded(child: Text(errorText!, style: const TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.error))),
+          Expanded(child: Text(errorText!, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 11, color: AppColors.error))),
         ]),
       ),
     ]);

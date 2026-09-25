@@ -41,7 +41,7 @@ class CallsScreen extends ConsumerWidget {
               return Container(
                 padding: const EdgeInsets.all(16),
                 decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: AppColors.black, width: 1)),
+                  border: Border(bottom: BorderSide(color: AppColors.line, width: 1)),
                 ),
                 child: Row(children: [
                   Expanded(child: _CallStat(label: 'TODAY', value: '${today['total'] ?? 0}', sub: '${today['connected'] ?? 0} connected')),
@@ -77,7 +77,7 @@ class CallsScreen extends ConsumerWidget {
                               width: 40, height: 40,
                               decoration: BoxDecoration(
                                 color: c.isConnected ? AppColors.successBg : AppColors.greyLight,
-                                border: Border.all(color: AppColors.black, width: 1),
+                                border: Border.all(color: AppColors.line, width: 1),
                               ),
                               child: Icon(c.direction == 'outbound' ? Icons.call_made : Icons.call_received,
                                   size: 18, color: c.isConnected ? AppColors.success : AppColors.grey),
@@ -125,9 +125,9 @@ class _CallStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, children: [
-    Text(label, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.muted, letterSpacing: 0.5)),
+    Text(label, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.muted, letterSpacing: 0.5)),
     const SizedBox(height: 4),
-    Text(value, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 20, color: AppColors.yellow)),
-    Text(sub, style: const TextStyle(fontFamily: 'Archivo', fontSize: 10, color: AppColors.muted)),
+    Text(value, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 20, color: AppColors.yellow)),
+    Text(sub, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: AppColors.muted)),
   ]);
 }

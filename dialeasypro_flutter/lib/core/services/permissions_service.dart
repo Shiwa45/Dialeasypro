@@ -63,8 +63,8 @@ class PermissionsService {
       context: context,
       builder: (ctx) => AlertDialog(
         icon: Icon(icon, size: 36, color: Colors.amber),
-        title: Text(title, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700)),
-        content: Text(message, style: const TextStyle(fontFamily: 'Archivo')),
+        title: Text(title, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700)),
+        content: Text(message, style: const TextStyle(fontFamily: 'PlusJakartaSans')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
           ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Allow')),

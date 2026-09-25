@@ -136,8 +136,8 @@ final _routerProvider = Provider<GoRouter>((ref) {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('404', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 72, color: AppColors.yellow)),
-            const Text('Page not found', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w600, fontSize: 18)),
+            const Text('404', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 72, color: AppColors.yellow)),
+            const Text('Page not found', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w600, fontSize: 18)),
             const SizedBox(height: 20),
             ElevatedButton(onPressed: () => GoRouter.of(_).go('/'), child: const Text('Go Home')),
           ],
@@ -230,45 +230,52 @@ class _MainShellState extends ConsumerState<_MainShell>
 
     return Scaffold(
       body: widget.child,
+      // The web app's forest-green sidebar, as a bottom bar: deep green
+      // ground, pale-green labels, and the active tab on a mint pill.
       bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          border: Border(top: BorderSide(color: AppColors.line, width: 1)),
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _idx,
-          onTap: (i) {
-            setState(() => _idx = i);
-            context.go(tabs[i].path);
-          },
-          backgroundColor: AppColors.white,
-          selectedItemColor: AppColors.brand,
-          unselectedItemColor: AppColors.text3,
-          type: BottomNavigationBarType.fixed,
-          elevation: 0,
-          items: tabs.asMap().entries.map((e) => BottomNavigationBarItem(
-            icon: Padding(
-              padding: const EdgeInsets.only(bottom: 3),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 140),
-                curve: Curves.easeOut,
-                padding: EdgeInsets.symmetric(
-                  horizontal: _idx == e.key ? 14 : 0,
-                  vertical: _idx == e.key ? 4 : 0,
+        decoration: const BoxDecoration(gradient: AppColors.darkGradient),
+        child: SafeArea(
+          top: false,
+          child: BottomNavigationBar(
+            currentIndex: _idx,
+            onTap: (i) {
+              setState(() => _idx = i);
+              context.go(tabs[i].path);
+            },
+            backgroundColor: Colors.transparent,
+            selectedItemColor: AppColors.mint,
+            unselectedItemColor: const Color(0xFFB5D6C7),
+            type: BottomNavigationBarType.fixed,
+            elevation: 0,
+            items: tabs.asMap().entries.map((e) => BottomNavigationBarItem(
+              icon: Padding(
+                padding: const EdgeInsets.only(bottom: 4, top: 2),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOut,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: _idx == e.key ? 16 : 0,
+                    vertical: _idx == e.key ? 5 : 0,
+                  ),
+                  decoration: _idx == e.key
+                      ? BoxDecoration(
+                          gradient: AppColors.mintGradient,
+                          borderRadius: BorderRadius.circular(999),
+                          boxShadow: const [BoxShadow(color: Color(0x806FE0A6), blurRadius: 14, offset: Offset(0, 4), spreadRadius: -6)],
+                        )
+                      : null,
+                  child: Icon(
+                    _idx == e.key ? e.value.activeIcon : e.value.icon,
+                    size: 21,
+                    color: _idx == e.key ? AppColors.mintInk : null,
+                  ),
                 ),
-                decoration: _idx == e.key
-                    ? BoxDecoration(
-                        color: AppColors.brand50,
-                        borderRadius: BorderRadius.circular(999),
-                      )
-                    : null,
-                child: Icon(_idx == e.key ? e.value.activeIcon : e.value.icon, size: 20),
               ),
-            ),
-            label: e.value.label,
-          )).toList(),
-          selectedLabelStyle: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10),
-          unselectedLabelStyle: const TextStyle(fontFamily: 'Archivo', fontSize: 10),
+              label: e.value.label,
+            )).toList(),
+            selectedLabelStyle: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 11),
+            unselectedLabelStyle: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w500, fontSize: 11),
+          ),
         ),
       ),
     );

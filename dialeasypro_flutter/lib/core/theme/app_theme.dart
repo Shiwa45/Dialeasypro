@@ -6,18 +6,16 @@ import 'package:flutter/services.dart';
 import 'colors.dart';
 
 // ============================================================
-// DialEasypro — Material theme (BrokerStack)
+// DialEasypro — Material theme (TeleCRM)
 //
-// Square corners and 2px black rules are replaced by hairlines and small
-// radii. The primary colour is the brand green: it was the old brand yellow,
-// which Material also used for focus rings, selection handles and progress
-// indicators — all of which read as "warning" against the new palette.
+// Matches the web app: cool-grey page, white cards with 14px corners, green
+// primary actions, blue second accent, bold Plus Jakarta Sans headings.
 // ============================================================
 
 class AppTheme {
   AppTheme._();
 
-  static const _radius = BorderRadius.all(Radius.circular(8));
+  static const _radius = BorderRadius.all(Radius.circular(10));
 
   static ThemeData get theme => ThemeData(
     useMaterial3: true,
@@ -29,6 +27,8 @@ class AppTheme {
       secondary: AppColors.brass,
       onSecondary: AppColors.surface,
       tertiary: AppColors.visit,
+      surfaceContainerLow: AppColors.surface2,
+      surfaceContainer: AppColors.sunken,
       surface: AppColors.surface,
       onSurface: AppColors.text,
       surfaceContainerHighest: AppColors.surface2,
@@ -38,19 +38,19 @@ class AppTheme {
       onError: AppColors.surface,
     ),
     scaffoldBackgroundColor: AppColors.paper,
-    fontFamily: 'Archivo',
+    fontFamily: 'PlusJakartaSans',
     splashFactory: InkSparkle.splashFactory,
 
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.paper,
+      backgroundColor: AppColors.surface,
       foregroundColor: AppColors.text,
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
       titleSpacing: 16,
       titleTextStyle: TextStyle(
-        fontFamily: 'Fraunces', fontWeight: FontWeight.w600,
-        fontSize: 19, letterSpacing: -0.3, color: AppColors.text,
+        fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w800,
+        fontSize: 19, letterSpacing: -0.4, color: AppColors.text,
       ),
       systemOverlayStyle: SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
@@ -65,7 +65,7 @@ class AppTheme {
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(10)),
+        borderRadius: BorderRadius.all(Radius.circular(14)),
         side: BorderSide(color: AppColors.line, width: 1),
       ),
     ),
@@ -74,8 +74,8 @@ class AppTheme {
       backgroundColor: AppColors.surface,
       selectedItemColor: AppColors.brand,
       unselectedItemColor: AppColors.text3,
-      selectedLabelStyle: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w600, fontSize: 10.5),
-      unselectedLabelStyle: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w500, fontSize: 10.5),
+      selectedLabelStyle: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 11),
+      unselectedLabelStyle: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w500, fontSize: 11),
       elevation: 0,
       type: BottomNavigationBarType.fixed,
     ),
@@ -83,9 +83,9 @@ class AppTheme {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      hintStyle: const TextStyle(color: AppColors.text3, fontSize: 13.5),
-      labelStyle: const TextStyle(color: AppColors.text2, fontSize: 13.5),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      hintStyle: const TextStyle(color: AppColors.text3, fontSize: 14),
+      labelStyle: const TextStyle(color: AppColors.text2, fontSize: 14),
       border: const OutlineInputBorder(
         borderRadius: _radius,
         borderSide: BorderSide(color: AppColors.line2, width: 1),
@@ -109,7 +109,7 @@ class AppTheme {
         backgroundColor: AppColors.brand,
         foregroundColor: AppColors.surface,
         elevation: 0,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         shape: const RoundedRectangleBorder(borderRadius: _radius),
         textStyle: AppTextStyles.button,
       ),
@@ -125,21 +125,25 @@ class AppTheme {
     ),
 
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(foregroundColor: AppColors.brand),
+      style: TextButton.styleFrom(
+        foregroundColor: AppColors.brandInk,
+        textStyle: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 13.5),
+      ),
     ),
 
     floatingActionButtonTheme: const FloatingActionButtonThemeData(
       backgroundColor: AppColors.brand,
       foregroundColor: AppColors.surface,
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(14))),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(16))),
     ),
 
     chipTheme: const ChipThemeData(
-      backgroundColor: Color(0xFFEDF0EA),
-      labelStyle: TextStyle(fontFamily: 'Archivo', fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.text2),
+      backgroundColor: AppColors.sunken,
+      selectedColor: AppColors.brand50,
+      labelStyle: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.text2),
       side: BorderSide.none,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(5))),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(999))),
       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
     ),
 
@@ -149,11 +153,11 @@ class AppTheme {
       backgroundColor: AppColors.surface,
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(12)),
+        borderRadius: BorderRadius.all(Radius.circular(20)),
         side: BorderSide(color: AppColors.line, width: 1),
       ),
       titleTextStyle: TextStyle(
-        fontFamily: 'Fraunces', fontWeight: FontWeight.w600, fontSize: 18, color: AppColors.text,
+        fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w800, fontSize: 18, color: AppColors.text,
       ),
     ),
 
@@ -161,31 +165,31 @@ class AppTheme {
       backgroundColor: AppColors.surface,
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
     ),
 
     snackBarTheme: const SnackBarThemeData(
       backgroundColor: AppColors.ink,
-      contentTextStyle: TextStyle(fontFamily: 'Archivo', color: AppColors.surface, fontSize: 13),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+      contentTextStyle: TextStyle(fontFamily: 'PlusJakartaSans', color: AppColors.surface, fontSize: 13),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
       behavior: SnackBarBehavior.floating,
     ),
 
     tabBarTheme: const TabBarThemeData(
-      labelColor: AppColors.brand,
+      labelColor: AppColors.brandInk,
       unselectedLabelColor: AppColors.text2,
       indicatorColor: AppColors.brand,
       indicatorSize: TabBarIndicatorSize.tab,
       dividerColor: AppColors.line,
-      labelStyle: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w600, fontSize: 13),
-      unselectedLabelStyle: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w500, fontSize: 13),
+      labelStyle: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 13.5),
+      unselectedLabelStyle: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w600, fontSize: 13.5),
     ),
 
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: AppColors.brand,
-      linearTrackColor: Color(0xFFE7EBE4),
-      circularTrackColor: Color(0xFFE7EBE4),
+      linearTrackColor: AppColors.sunken,
+      circularTrackColor: AppColors.sunken,
     ),
 
     switchTheme: SwitchThemeData(

@@ -48,12 +48,12 @@ class QueueStarterScreen extends ConsumerWidget {
                   Row(children: [
                     Icon(Icons.flash_on, color: AppColors.brand, size: 22),
                     SizedBox(width: 8),
-                    Text('Power Dialer', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.brand)),
+                    Text('Power Dialer', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.brand)),
                   ]),
                   SizedBox(height: 6),
                   Text(
                     'Pick a queue assigned to you. Leads are dialed one after another — each call needs a disposition before the next. No lead repeats.',
-                    style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.text2, height: 1.5),
+                    style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.text2, height: 1.5),
                   ),
                 ]),
               ).animate().fadeIn(),
@@ -73,7 +73,7 @@ class QueueStarterScreen extends ConsumerWidget {
                     Text(
                       'Ask your admin to create a calling queue and add you to it.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.grey),
+                      style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.grey),
                     ),
                   ]),
                 ).animate().fadeIn()
@@ -154,9 +154,9 @@ class _QueueCard extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: count > 0 ? AppColors.yellow : AppColors.greyLight,
-              border: Border.all(color: AppColors.black, width: 1),
+              border: Border.all(color: AppColors.line, width: 1),
             ),
-            child: Text('$count', style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w900, fontSize: 16)),
+            child: Text('$count', style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w900, fontSize: 16)),
           ),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -167,7 +167,7 @@ class _QueueCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                   decoration: BoxDecoration(color: AppColors.warning.withOpacity(0.2), border: Border.all(color: AppColors.warning, width: 1)),
-                  child: const Text('AUTO', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9, color: AppColors.warning)),
+                  child: const Text('AUTO', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 9, color: AppColors.warning)),
                 ),
               ],
             ]),
@@ -190,7 +190,7 @@ class _Tip extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: 2),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('▸ ', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.warning)),
-      Expanded(child: Text(text, style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, height: 1.4))),
+      Expanded(child: Text(text, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, height: 1.4))),
     ]),
   );
 }

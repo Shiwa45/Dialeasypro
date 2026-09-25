@@ -114,7 +114,7 @@ class _LeadImportScreenState extends ConsumerState<LeadImportScreen> {
               SizedBox(height: 6),
               Text(
                 'One lead per line. Columns:\nname, phone, email, city, requirement\n\nMinimum: name and phone. Phone must be 10+ digits.',
-                style: TextStyle(fontFamily: 'IBMPlexMono', fontSize: 11, color: AppColors.dark, height: 1.5),
+                style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 11, color: AppColors.dark, height: 1.5),
               ),
             ]),
           ).animate().fadeIn(),
@@ -252,7 +252,7 @@ class _DropField extends StatelessWidget {
     Container(
       decoration: BoxDecoration(
         color: AppColors.white,
-        border: Border.all(color: AppColors.black, width: 1),
+        border: Border.all(color: AppColors.line, width: 1),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: DropdownButtonHideUnderline(child: DropdownButton<String>(
@@ -260,7 +260,7 @@ class _DropField extends StatelessWidget {
         isExpanded: true,
         items: options.entries.map((e) => DropdownMenuItem(
           value: e.key,
-          child: Text(e.value, style: const TextStyle(fontFamily: 'Archivo', fontSize: 12)),
+          child: Text(e.value, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12)),
         )).toList(),
         onChanged: (v) { if (v != null) onChange(v); },
         icon: const Icon(Icons.arrow_drop_down, color: AppColors.black, size: 18),

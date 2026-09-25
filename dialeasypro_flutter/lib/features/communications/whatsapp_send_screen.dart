@@ -139,7 +139,7 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
             child: Row(children: [
               Container(
                 width: 44, height: 44,
-                decoration: BoxDecoration(color: AppColors.teal, border: Border.all(color: AppColors.black, width: 1)),
+                decoration: BoxDecoration(color: AppColors.teal, border: Border.all(color: AppColors.line, width: 1)),
                 child: const Icon(Icons.chat_bubble, color: AppColors.white, size: 20),
               ),
               const SizedBox(width: 12),
@@ -296,13 +296,13 @@ class _ModeOption extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Icon(icon, size: 24, color: selected ? AppColors.white : color),
         const SizedBox(height: 8),
-        Text(label, style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 14, color: selected ? AppColors.white : AppColors.black)),
-        Text(subtitle, style: TextStyle(fontFamily: 'Archivo', fontSize: 10, color: selected ? AppColors.white.withOpacity(0.85) : AppColors.grey)),
+        Text(label, style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 14, color: selected ? AppColors.white : AppColors.black)),
+        Text(subtitle, style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: selected ? AppColors.white.withOpacity(0.85) : AppColors.grey)),
         const SizedBox(height: 6),
         if (selected) const Row(children: [
           Icon(Icons.check_circle, size: 14, color: AppColors.white),
           SizedBox(width: 4),
-          Text('ACTIVE', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9, color: AppColors.white, letterSpacing: 0.4)),
+          Text('ACTIVE', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 9, color: AppColors.white, letterSpacing: 0.4)),
         ]),
       ]),
     );

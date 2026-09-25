@@ -86,34 +86,20 @@ flutter:
     - assets/icons/
     - assets/lottie/
 
-  # Fonts were previously referenced by name but never declared here, and
-  # assets/fonts held only a README — so every `fontFamily: 'SpaceGrotesk'` in
-  # the app silently fell back to Roboto. These are the real files.
-  #
-  # Archivo is registered as four STATIC weights (from the Omnibus-Type
-  # foundry, not the variable build Google Fonts serves) so that plain
-  # `fontWeight:` works everywhere in the app. Fraunces exists only as a
-  # variable font, but it is used in a handful of title styles that set
-  # `fontVariations` explicitly — see AppTextStyles.
+  # Plus Jakarta Sans, the web app's typeface, registered as five STATIC
+  # weights (from github.com/tokotype/PlusJakartaSans, SIL OFL) so plain
+  # `fontWeight:` works everywhere. The app uses this one family for text and
+  # figures alike; numbers take tabular figures instead of a mono face.
   fonts:
-    - family: Archivo
+    - family: PlusJakartaSans
       fonts:
-        - asset: assets/fonts/Archivo-Regular.ttf
+        - asset: assets/fonts/PlusJakartaSans-Regular.ttf
           weight: 400
-        - asset: assets/fonts/Archivo-Medium.ttf
+        - asset: assets/fonts/PlusJakartaSans-Medium.ttf
           weight: 500
-        - asset: assets/fonts/Archivo-SemiBold.ttf
+        - asset: assets/fonts/PlusJakartaSans-SemiBold.ttf
           weight: 600
-        - asset: assets/fonts/Archivo-Bold.ttf
+        - asset: assets/fonts/PlusJakartaSans-Bold.ttf
           weight: 700
-    - family: Fraunces
-      fonts:
-        - asset: assets/fonts/Fraunces-Variable.ttf
-    - family: IBMPlexMono
-      fonts:
-        - asset: assets/fonts/IBMPlexMono-Regular.ttf
-          weight: 400
-        - asset: assets/fonts/IBMPlexMono-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/IBMPlexMono-SemiBold.ttf
-          weight: 600
+        - asset: assets/fonts/PlusJakartaSans-ExtraBold.ttf
+          weight: 800

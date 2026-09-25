@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/colors.dart';
 import '../notifications/notification_bell.dart';
 import '../../core/utils/utils.dart';
+import '../../core/widgets/brand.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/services/services.dart';
@@ -42,17 +43,10 @@ class DashboardScreen extends ConsumerWidget {
               backgroundColor: AppColors.white,
               elevation: 0,
               titleSpacing: 16,
-              title: Row(children: [
-                Container(
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(
-                    color: AppColors.yellow,
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: const Center(child: Text('D', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.white))),
-                ),
-                const SizedBox(width: 10),
-                const Text('DialEasypro', style: AppTextStyles.h3),
+              title: const Row(children: [
+                BrandMark(size: 34),
+                SizedBox(width: 8),
+                BrandWordmark(size: 19),
               ]),
               actions: [
                 const NotificationBell(),
@@ -70,14 +64,15 @@ class DashboardScreen extends ConsumerWidget {
               ),
             ),
 
+            // ─── Hero band — greeting over the soft green wash ─────
+            SliverToBoxAdapter(
+              child: _Greeting(agent: agent).animate().fadeIn(duration: 250.ms),
+            ),
+
             // ─── Content ──────────────────────────────────────────
             SliverPadding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
               sliver: SliverList(delegate: SliverChildListDelegate([
-
-                // Greeting
-                _Greeting(agent: agent).animate().fadeIn(duration: 250.ms),
-                const SizedBox(height: 16),
 
                 // BIG Auto-Dialer CTA
                 _AutoDialerCTA().animate().slideY(begin: 0.1, end: 0, duration: 350.ms, delay: 80.ms).fadeIn(delay: 80.ms),
@@ -96,25 +91,26 @@ class DashboardScreen extends ConsumerWidget {
                     Row(children: [
                       Expanded(child: CompactKpi(
                         label: 'New Today', value: '${stats.newLeadsToday}',
-                        color: AppColors.info, icon: Icons.fiber_new,
+                        color: AppColors.brand, icon: Icons.group_rounded,
                       )),
                       const SizedBox(width: 10),
                       Expanded(child: CompactKpi(
                         label: 'Follow-ups',
                         value: '${stats.followupsDue}',
-                        color: AppColors.warning, icon: Icons.alarm,
+                        color: stats.overdueFollowups > 0 ? AppColors.hot : AppColors.warning,
+                        icon: Icons.notifications_rounded,
                       )),
                     ]),
                     const SizedBox(height: 10),
                     Row(children: [
                       Expanded(child: CompactKpi(
                         label: 'Active Leads', value: '${stats.activeLeads}',
-                        color: AppColors.purple, icon: Icons.trending_up,
+                        color: AppColors.blue, icon: Icons.layers_rounded,
                       )),
                       const SizedBox(width: 10),
                       Expanded(child: CompactKpi(
                         label: 'Conversion', value: '${stats.conversionRate.toStringAsFixed(1)}%',
-                        color: AppColors.success, icon: Icons.emoji_events,
+                        color: AppColors.teal, icon: Icons.bar_chart_rounded,
                       )),
                     ]),
                   ]).animate().fadeIn(delay: 200.ms),
@@ -164,7 +160,7 @@ class DashboardScreen extends ConsumerWidget {
                   icon: Icons.history,
                   action: TextButton(
                     onPressed: () => context.go('/leads'),
-                    child: const Text('All →', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.black)),
+                    child: const Text('View all →', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.brandInk)),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -201,37 +197,35 @@ class _Greeting extends StatelessWidget {
   Widget build(BuildContext context) {
     final hour = DateTime.now().hour;
     final greet = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
-    final emoji = hour < 12 ? '☀️' : hour < 17 ? '🌤️' : '🌙';
-    // This was an ink slab carrying `AppColors.yellow` text. That alias moved
-    // from brass to the brand green, so the greeting became dark green on
-    // near-black and the date, already in --text-2, was no more readable.
-    //
-    // A pale brand tint gives the greeting its own identity without going
-    // back to a black card, and every colour on it is now dark-on-light like
-    // the rest of the screen.
-    return BrutalCard(
-      padding: const EdgeInsets.all(16),
-      color: AppColors.brand50,
-      borderColor: const Color(0xFFC9DED9),
-      child: Row(children: [
+    // The web dashboard's hero band: a soft green wash across the full width,
+    // the page title and greeting on the left, the illustration on the right.
+    return Container(
+      decoration: const BoxDecoration(gradient: AppColors.heroGradient),
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 12),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('$greet, ${agent?.name.split(' ').first ?? 'Agent'}! $emoji',
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.brand700)),
-          const SizedBox(height: 3),
-          Text(Fmt.date(DateTime.now().toIso8601String()),
-              style: const TextStyle(fontFamily: 'Archivo', fontSize: 12, color: AppColors.text2)),
-        ])),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            // Surface, not brand50 — the card behind it is brand50 now, and
-            // a pill the same colour as its ground is not a pill.
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(999),
+          Text(Fmt.date(DateTime.now().toIso8601String()), style: AppTextStyles.caption),
+          const SizedBox(height: 4),
+          const Text('Dashboard', style: AppTextStyles.h1),
+          const SizedBox(height: 4),
+          Text('$greet, ${agent?.name.split(' ').first ?? 'Agent'}',
+              style: AppTextStyles.bodyMedium.copyWith(color: AppColors.text2)),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: AppColors.line),
+            ),
+            child: Text((agent?.role ?? 'agent').replaceAll('_', ' ').toUpperCase(),
+                style: const TextStyle(fontFamily: kFontFamily, fontWeight: FontWeight.w700,
+                    fontSize: 10, color: AppColors.brandInk, letterSpacing: 0.6)),
           ),
-          child: Text((agent?.role ?? 'agent').toUpperCase(),
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.brand, letterSpacing: 0.5)),
-        ),
+        ])),
+        // The illustration is decorative; on a narrow phone it shrinks
+        // rather than pushing the greeting onto three lines.
+        const Flexible(child: HeroArt(height: 104)),
       ]),
     );
   }
@@ -262,10 +256,10 @@ class _AutoDialerCTA extends StatelessWidget {
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
               Text('Auto-Dialer Queue',
-                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.white)),
+                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.white)),
               SizedBox(height: 2),
               Text('Dial leads one-by-one. No tap needed.',
-                  style: TextStyle(fontFamily: 'Archivo', fontSize: 12, color: Color(0xCCFFFFFF))),
+                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: Color(0xCCFFFFFF))),
             ])),
             const Icon(Icons.arrow_forward, color: AppColors.white),
           ]),
@@ -326,10 +320,10 @@ class _TodayCallsCard extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('TODAY\'S CALLS',
-              style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.text3, letterSpacing: 0.6)),
+              style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.text3, letterSpacing: 0.6)),
           const SizedBox(height: 3),
           Text('${today['total'] ?? 0} total · ${today['connected'] ?? 0} connected',
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.text)),
+              style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.text)),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -338,7 +332,7 @@ class _TodayCallsCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
           ),
           child: Text('${period['connection_rate'] ?? 0}%',
-              style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.white)),
+              style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.white)),
         ),
       ]),
     );
@@ -353,10 +347,11 @@ class _PipelineCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final entries = [
-      ('New', stats.byStatus['new'] ?? 0, AppColors.info),
-      ('Interested', stats.byStatus['interested'] ?? 0, AppColors.success),
-      ('Negotiation', stats.byStatus['negotiation'] ?? 0, AppColors.warning),
-      ('Converted', stats.byStatus['converted'] ?? 0, AppColors.teal),
+      // Same stage colours as the web pipeline donut.
+      ('New', stats.byStatus['new'] ?? 0, AppColors.brand),
+      ('Interested', stats.byStatus['interested'] ?? 0, AppColors.teal),
+      ('Negotiation', stats.byStatus['negotiation'] ?? 0, AppColors.visit),
+      ('Converted', stats.byStatus['converted'] ?? 0, AppColors.won),
     ];
     final total = entries.fold<int>(0, (s, e) => s + e.$2);
     return BrutalCard(
@@ -372,7 +367,7 @@ class _PipelineCard extends StatelessWidget {
               Container(
                 height: 8,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE7EBE4),
+                  color: AppColors.sunken,
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
@@ -494,7 +489,7 @@ class _TasksCard extends StatelessWidget {
           Text(
             hasOverdue ? '${stats.overdueFollowups} OVERDUE!' : "TODAY'S TASKS",
             style: const TextStyle(
-              fontFamily: 'Archivo', fontWeight: FontWeight.w700,
+              fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700,
               fontSize: 11, color: AppColors.black, letterSpacing: 0.5,
             ),
           ),

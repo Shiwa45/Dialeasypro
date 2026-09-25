@@ -133,7 +133,7 @@ class _LeadCustomFieldsState extends State<LeadCustomFields> {
             Text(
               widget.title.toUpperCase(),
               style: TextStyle(
-                fontFamily: 'Archivo', fontWeight: FontWeight.w700,
+                fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700,
                 fontSize: widget.compact ? 10 : 11,
                 letterSpacing: 0.6, color: AppColors.text3,
               ),
@@ -169,7 +169,7 @@ class _Row extends StatelessWidget {
           child: Text(
             field.name,
             style: TextStyle(
-              fontFamily: 'Archivo',
+              fontFamily: 'PlusJakartaSans',
               fontSize: compact ? 12 : 13,
               color: AppColors.text2,
             ),
@@ -180,7 +180,7 @@ class _Row extends StatelessWidget {
           child: Text(
             field.value,
             style: TextStyle(
-              fontFamily: 'Archivo',
+              fontFamily: 'PlusJakartaSans',
               fontWeight: FontWeight.w600,
               fontSize: compact ? 13 : 14,
               color: AppColors.text,

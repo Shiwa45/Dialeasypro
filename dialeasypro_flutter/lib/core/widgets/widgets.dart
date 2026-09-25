@@ -1,3 +1,5 @@
+import 'dart:ui' show FontFeature;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -72,7 +74,7 @@ class _BrutalCardState extends State<BrutalCard> {
               : [
                   AppColors.brutalShadowSm,
                   BoxShadow(
-                    color: const Color(0x24111A16),
+                    color: const Color(0x1A0F1B2D),
                     offset: Offset(0, 6 * lift),
                     blurRadius: 20 * lift,
                     spreadRadius: -10 * lift,
@@ -134,7 +136,7 @@ class BrutalButton extends StatefulWidget {
     super.key, required this.label, this.onPressed,
     this.isLoading = false, this.isFullWidth = true,
     this.icon, this.iconData, this.fontSize, this.padding, this.shadowOffset = 5,
-  }) : backgroundColor = AppColors.black, textColor = AppColors.white, gradient = null;
+  }) : backgroundColor = AppColors.brand, textColor = AppColors.white, gradient = null;
 
   const BrutalButton.secondary({
     super.key, required this.label, this.onPressed,
@@ -146,7 +148,7 @@ class BrutalButton extends StatefulWidget {
     super.key, required this.label, this.onPressed,
     this.isLoading = false, this.isFullWidth = false,
     this.icon, this.iconData, this.fontSize, this.padding, this.shadowOffset = 4,
-  }) : backgroundColor = AppColors.brass, textColor = AppColors.white, gradient = null;
+  }) : backgroundColor = AppColors.brand50, textColor = AppColors.brandInk, gradient = null;
 
   const BrutalButton.success({
     super.key, required this.label, this.onPressed,
@@ -170,7 +172,7 @@ class _BrutalButtonState extends State<BrutalButton> {
   @override
   Widget build(BuildContext context) {
     final disabled = widget.onPressed == null || widget.isLoading;
-    final bg = widget.backgroundColor ?? AppColors.black;
+    final bg = widget.backgroundColor ?? AppColors.brand;
     final fg = widget.textColor ?? AppColors.white;
 
     return GestureDetector(
@@ -198,10 +200,14 @@ class _BrutalButtonState extends State<BrutalButton> {
                 : Colors.transparent,
             width: 1,
           ),
-          borderRadius: BorderRadius.circular(9),
-          boxShadow: disabled || _pressed ? [] : const [AppColors.brutalShadowSm],
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: disabled || _pressed
+              ? []
+              : bg == AppColors.brand
+                  ? const [AppColors.brutalShadowColor]
+                  : const [AppColors.brutalShadowSm],
         ),
-        padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: widget.isLoading
             ? SizedBox(
                 height: 18,
@@ -225,7 +231,7 @@ class _BrutalButtonState extends State<BrutalButton> {
                     child: Text(
                       widget.label,
                       style: TextStyle(
-                        fontFamily: 'Archivo',
+                        fontFamily: 'PlusJakartaSans',
                         fontWeight: FontWeight.w700,
                         fontSize: widget.fontSize ?? 14,
                         color: disabled ? AppColors.grey : fg,
@@ -302,26 +308,25 @@ class _BrutalTextFieldState extends State<BrutalTextField> {
         ],
         AnimatedContainer(
           duration: const Duration(milliseconds: 120),
+          // Hairline border that turns green with a soft halo on focus — the
+          // web input, not the old 2px black box with an offset shadow.
           decoration: BoxDecoration(
             color: AppColors.white,
+            borderRadius: AppColors.radiusBtn,
             border: Border.all(
               color: widget.errorText != null
                   ? AppColors.error
                   : _focused
-                      ? AppColors.yellow
-                      : AppColors.black,
-              width: _focused ? 2.5 : 2,
+                      ? AppColors.brand
+                      : AppColors.line2,
+              width: _focused ? 1.5 : 1,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: widget.errorText != null
-                    ? AppColors.error
-                    : _focused
-                        ? AppColors.yellow
-                        : AppColors.black,
-                offset: const Offset(3, 3),
-              ),
-            ],
+            boxShadow: _focused
+                ? [BoxShadow(
+                    color: widget.errorText != null ? AppColors.errorBg : AppColors.brand50,
+                    spreadRadius: 3,
+                  )]
+                : const [],
           ),
           child: TextFormField(
             controller: widget.controller,
@@ -338,10 +343,10 @@ class _BrutalTextFieldState extends State<BrutalTextField> {
             focusNode: _node,
             autofocus: widget.autofocus,
             validator: widget.validator,
-            style: const TextStyle(fontFamily: 'Archivo', fontSize: 14, color: AppColors.black),
+            style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 14, color: AppColors.black),
             decoration: InputDecoration(
               hintText: widget.hint,
-              hintStyle: const TextStyle(fontFamily: 'Archivo', color: AppColors.grey, fontSize: 14),
+              hintStyle: const TextStyle(fontFamily: 'PlusJakartaSans', color: AppColors.grey, fontSize: 14),
               suffixIcon: widget.suffix,
               prefixIcon: widget.prefix ?? (widget.prefixIcon != null
                   ? Icon(widget.prefixIcon, size: 18, color: AppColors.grey)
@@ -360,7 +365,7 @@ class _BrutalTextFieldState extends State<BrutalTextField> {
           Row(children: [
             const Icon(Icons.error_outline, size: 12, color: AppColors.error),
             const SizedBox(width: 4),
-            Text(widget.errorText!, style: const TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.error)),
+            Text(widget.errorText!, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 11, color: AppColors.error)),
           ]),
         ],
       ],
@@ -378,25 +383,28 @@ class StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = AppColors.leadStatusColors[status.toLowerCase()];
-    final text = (label ?? status.replaceAll('_', ' ')).toUpperCase();
+    final raw = label ?? status.replaceAll('_', ' ');
+    final text = raw.isEmpty ? raw : raw[0].toUpperCase() + raw.substring(1);
+    final fg = cs?.text ?? AppColors.text2;
     return Container(
       padding: EdgeInsets.symmetric(horizontal: large ? 10 : 8, vertical: large ? 4 : 3),
-      // Rounded and unoutlined. A 1.5px ring around a 9px label was the old
-      // theme's idea of a chip, and it fights everything around it now.
       decoration: BoxDecoration(
-        color: cs?.background ?? AppColors.greyLight,
-        borderRadius: BorderRadius.circular(999),
+        color: cs?.background ?? AppColors.sunken,
+        borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontFamily: 'Archivo',
-          fontWeight: FontWeight.w700,
-          fontSize: large ? 11 : 9.5,
-          letterSpacing: 0.5,
-          color: cs?.text ?? AppColors.greyDark,
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 6, height: 6, decoration: BoxDecoration(color: fg, shape: BoxShape.circle)),
+        const SizedBox(width: 5),
+        Text(
+          text,
+          style: TextStyle(
+            fontFamily: 'PlusJakartaSans',
+            fontWeight: FontWeight.w700,
+            fontSize: large ? 12 : 11,
+            color: fg,
+          ),
         ),
-      ),
+      ]),
     );
   }
 }
@@ -408,26 +416,22 @@ class PriorityBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = AppColors.priorityColors[priority.toLowerCase()] ?? AppColors.grey;
-    final isLight = priority == 'warm' || priority == 'cold';
+    final key = priority.toLowerCase();
+    final color = AppColors.priorityColors[key] ?? AppColors.text2;
+    final bg = AppColors.priorityBgColors[key] ?? AppColors.sunken;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-      decoration: BoxDecoration(
-        color: color,
-        border: Border.all(color: AppColors.black, width: 1),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (priority == 'hot') const Padding(
-            padding: EdgeInsets.only(right: 2),
-            child: Text('🔥', style: TextStyle(fontSize: 10)),
-          ),
+          Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 5),
           Text(
             priority.toUpperCase(),
             style: TextStyle(
-              fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9.5,
-              letterSpacing: 0.4, color: isLight ? AppColors.black : AppColors.white,
+              fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w800, fontSize: 10.5,
+              letterSpacing: 0.3, color: color,
             ),
           ),
         ],
@@ -448,21 +452,23 @@ class ScoreBar extends StatelessWidget {
                 : score >= 40 ? AppColors.warning : AppColors.error;
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Container(
-        width: 52, height: 6,
+        width: 52, height: 5,
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: const Color(0xFFE7EBE4),
-          borderRadius: BorderRadius.circular(3),
+          color: AppColors.sunken,
+          borderRadius: BorderRadius.circular(9),
         ),
         child: FractionallySizedBox(
           alignment: Alignment.centerLeft,
           widthFactor: score.clamp(0, 100) / 100,
-          child: Container(color: color),
+          child: Container(decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(9))),
         ),
       ),
       if (showLabel) ...[
-        const SizedBox(width: 4),
+        const SizedBox(width: 6),
         Text('$score', style: const TextStyle(
-          fontFamily: 'IBMPlexMono', fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.greyDark,
+          fontFamily: 'PlusJakartaSans', fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.text,
+          fontFeatures: [FontFeature.tabularFigures()],
         )),
       ],
     ]);
@@ -485,26 +491,26 @@ class TagChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final w = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: backgroundColor ?? const Color(0xFFEDF0EA),
-        border: Border.all(color: AppColors.line, width: 1),
+        color: backgroundColor ?? AppColors.brass50,
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 10, color: textColor ?? AppColors.black),
+            Icon(icon, size: 11, color: textColor ?? AppColors.brass600),
             const SizedBox(width: 4),
           ],
           Flexible(
             child: Text(
-              label.toUpperCase(),
+              label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 9,
-                letterSpacing: 0.4, color: textColor ?? AppColors.black,
+                fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 11,
+                color: textColor ?? AppColors.brass600,
               ),
             ),
           ),
@@ -551,12 +557,12 @@ class StatCard extends StatelessWidget {
               Flexible(child: Text(label.toUpperCase(), style: AppTextStyles.label)),
               if (icon != null)
                 Container(
-                  padding: const EdgeInsets.all(4),
+                  width: 34, height: 34,
                   decoration: BoxDecoration(
-                    color: (accentColor ?? AppColors.yellow).withOpacity(0.2),
-                    border: Border.all(color: accentColor ?? AppColors.black, width: 1.5),
+                    color: accentColor ?? AppColors.brand,
+                    shape: BoxShape.circle,
                   ),
-                  child: Icon(icon, size: 13, color: accentColor ?? AppColors.dark),
+                  child: Icon(icon, size: 17, color: AppColors.white),
                 ),
             ],
           ),
@@ -582,23 +588,40 @@ class CompactKpi extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The web dashboard's tinted card: the tone's pale tint fading into white
+    // (composited so the fill is opaque), a round solid icon, the figure big.
+    final tintBg = Color.alphaBlend(color.withOpacity(0.10), AppColors.white);
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
-        // Composite the tint over white so the fill is fully OPAQUE. A bare
-        // color.withOpacity(0.12) is translucent and lets a dark surface behind
-        // it bleed through, making the card look black and hiding the text.
-        color: Color.alphaBlend(color.withOpacity(0.12), AppColors.white),
-        border: Border.all(color: color, width: 1),
-        boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
+        gradient: AppColors.tint(tintBg),
+        border: Border.all(color: AppColors.line, width: 1),
+        borderRadius: AppColors.radius,
+        boxShadow: const [AppColors.brutalShadowSm, AppColors.brutalShadow],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(height: 6),
-          Text(value, style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.black)),
-          Text(label, style: const TextStyle(fontFamily: 'Archivo', fontSize: 10, color: AppColors.grey)),
+          Row(children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: color.withOpacity(.45), offset: const Offset(0, 5), blurRadius: 12, spreadRadius: -5)],
+              ),
+              child: Icon(icon, size: 18, color: AppColors.white),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(label.toUpperCase(),
+                maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700,
+                    fontSize: 10.5, letterSpacing: 0.5, color: AppColors.text, height: 1.25))),
+          ]),
+          const SizedBox(height: 12),
+          Text(value, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w800,
+              fontSize: 24, letterSpacing: -0.6, color: AppColors.text, height: 1,
+              fontFeatures: [FontFeature.tabularFigures()])),
         ],
       ),
     );
@@ -667,13 +690,12 @@ class EmptyStateView extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
-                color: (iconColor ?? AppColors.yellow).withOpacity(0.18),
-                border: Border.all(color: iconColor ?? AppColors.line, width: 1),
-                boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
+                color: Color.alphaBlend((iconColor ?? AppColors.brand).withOpacity(0.12), AppColors.white),
+                shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 40, color: iconColor ?? AppColors.dark),
+              child: Icon(icon, size: 38, color: iconColor ?? AppColors.brand),
             ).animate().scale(begin: const Offset(0.7, 0.7), duration: 400.ms, curve: Curves.easeOutBack),
             const SizedBox(height: 20),
             Text(title, style: AppTextStyles.h3, textAlign: TextAlign.center),
@@ -704,9 +726,8 @@ class ShimmerCard extends StatelessWidget {
       width: width ?? double.infinity,
       height: height,
       decoration: BoxDecoration(
-        color: AppColors.greyLight,
-        border: Border.all(color: AppColors.black, width: 1),
-        boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
+        color: AppColors.sunken,
+        borderRadius: AppColors.radius,
       ),
     ).animate(onPlay: (c) => c.repeat(reverse: true)).fade(begin: 1, end: 0.6, duration: 800.ms);
   }
@@ -734,22 +755,21 @@ class AppToast {
     bool isError = false, bool isSuccess = false, bool isInfo = false,
   }) {
     HapticFeedback.lightImpact();
-    final color = isError ? AppColors.error : isSuccess ? AppColors.success : isInfo ? AppColors.info : AppColors.yellow;
+    final color = isError ? const Color(0xFFFF8A7A) : isSuccess ? AppColors.mintSoft : isInfo ? const Color(0xFF8BB6FF) : AppColors.mintSoft;
     final icon = isError ? Icons.error_outline : isSuccess ? Icons.check_circle_outline : Icons.info_outline;
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
         Icon(icon, color: color, size: 18),
         const SizedBox(width: 10),
-        Expanded(child: Text(message, style: const TextStyle(fontFamily: 'Archivo', color: AppColors.white, fontSize: 13))),
+        Expanded(child: Text(message, style: const TextStyle(fontFamily: 'PlusJakartaSans', color: AppColors.white, fontSize: 13))),
       ]),
       backgroundColor: AppColors.dark,
       behavior: SnackBarBehavior.floating,
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.zero,
-        side: BorderSide(color: AppColors.black, width: 1),
+        borderRadius: BorderRadius.all(Radius.circular(12)),
       ),
       duration: const Duration(seconds: 3),
     ));
@@ -767,9 +787,9 @@ Future<T?> showBrutalBottomSheet<T>({
   isScrollControlled: isScrollControlled,
   backgroundColor: backgroundColor ?? AppColors.white,
   shape: const RoundedRectangleBorder(
-    borderRadius: BorderRadius.zero,
-    side: BorderSide(color: AppColors.black, width: 1),
+    borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
   ),
+  clipBehavior: Clip.antiAlias,
   builder: (ctx) => Padding(
     padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
     child: builder(ctx),
@@ -788,23 +808,28 @@ Future<bool?> showBrutalConfirm({
   builder: (ctx) => Dialog(
     insetPadding: const EdgeInsets.all(20),
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.zero,
-      side: BorderSide(color: AppColors.black, width: 1),
+      borderRadius: BorderRadius.all(Radius.circular(20)),
     ),
+    clipBehavior: Clip.antiAlias,
     child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: danger ? AppColors.error : AppColors.dark,
-            border: const Border(bottom: BorderSide(color: AppColors.black, width: 1)),
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: AppColors.line, width: 1)),
           ),
-          child: Text(
-            title,
-            style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.white),
-          ),
+          child: Row(children: [
+            if (danger) ...[
+              Container(width: 10, height: 10, decoration: const BoxDecoration(color: AppColors.error, shape: BoxShape.circle)),
+              const SizedBox(width: 10),
+            ],
+            Expanded(child: Text(
+              title,
+              style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w800, fontSize: 17, color: AppColors.text),
+            )),
+          ]),
         ),
         Padding(
           padding: const EdgeInsets.all(20),
@@ -817,7 +842,7 @@ Future<bool?> showBrutalConfirm({
             const SizedBox(width: 12),
             Expanded(child: BrutalButton(
               label: confirmLabel, isFullWidth: true,
-              backgroundColor: danger ? AppColors.error : AppColors.black,
+              backgroundColor: danger ? AppColors.error : AppColors.brand,
               textColor: AppColors.white,
               onPressed: () => Navigator.pop(ctx, true),
             )),
@@ -842,15 +867,7 @@ class SectionHeader extends StatelessWidget {
     return Row(
       children: [
         if (icon != null) ...[
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: AppColors.yellow,
-              border: Border.all(color: AppColors.yellow, width: 1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Icon(icon, size: 14, color: AppColors.white),
-          ),
+          Icon(icon, size: 22, color: AppColors.brand),
           const SizedBox(width: 10),
         ],
         Expanded(
@@ -883,33 +900,34 @@ class BrutalAvatar extends StatelessWidget {
   String get initials => name.trim().split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join().toUpperCase();
 
   // Generate a color from name
-  Color get _generatedColor {
-    if (backgroundColor != null) return backgroundColor!;
-    final colors = [
-      AppColors.yellow, AppColors.purpleBg, AppColors.pinkBg,
-      AppColors.tealBg, AppColors.orangeBg, AppColors.infoBg, AppColors.successBg,
-    ];
-    final idx = name.codeUnits.fold<int>(0, (a, b) => a + b) % colors.length;
-    return colors[idx];
+  static const _tints = [
+    (AppColors.brand50, AppColors.brandInk),
+    (AppColors.visitBg, AppColors.visit),
+    (AppColors.brass50, AppColors.brass600),
+    (AppColors.warmBg,  Color(0xFFB24A09)),
+    (AppColors.tealBg,  AppColors.teal),
+  ];
+
+  (Color, Color) get _tint {
+    final idx = name.codeUnits.fold<int>(0, (a, b) => a + b) % _tints.length;
+    final t = _tints[idx];
+    return backgroundColor != null ? (backgroundColor!, AppColors.text) : t;
   }
 
   @override
   Widget build(BuildContext context) {
+    final (bg, fg) = _tint;
     return Container(
       width: size, height: size,
-      decoration: BoxDecoration(
-        color: _generatedColor,
-        border: Border.all(color: AppColors.black, width: 1),
-        boxShadow: const [BoxShadow(color: Color(0x14111A16), offset: Offset(0, 2), blurRadius: 8, spreadRadius: -4)],
-      ),
+      decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
       child: Center(
         child: Text(
           initials,
           style: TextStyle(
-            fontFamily: 'Archivo',
+            fontFamily: 'PlusJakartaSans',
             fontWeight: FontWeight.w700,
-            fontSize: size * 0.36,
-            color: AppColors.black,
+            fontSize: size * 0.34,
+            color: fg,
           ),
         ),
       ),
@@ -954,17 +972,18 @@ class _ActionButtonState extends State<ActionButton> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 80),
           width: widget.size, height: widget.size,
-          transform: Matrix4.translationValues(_pressed ? 2 : 0, _pressed ? 2 : 0, 0),
+          transform: Matrix4.diagonal3Values(_pressed ? .95 : 1, _pressed ? .95 : 1, 1),
+          transformAlignment: Alignment.center,
           decoration: BoxDecoration(
             color: widget.color,
-            border: Border.all(color: AppColors.black, width: 1),
-            boxShadow: [BoxShadow(color: AppColors.black, offset: Offset(_pressed ? 1 : 4, _pressed ? 1 : 4))],
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: _pressed ? const [] : const [AppColors.brutalShadowSm, AppColors.brutalShadow],
           ),
           child: Icon(widget.icon, size: widget.size * 0.4, color: widget.iconColor),
         ),
       ),
       const SizedBox(height: 6),
-      Text(widget.label, style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, color: AppColors.dark)),
+      Text(widget.label, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 11, color: AppColors.text)),
     ]);
   }
 }

@@ -113,7 +113,7 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
             ? TextField(
                 controller: _searchCtrl,
                 autofocus: true,
-                style: const TextStyle(fontFamily: 'Archivo', fontSize: 14),
+                style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 14),
                 decoration: const InputDecoration(
                   hintText: 'Search name, phone…', border: InputBorder.none,
                   hintStyle: TextStyle(color: AppColors.grey),
@@ -172,7 +172,7 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
                 });
               },
               child: const Text('Select all on page',
-                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 11)),
+                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 11)),
             ),
         ],
       ),
@@ -231,15 +231,15 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
           ? Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: AppColors.black, width: 1)),
+                border: Border(top: BorderSide(color: AppColors.line, width: 1)),
               ),
               child: SafeArea(
                 child: Row(children: [
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                     Text('${_selectedIds.length} leads',
-                        style: const TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.brand)),
+                        style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.brand)),
                     const Text('selected for queue',
-                        style: TextStyle(fontFamily: 'Archivo', fontSize: 11, color: AppColors.text2)),
+                        style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 11, color: AppColors.text2)),
                   ])),
                   BrutalButton(
                     label: 'START DIALING →',
@@ -291,14 +291,14 @@ class _LeadTile extends StatelessWidget {
           width: 40, height: 92,
           decoration: BoxDecoration(
             color: selected ? AppColors.yellow : AppColors.white,
-            border: const Border(right: BorderSide(color: AppColors.black, width: 1.5)),
+            border: const Border(right: BorderSide(color: AppColors.line, width: 1)),
           ),
           child: Center(
             child: Container(
               width: 22, height: 22,
               decoration: BoxDecoration(
                 color: selected ? AppColors.black : AppColors.white,
-                border: Border.all(color: AppColors.black, width: 1),
+                border: Border.all(color: AppColors.line, width: 1),
               ),
               child: selected ? const Icon(Icons.check, color: AppColors.white, size: 14) : null,
             ),
@@ -308,7 +308,7 @@ class _LeadTile extends StatelessWidget {
         // Avatar
         Container(
           width: 50, height: 92,
-          decoration: const BoxDecoration(border: Border(right: BorderSide(color: AppColors.black, width: 1.5))),
+          decoration: const BoxDecoration(border: Border(right: BorderSide(color: AppColors.line, width: 1))),
           child: Center(child: BrutalAvatar(name: lead.name, size: 38)),
         ),
         Expanded(child: Padding(
@@ -363,7 +363,7 @@ class _LeadTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontFamily: 'Archivo', fontSize: 10,
+                      fontFamily: 'PlusJakartaSans', fontSize: 10,
                       color: lead.followupOverdue ? AppColors.error : AppColors.grey,
                       fontWeight: lead.followupOverdue ? FontWeight.w600 : FontWeight.w400,
                     ),
@@ -409,11 +409,11 @@ class _FilterSheetState extends State<_FilterSheet> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
           color: sel ? AppColors.black : AppColors.white,
-          border: Border.all(color: AppColors.black, width: sel ? 2 : 1.5),
+          border: Border.all(color: sel ? AppColors.brand : AppColors.line, width: sel ? 1.5 : 1),
           boxShadow: sel ? const [BoxShadow(color: Color(0x14111A16), offset: Offset(0, 2), blurRadius: 8, spreadRadius: -4)] : null,
         ),
         child: Text(label, style: TextStyle(
-          fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 11,
+          fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 11,
           color: sel ? AppColors.white : AppColors.black,
         )),
       ),
@@ -429,7 +429,7 @@ class _FilterSheetState extends State<_FilterSheet> {
           const Expanded(child: Text('Filter Leads', style: AppTextStyles.h2)),
           TextButton(
             onPressed: () => setState(() => _f = const LeadsFilter()),
-            child: const Text('Clear All', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.error)),
+            child: const Text('Clear All', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 12, color: AppColors.error)),
           ),
         ]),
         const SizedBox(height: 16),
@@ -454,14 +454,14 @@ class _FilterSheetState extends State<_FilterSheet> {
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
             decoration: BoxDecoration(
               color: _f.overdue ? AppColors.errorBg : AppColors.white,
-              border: Border.all(color: AppColors.black, width: 1),
+              border: Border.all(color: AppColors.line, width: 1),
               boxShadow: const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
             ),
             child: Row(children: [
               Icon(Icons.warning_amber_rounded, size: 18, color: _f.overdue ? AppColors.error : AppColors.grey),
               const SizedBox(width: 10),
               Text('Overdue Follow-ups Only',
-                  style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.black)),
+                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.black)),
               const Spacer(),
               if (_f.overdue) const Icon(Icons.check_box, color: AppColors.error) else const Icon(Icons.check_box_outline_blank, color: AppColors.grey),
             ]),
@@ -488,7 +488,7 @@ class _ActiveFiltersBar extends ConsumerWidget {
         border: Border(bottom: BorderSide(color: AppColors.line, width: 1)),
       ),
       child: Row(children: [
-        const Text('FILTERS:', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.5, color: AppColors.text3)),
+        const Text('FILTERS:', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 10, letterSpacing: 0.5, color: AppColors.text3)),
         const SizedBox(width: 8),
         Expanded(child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -509,7 +509,7 @@ class _ActiveFiltersBar extends ConsumerWidget {
         )),
         GestureDetector(
           onTap: () => ref.read(leadsFilterProvider.notifier).state = const LeadsFilter(),
-          child: const Text('Clear ✕', style: TextStyle(fontFamily: 'Archivo', fontWeight: FontWeight.w700, fontSize: 11)),
+          child: const Text('Clear ✕', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 11)),
         ),
       ]),
     );

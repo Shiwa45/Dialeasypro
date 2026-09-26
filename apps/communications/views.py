@@ -368,6 +368,9 @@ class BulkCampaignDetailView(generics.RetrieveAPIView):
         return BulkCampaign.objects.all()
 
 
+LAUNCHABLE_STATUSES = ("draft", "scheduled", "paused")
+
+
 class BulkCampaignLaunchView(APIView):
     """
     POST /api/v1/comms/campaigns/{id}/launch/ — Start sending a campaign.
@@ -379,7 +382,7 @@ class BulkCampaignLaunchView(APIView):
 
     def post(self, request, pk):
         try:
-            campaign = BulkCampaign.objects.get(pk=pk, status__in=["draft", "scheduled", "paused"])
+            campaign = BulkCampaign.objects.get(pk=pk, status__in=LAUNCHABLE_STATUSES)
         except BulkCampaign.DoesNotExist:
             return Response({"error": "campaign_not_found_or_not_launchable"}, status=404)
 
@@ -396,13 +399,36 @@ class BulkCampaignLaunchView(APIView):
         if not task_fn:
             return Response({"error": "unsupported_channel"}, status=400)
 
-        result = task_fn.apply_async(
-            args=[connection.schema_name, str(campaign.id)],
-            queue="bulk_ops",
-        )
+        # Claim it before dispatching, conditionally — the same way the
+        # scheduler does. This used to dispatch first and mark it running
+        # after, so a double click, or a click as the scheduler picked up a
+        # scheduled campaign, sent the whole audience twice. Whoever wins this
+        # UPDATE owns the launch.
+        previous_status = campaign.status
+        claimed = BulkCampaign.objects.filter(
+            pk=campaign.pk, status__in=LAUNCHABLE_STATUSES
+        ).update(status="running")
+        if not claimed:
+            return Response(
+                {"error": "campaign_already_launched",
+                 "message": "This campaign is already running."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            result = task_fn.apply_async(
+                args=[connection.schema_name, str(campaign.id)],
+                queue="bulk_ops",
+            )
+        except Exception:
+            # Nothing was queued — give the campaign back so it can be retried.
+            BulkCampaign.objects.filter(pk=campaign.pk, status="running").update(
+                status=previous_status
+            )
+            raise
         campaign.celery_task_id = result.id
         campaign.status = "running"
-        campaign.save(update_fields=["celery_task_id", "status"])
+        campaign.save(update_fields=["celery_task_id"])
 
         AuditLog.log(
             action=AuditAction.BULK_ACTION,

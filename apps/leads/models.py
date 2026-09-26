@@ -285,6 +285,31 @@ class Lead(SoftDeleteModel, TimeStampedModel):
             return False
         return timezone.now() > self.next_followup_at
 
+    def refresh_next_followup(self) -> None:
+        """
+        Set next_followup_at to the EARLIEST follow-up not yet completed —
+        past or future.
+
+        This field drives the Overdue filter, the overdue badge and the
+        dashboard's overdue count. Three places used to recompute it from
+        FUTURE follow-ups only (`scheduled_at__gt=now`): the follow-up save
+        signal, FollowUp.complete(), and — via that signal — the 5-minute
+        reminder task marking a reminder sent. So a lead with yesterday's
+        follow-up still pending left the Overdue list the moment another
+        follow-up was saved on it, a later one was completed early, or its own
+        overdue reminder went out. An overdue follow-up is still the next thing
+        owed on the lead; it stays here until it is completed.
+        """
+        earliest = (
+            FollowUp.objects.filter(lead=self, is_completed=False)
+            .order_by("scheduled_at")
+            .values_list("scheduled_at", flat=True)
+            .first()
+        )
+        if self.next_followup_at != earliest:
+            type(self).objects.filter(pk=self.pk).update(next_followup_at=earliest)
+            self.next_followup_at = earliest
+
     @property
     def is_locked(self) -> bool:
         """True if the lead is currently checked out (lock not expired)."""
@@ -632,12 +657,8 @@ class FollowUp(TimeStampedModel):
         self.completion_notes = notes
         self.save(update_fields=["is_completed", "completed_at", "completion_notes"])
 
-        # Update lead's next_followup_at to the next pending follow-up
-        next_fu = FollowUp.objects.filter(
-            lead=self.lead, is_completed=False, scheduled_at__gt=timezone.now()
-        ).order_by("scheduled_at").first()
-        self.lead.next_followup_at = next_fu.scheduled_at if next_fu else None
-        self.lead.save(update_fields=["next_followup_at"])
+        # The next thing owed on the lead — see Lead.refresh_next_followup.
+        self.lead.refresh_next_followup()
 
         # Log activity
         LeadActivity.objects.create(

@@ -9,7 +9,7 @@ post_save Lead      → Check plan lead limit on creation
 """
 import logging
 
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from apps.leads.models import FollowUp, Lead
@@ -87,17 +87,16 @@ def followup_post_save(sender, instance, created, **kwargs):
 
 
 def _sync_lead_next_followup(lead: Lead):
-    """Update Lead.next_followup_at to the earliest pending follow-up."""
-    from django.utils import timezone
+    """Update Lead.next_followup_at — see Lead.refresh_next_followup."""
+    lead.refresh_next_followup()
 
-    next_fu = FollowUp.objects.filter(
-        lead=lead,
-        is_completed=False,
-        scheduled_at__gt=timezone.now(),
-    ).order_by("scheduled_at").values_list("scheduled_at", flat=True).first()
 
-    if lead.next_followup_at != next_fu:
-        Lead.objects.filter(pk=lead.pk).update(next_followup_at=next_fu)
+@receiver(post_delete, sender=FollowUp)
+def followup_post_delete(sender, instance, **kwargs):
+    """A deleted follow-up is no longer owed; nothing re-synced on delete."""
+    lead = Lead.objects.filter(pk=instance.lead_id).first()
+    if lead is not None:
+        lead.refresh_next_followup()
 
 
 def _check_lead_plan_limit(lead: Lead):

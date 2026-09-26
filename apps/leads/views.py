@@ -562,11 +562,8 @@ class FollowUpListCreateView(generics.ListCreateAPIView):
             lead_id=self.kwargs["lead_id"],
             assigned_to=serializer.validated_data.get("assigned_to") or agent,
         )
-        # Update lead's next_followup_at
+        # The post_save signal has already refreshed next_followup_at.
         lead = followup.lead
-        if not lead.next_followup_at or followup.scheduled_at < lead.next_followup_at:
-            lead.next_followup_at = followup.scheduled_at
-            lead.save(update_fields=["next_followup_at"])
 
         LeadActivity.objects.create(
             lead=lead,

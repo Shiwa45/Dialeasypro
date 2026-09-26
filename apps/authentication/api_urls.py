@@ -27,6 +27,8 @@ from apps.authentication.views import (
     AgentStatusUpdateAPIView,
     LiveAgentsAPIView,
     TeamListAPIView,
+    TeamDetailAPIView,
+    TeamMembersAPIView,
     CapabilitiesAPIView,
     TenantFeaturesAPIView,
     TenantInfoAPIView,
@@ -64,6 +66,9 @@ urlpatterns = [
 
     # Teams
     path("teams/", TeamListAPIView.as_view(), name="api_team_list"),
+    path("teams/<int:pk>/", TeamDetailAPIView.as_view(), name="api_team_detail"),
+    path("teams/<int:pk>/members/", TeamMembersAPIView.as_view(), name="api_team_members"),
+    path("teams/<int:pk>/members/<int:agent_id>/", TeamMembersAPIView.as_view(), name="api_team_member_detail"),
 
     # Notifications — the agent's own, always scoped to request.user.
     path("notifications/", NotificationListAPIView.as_view(),

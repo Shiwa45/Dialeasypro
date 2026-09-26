@@ -200,12 +200,69 @@ class AdminSetPasswordSerializer(serializers.Serializer):
         return data
 
 
-class TeamSerializer(serializers.ModelSerializer):
-    """Team serializer with member count."""
+class TeamMemberSerializer(serializers.ModelSerializer):
+    """One agent's place in a team."""
 
-    member_count = serializers.IntegerField(read_only=True)
+    agent_id = serializers.IntegerField(source="agent.id", read_only=True)
+    name = serializers.CharField(source="agent.name", read_only=True)
+    email = serializers.EmailField(source="agent.email", read_only=True)
+    role = serializers.CharField(source="agent.role", read_only=True)
+    is_active = serializers.BooleanField(source="agent.is_active", read_only=True)
+
+    class Meta:
+        model = AgentTeam
+        fields = ["agent_id", "name", "email", "role", "is_active", "is_team_lead", "joined_at"]
+        read_only_fields = fields
+
+
+class TeamSerializer(serializers.ModelSerializer):
+    """
+    A team, with who is in it.
+
+    Membership is not decoration: a manager only sees agents who share a team
+    with them, a senior agent sees their teammates' leads, and a team lead
+    sees their team's leads. The members are therefore part of the team, not
+    a separate thing to go and look up.
+    """
+
+    member_count = serializers.SerializerMethodField()
+    members = TeamMemberSerializer(source="memberships", many=True, read_only=True)
 
     class Meta:
         model = Team
-        fields = ["id", "name", "description", "is_active", "member_count", "created_at"]
+        fields = [
+            "id", "name", "description", "is_active",
+            "member_count", "members", "created_at",
+        ]
         read_only_fields = ["id", "created_at"]
+
+    def get_member_count(self, obj) -> int:
+        # The annotation when the list view provides one, else counted here so
+        # the detail endpoint does not answer with a missing field.
+        annotated = getattr(obj, "member_count_annotated", None)
+        if annotated is not None:
+            return annotated
+        return obj.memberships.filter(agent__is_active=True).count()
+
+    def validate_name(self, value):
+        name = (value or "").strip()
+        if not name:
+            raise serializers.ValidationError("Give the team a name.")
+        clash = Team.objects.filter(name__iexact=name)
+        if self.instance:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError(f'"{name}" already exists.')
+        return name
+
+
+class TeamMemberWriteSerializer(serializers.Serializer):
+    """Adding an agent to a team."""
+
+    agent_id = serializers.IntegerField()
+    is_team_lead = serializers.BooleanField(required=False, default=False)
+
+    def validate_agent_id(self, value):
+        if not Agent.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("No such agent.")
+        return value

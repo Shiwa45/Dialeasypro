@@ -86,6 +86,8 @@ def leads_visible_to(agent):
     STRICT rule:
       - Admins & Managers      → all leads in the tenant
       - Senior Agents          → own assigned leads + their teams' leads
+      - Team leads             → own assigned leads + the leads of everyone
+                                 in the teams they lead
       - Everyone else (Agent,  → ONLY leads assigned to themselves
         Read-only, Trainee,
         unknown roles)
@@ -104,6 +106,20 @@ def leads_visible_to(agent):
             Q(assigned_to=agent)
             | Q(assigned_to__team_memberships__team__memberships__agent=agent)
         ).distinct()
+
+    # A team lead sees their team, whatever their role. AgentTeam.is_team_lead
+    # has said "Team leads can view their team members' leads" since the model
+    # was written and nothing ever read it, so marking somebody a lead changed
+    # nothing at all.
+    led_team_ids = list(
+        agent.team_memberships.filter(is_team_lead=True).values_list("team_id", flat=True)
+    ) if hasattr(agent, "team_memberships") else []
+    if led_team_ids:
+        return qs.filter(
+            Q(assigned_to=agent)
+            | Q(assigned_to__team_memberships__team_id__in=led_team_ids)
+        ).distinct()
+
     # Secure default: own assigned leads only.
     return qs.filter(assigned_to=agent)
 

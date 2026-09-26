@@ -48,6 +48,7 @@ from apps.authentication.permissions import (
     role_required,
     tenant_admin_required,
 )
+from apps.authentication.models import AgentTeam
 from apps.authentication.serializers import (
     AdminSetPasswordSerializer,
     AgentCreateSerializer,
@@ -57,6 +58,7 @@ from apps.authentication.serializers import (
     AgentUpdateSerializer,
     PasswordChangeSerializer,
     TeamSerializer,
+    TeamMemberWriteSerializer,
 )
 from apps.authentication.tokens import (
     blacklist_refresh_token,
@@ -587,17 +589,123 @@ class AgentSetPasswordAPIView(APIView):
 
 
 class TeamListAPIView(generics.ListCreateAPIView):
-    """GET/POST /api/v1/auth/teams/"""
+    """
+    GET  /api/v1/auth/teams/   → teams, with their members
+    POST /api/v1/auth/teams/   → create one (tenant admin)
 
-    permission_classes = [IsManagerOrAdmin]
+    `?include_inactive=true` returns disbanded teams too, so one can be
+    brought back rather than recreated from scratch.
+    """
+
     serializer_class = TeamSerializer
 
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsTenantAdmin()]
+        return [IsManagerOrAdmin()]
+
     def get_queryset(self):
-        return Team.objects.filter(is_active=True).annotate(
-            member_count=models.Count("memberships", filter=models.Q(
-                memberships__agent__is_active=True
-            ))
+        qs = Team.objects.prefetch_related("memberships__agent").annotate(
+            member_count_annotated=models.Count(
+                "memberships",
+                filter=models.Q(memberships__agent__is_active=True),
+            )
         )
+        if self.request.query_params.get("include_inactive") not in ("true", "1"):
+            qs = qs.filter(is_active=True)
+        return qs.order_by("name")
+
+
+class TeamDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE /api/v1/auth/teams/{id}/   (tenant admin for writes)
+
+    DELETE disbands rather than deletes. Memberships cascade, and a team is
+    what decides which agents a manager can see and whose leads a senior
+    agent can read — dropping the rows would silently change who can see what,
+    with nothing left to explain why.
+    """
+
+    serializer_class = TeamSerializer
+
+    def get_permissions(self):
+        if self.request.method in ("PATCH", "PUT", "DELETE"):
+            return [IsTenantAdmin()]
+        return [IsManagerOrAdmin()]
+
+    def get_queryset(self):
+        return Team.objects.prefetch_related("memberships__agent")
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+
+
+class TeamMembersAPIView(APIView):
+    """
+    POST   /api/v1/auth/teams/{id}/members/            → add an agent
+    DELETE /api/v1/auth/teams/{id}/members/{agent_id}/ → remove one
+
+    There was no way at all to put an agent in a team through the product,
+    which left both rules that depend on membership permanently inert: a
+    manager saw no agents, and a senior agent saw only their own leads.
+    """
+
+    permission_classes = [IsTenantAdmin]
+
+    def post(self, request, pk):
+        team = get_object_or_404(Team, pk=pk)
+        serializer = TeamMemberWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        agent = Agent.objects.get(pk=serializer.validated_data["agent_id"])
+        membership, created = AgentTeam.objects.get_or_create(
+            agent=agent, team=team,
+            defaults={"is_team_lead": serializer.validated_data["is_team_lead"]},
+        )
+        if not created:
+            # Already in the team — treat the call as setting their role in it
+            # rather than refusing, which is what the UI's toggle wants.
+            membership.is_team_lead = serializer.validated_data["is_team_lead"]
+            membership.save(update_fields=["is_team_lead"])
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_type="agent",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            entity_type="Team",
+            entity_id=team.pk,
+            entity_repr=team.name,
+            description=f"{'Added' if created else 'Updated'} {agent.name} in {team.name}",
+            request=request,
+        )
+        return Response(
+            TeamSerializer(team).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    def delete(self, request, pk, agent_id):
+        team = get_object_or_404(Team, pk=pk)
+        removed = AgentTeam.objects.filter(team=team, agent_id=agent_id).delete()[0]
+        if not removed:
+            return Response(
+                {"error": "not_a_member", "message": "That agent is not in this team."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_type="agent",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            entity_type="Team",
+            entity_id=team.pk,
+            entity_repr=team.name,
+            description=f"Removed agent {agent_id} from {team.name}",
+            request=request,
+        )
+        return Response(TeamSerializer(team).data)
 
 
 class TenantFeaturesAPIView(APIView):

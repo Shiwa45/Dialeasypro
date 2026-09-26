@@ -59,7 +59,7 @@ class AgentPerformanceReportView(APIView):
 
         params = request.query_params
         date_from = params.get("date_from", (timezone.now() - timedelta(days=30)).date().isoformat())
-        date_to = params.get("date_to", timezone.now().date().isoformat())
+        date_to = params.get("date_to", timezone.localdate().isoformat())
         agent_id = params.get("agent_id")
 
         cache_key = f"report:agent_perf:{date_from}:{date_to}:{agent_id or 'all'}"
@@ -133,7 +133,7 @@ class LeadSourceReportView(APIView):
 
         params = request.query_params
         date_from = params.get("date_from", (timezone.now() - timedelta(days=30)).date().isoformat())
-        date_to = params.get("date_to", timezone.now().date().isoformat())
+        date_to = params.get("date_to", timezone.localdate().isoformat())
 
         cache_key = f"report:lead_sources:{date_from}:{date_to}"
 
@@ -195,7 +195,7 @@ class CallAnalyticsReportView(APIView):
 
         params = request.query_params
         date_from = params.get("date_from", (timezone.now() - timedelta(days=30)).date().isoformat())
-        date_to = params.get("date_to", timezone.now().date().isoformat())
+        date_to = params.get("date_to", timezone.localdate().isoformat())
 
         cache_key = f"report:call_analytics:{scope_key}:{date_from}:{date_to}"
 
@@ -282,7 +282,7 @@ class ConversionFunnelView(APIView):
 
         params = request.query_params
         date_from = params.get("date_from", (timezone.now() - timedelta(days=90)).date().isoformat())
-        date_to = params.get("date_to", timezone.now().date().isoformat())
+        date_to = params.get("date_to", timezone.localdate().isoformat())
 
         cache_key = f"report:funnel:{scope_key}:{date_from}:{date_to}"
 
@@ -332,7 +332,7 @@ class DailyActivityView(APIView):
         from apps.calls.models import CallLog
 
         agent = request.user
-        today = timezone.now().date()
+        today = timezone.localdate()
 
         lead_qs = Lead.objects.filter(created_at__date=today, is_deleted=False)
         call_qs = CallLog.objects.filter(started_at__date=today)

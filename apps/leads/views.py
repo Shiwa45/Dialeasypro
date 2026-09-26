@@ -1002,7 +1002,7 @@ class LeadDashboardStatsView(APIView):
 
     def get(self, request):
         agent = request.user
-        today = timezone.now().date()
+        today = timezone.localdate()
 
         base_qs = leads_visible_to(agent)
 
@@ -1104,13 +1104,34 @@ class LeadExportView(APIView):
 
         qs = leads_visible_to(request.user).select_related("assigned_to")
 
+        # The same filters the list applies, so the file matches the screen it
+        # was exported from. Source, priority, search and overdue were missing
+        # here: narrowing the list to one source and pressing Export quietly
+        # produced every lead in the tenant.
         params = request.query_params
         if status_filter := params.get("status"):
             qs = qs.filter(status=status_filter)
+        if priority := params.get("priority"):
+            qs = qs.filter(priority=priority)
+        if source := params.get("source"):
+            qs = qs.filter(source=source)
         if assigned_to := params.get("assigned_to"):
             qs = qs.filter(assigned_to_id=assigned_to)
         if batch := params.get("batch"):
             qs = qs.filter(batch_id=batch)
+        if city := params.get("city"):
+            qs = qs.filter(city__icontains=city)
+        if search := params.get("search"):
+            qs = qs.filter(
+                Q(name__icontains=search)
+                | Q(phone__icontains=search)
+                | Q(email__icontains=search)
+            )
+        if params.get("overdue") == "true":
+            qs = qs.filter(
+                next_followup_at__lt=timezone.now(),
+                next_followup_at__isnull=False,
+            )
         if date_from := params.get("date_from"):
             qs = qs.filter(created_at__date__gte=date_from)
         if date_to := params.get("date_to"):

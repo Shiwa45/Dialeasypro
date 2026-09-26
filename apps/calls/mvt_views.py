@@ -75,7 +75,7 @@ class CallListMVTView(View):
         page = paginator.get_page(request.GET.get("page", 1))
 
         # Today's quick stats for the top bar
-        today = timezone.now().date()
+        today = timezone.localdate()
         today_calls = CallLog.objects.filter(started_at__date=today)
         if agent.role == AgentRole.AGENT:
             today_calls = today_calls.filter(agent=agent)

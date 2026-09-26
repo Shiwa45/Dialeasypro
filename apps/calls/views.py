@@ -610,7 +610,7 @@ class CallStatsView(APIView):
         if date_to:
             qs = qs.filter(started_at__date__lte=date_to)
 
-        today = timezone.now().date()
+        today = timezone.localdate()
         today_qs = qs.filter(started_at__date=today)
 
         stats = qs.aggregate(

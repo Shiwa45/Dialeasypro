@@ -16,8 +16,8 @@ def download_call_recording(self, schema_name: str, call_id: str, recording_url:
     Download call recording from provider URL and store in S3.
     Called by provider webhook handlers after a call ends with a recording.
     """
-    import requests
     from apps.calls.models import CallLog, CallRecording
+    from apps.core.safe_fetch import UnsafeURL, fetch_public_url
 
     try:
         call = CallLog.objects.get(id=call_id)
@@ -26,11 +26,15 @@ def download_call_recording(self, schema_name: str, call_id: str, recording_url:
         return
 
     try:
-        response = requests.get(recording_url, timeout=60)
-        response.raise_for_status()
+        # The URL arrives from a provider webhook. Fetching it as-is let any
+        # caller make this server read cloud metadata or an internal service
+        # and store the answer as a recording; it also loaded the whole body
+        # into memory. fetch_public_url refuses non-public destinations,
+        # re-checks redirects, and caps the size.
+        body, content_type = fetch_public_url(recording_url)
 
         from django.core.files.base import ContentFile
-        content_type = response.headers.get("Content-Type", "audio/mpeg")
+        content_type = content_type or "audio/mpeg"
         ext = "mp3" if "mpeg" in content_type else "wav"
         filename = f"{call_id}.{ext}"
 
@@ -38,12 +42,17 @@ def download_call_recording(self, schema_name: str, call_id: str, recording_url:
             call=call,
             defaults={"format": ext},
         )
-        recording.file.save(filename, ContentFile(response.content), save=True)
-        recording.file_size_bytes = len(response.content)
+        recording.file.save(filename, ContentFile(body), save=True)
+        recording.file_size_bytes = len(body)
         recording.duration_seconds = call.duration_seconds
         recording.save(update_fields=["file_size_bytes", "duration_seconds"])
 
         logger.info(f"[Task] Recording saved for call {call_id}")
+
+    except UnsafeURL as exc:
+        # Not a transient failure — retrying would only fetch it again.
+        logger.warning(f"[Task] Refused recording URL for call {call_id}: {exc}")
+        return
 
     except Exception as exc:
         logger.error(f"[Task] download_call_recording failed: {exc}")

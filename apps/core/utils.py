@@ -53,6 +53,42 @@ def normalize_indian_phone(phone: str) -> Optional[str]:
     return None
 
 
+_AMOUNT_UNITS = {
+    "cr": 10_000_000, "crore": 10_000_000, "crores": 10_000_000,
+    "l": 100_000, "lac": 100_000, "lacs": 100_000, "lakh": 100_000, "lakhs": 100_000,
+    "k": 1_000, "thousand": 1_000,
+}
+_AMOUNT = re.compile(r"^(\d+(?:\.\d+)?)\s*([a-z]*)\.?$")
+
+
+def parse_indian_amount(text: str):
+    """
+    "1.2 Cr" → 12000000, "50L" → 5000000, "₹ 20 lakh" → 2000000, "5,00,000" → 500000.
+
+    Returns a Decimal, None for a blank cell, and raises ValueError for
+    anything it cannot read. Import used to accept plain numbers only, so the
+    lakh/crore budgets real-estate sheets are full of became an empty budget
+    with no error.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    cleaned = (text or "").strip().lower()
+    for token in ("₹", "inr", "rs.", "rs", ","):
+        cleaned = cleaned.replace(token, "")
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return None
+
+    match = _AMOUNT.match(cleaned)
+    if not match or (match.group(2) and match.group(2) not in _AMOUNT_UNITS):
+        raise ValueError(f"not an amount: {text!r}")
+    try:
+        number = Decimal(match.group(1))
+    except InvalidOperation:
+        raise ValueError(f"not an amount: {text!r}")
+    return number * _AMOUNT_UNITS.get(match.group(2), 1)
+
+
 def mask_phone_number(phone: str) -> str:
     """
     Mask phone number for logs: +919876543210 → +91XXXXXX3210

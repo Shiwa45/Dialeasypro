@@ -17,6 +17,10 @@ from django.utils import timezone
 
 from apps.core.tasks import PublicSchemaTask, TenantAwareTask
 
+# Lead.budget is Decimal(12, 2): anything from ten billion up cannot be stored,
+# and one such cell would fail the whole bulk insert it sits in.
+MAX_BUDGET = 10 ** 10
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +43,7 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
         CustomField, CustomFieldValue, Lead, LeadActivity, LeadBatch, LeadImportJob, LeadNote,
     )
     from apps.core.constants import LeadSource
-    from apps.core.utils import normalize_indian_phone
+    from apps.core.utils import normalize_indian_phone, parse_indian_amount
 
     logger.info(f"[Import] Starting import job {import_job_id} in {schema_name}")
 
@@ -119,6 +123,10 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
     existing_phones = set(
         Lead.objects.filter(is_deleted=False).values_list("phone", flat=True)
     )
+    # New numbers queued earlier in THIS file: phone -> index in
+    # leads_to_create. They are in existing_phones but not yet in the
+    # database, so "update duplicates" cannot look them up there.
+    queued = {}
 
     for row_idx, raw_row in enumerate(rows, start=2):  # start=2 (row 1 is header)
         try:
@@ -160,8 +168,20 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
                     )
                     if existing is not None:
                         _update_lead_from_row(existing, row, job)
-                        successful += 1
-                        duplicates += 1
+                    elif phone in queued:
+                        # The same new number twice in one file. It used to
+                        # look for a saved lead that did not exist yet, find
+                        # none, and drop the row without counting it anywhere.
+                        # Merge it into the queued lead instead, by the same
+                        # fill-a-blank rule as updating a saved one.
+                        idx = queued[phone]
+                        _merge_row_into_queued(
+                            leads_to_create[idx], pending_extras[idx], row, custom_field_by_key,
+                        )
+                    else:
+                        raise ValueError("Duplicate number, but no lead found to update")
+                    successful += 1
+                    duplicates += 1
                     job.processed_rows += 1
                     job.save(update_fields=["processed_rows"])
                     continue
@@ -180,14 +200,25 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
                 "import_job": job,
                 "batch": batch,
             }
-            # Budget parsing
-            budget_str = row.get("budget", "").strip().replace(",", "").replace("₹", "")
-            if budget_str:
-                try:
-                    lead_kwargs["budget"] = float(budget_str)
-                except ValueError:
-                    pass
+            # Budget: "1.2 Cr", "50L", "20 lakh" as well as plain numbers.
+            # One that cannot be read no longer vanishes silently — the lead
+            # is still imported, and the row says why its budget is empty.
+            budget_text = row.get("budget", "")
+            try:
+                budget = parse_indian_amount(budget_text)
+                if budget is not None and budget >= MAX_BUDGET:
+                    raise ValueError("too large")
+            except ValueError:
+                budget = None
+                row_errors.append({
+                    "row": row_idx,
+                    "data": str(budget_text)[:200],
+                    "error": f"Budget '{budget_text.strip()}' not understood — imported without a budget.",
+                })
+            if budget is not None:
+                lead_kwargs["budget"] = budget
 
+            queued[phone] = len(leads_to_create)
             leads_to_create.append(Lead(**lead_kwargs))
             pending_extras.append({
                 "phone": phone,
@@ -557,6 +588,23 @@ def _apply_mapping(raw_row: dict, column_mapping: dict, default_mapping: dict) -
                     break
 
     return result
+
+
+def _merge_row_into_queued(lead: "Lead", extra: dict, row: dict, custom_field_by_key: dict):
+    """
+    Fold a later row for the same new number into the lead queued for it.
+
+    The same rule as _update_lead_from_row: fill a blank, never overwrite.
+    """
+    for field in ("email", "city", "requirement"):
+        value = (row.get(field) or "").strip()
+        if value and not getattr(lead, field):
+            setattr(lead, field, value.lower() if field == "email" else value)
+    for field, value in _extract_custom_values(row, custom_field_by_key).items():
+        extra["custom"].setdefault(field, value)
+    note = (row.get("notes") or "").strip()
+    if note:
+        extra["note"] = f"{extra['note']}\n{note}" if extra["note"] else note
 
 
 def _update_lead_from_row(lead: "Lead", row: dict, job: "LeadImportJob"):

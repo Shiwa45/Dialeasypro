@@ -14,6 +14,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from django.utils import timezone
 
+from apps.core.csv_export import safe_cell
+
 
 class Command(BaseCommand):
     help = "Export leads for a tenant to CSV."
@@ -67,7 +69,7 @@ class Command(BaseCommand):
             writer.writeheader()
             count = 0
             for lead in qs.values(*fields).iterator(chunk_size=500):
-                writer.writerow(lead)
+                writer.writerow({k: safe_cell(v) for k, v in lead.items()})
                 count += 1
 
         self.stdout.write(

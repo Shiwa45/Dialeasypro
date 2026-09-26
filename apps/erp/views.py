@@ -8,13 +8,13 @@ Invariants enforced here:
 * An ISSUED invoice is immutable — no edits, no line changes, no deletion.
 * Documents are numbered from a locked sequence, never max()+1.
 """
-import csv
 import logging
 
 from django.db import transaction
 from django.http import StreamingHttpResponse
 from rest_framework.renderers import JSONRenderer
 
+from apps.core.csv_export import csv_stream
 from apps.core.renderers import CSVRenderer
 from django.utils import timezone
 from rest_framework import generics, status
@@ -538,11 +538,6 @@ class PaymentCreateView(APIView):
 # Tally / Zoho Books export
 # ============================================================
 
-class _Echo:
-    def write(self, value):
-        return value
-
-
 class TallyExportView(APIView):
     """
     GET /api/v1/erp/export/tally/?date_from=&date_to=
@@ -578,21 +573,21 @@ class TallyExportView(APIView):
         if date_to := request.query_params.get("date_to"):
             qs = qs.filter(invoice_date__lte=date_to)
 
-        writer = csv.writer(_Echo())
-
         def rows():
-            yield writer.writerow(self.COLUMNS)
             for inv in qs.iterator():
                 # One row per HSN group keeps GSTR-1 reconciliation simple.
                 hsn = ", ".join(sorted({i.hsn_sac for i in inv.items.all() if i.hsn_sac})) or "-"
-                yield writer.writerow([
+                yield [
                     inv.number, inv.invoice_date.isoformat(), inv.customer.name,
                     inv.buyer_gstin or "URP", inv.buyer_state or "-", hsn,
                     inv.subtotal, inv.cgst_amount, inv.sgst_amount, inv.igst_amount,
                     inv.round_off, inv.total_amount,
-                ])
+                ]
 
-        response = StreamingHttpResponse(rows(), content_type="text/csv")
+        # Customer names are free text — escaped against formula injection.
+        response = StreamingHttpResponse(
+            csv_stream(self.COLUMNS, rows()), content_type="text/csv; charset=utf-8"
+        )
         response["Content-Disposition"] = 'attachment; filename="tally_invoices.csv"'
         return response
 

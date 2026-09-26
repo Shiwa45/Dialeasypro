@@ -1117,7 +1117,6 @@ class LeadExportView(APIView):
     renderer_classes = [JSONRenderer, CSVRenderer]
 
     def get(self, request):
-        import csv
         from django.http import StreamingHttpResponse
 
         qs = leads_visible_to(request.user).select_related("assigned_to")
@@ -1171,15 +1170,15 @@ class LeadExportView(APIView):
             "Last Contacted", "Contact Count", "DND", "Created At",
         ]
 
-        def generate():
-            pseudo_buffer = _Echo()
-            writer = csv.writer(pseudo_buffer)
-            yield writer.writerow(headers)
-            for row in qs.values_list(*fields):
-                yield writer.writerow(row)
+        # Escaped against formula injection, with a BOM for Excel and times in
+        # local time — see apps/core/csv_export.py.
+        from apps.core.csv_export import csv_stream
 
-        filename = f"leads_{timezone.now().strftime('%Y%m%d_%H%M')}.csv"
-        response = StreamingHttpResponse(generate(), content_type="text/csv")
+        filename = f"leads_{timezone.localtime().strftime('%Y%m%d_%H%M')}.csv"
+        response = StreamingHttpResponse(
+            csv_stream(headers, qs.values_list(*fields)),
+            content_type="text/csv; charset=utf-8",
+        )
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
 
         from apps.superadmin.models import AuditLog
@@ -1194,12 +1193,6 @@ class LeadExportView(APIView):
             request=request,
         )
         return response
-
-
-class _Echo:
-    """Pseudo file-like object for streaming CSV."""
-    def write(self, value):
-        return value
 
 
 # ============================================================

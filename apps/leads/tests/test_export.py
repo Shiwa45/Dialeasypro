@@ -128,7 +128,7 @@ def test_filters_combine_the_way_the_list_combines_them(admin, leads):
 def test_the_header_row_names_the_columns(admin, leads):
     first_line = _body(_export(admin, accept="text/csv")).splitlines()[0]
 
-    assert first_line.startswith("Name,Phone")
+    assert first_line.lstrip("﻿").startswith("Name,Phone")
 
 
 # ---- What the renderer does with an error -----------------------------
@@ -145,3 +145,50 @@ def test_an_error_under_accept_csv_is_still_readable(admin):
 
     assert "Plan limit reached" in rendered
     assert JSONRenderer in LeadExportView.renderer_classes, "JSON stays the default"
+
+
+# ---- What goes into the file (HIGH-14, MED-18, MED-19) -----------------
+
+def _rows(response):
+    import csv
+    import io
+
+    return list(csv.reader(io.StringIO(_body(response).lstrip("﻿"))))
+
+
+def test_a_formula_in_a_lead_name_is_written_as_text(admin):
+    """Lead names come from public webhooks; Excel runs a leading '='."""
+    Lead.objects.create(name='=HYPERLINK("http://evil","Click")', phone="+919812300009")
+
+    rows = _rows(_export(admin, accept="text/csv"))
+
+    assert rows[1][0] == '\'=HYPERLINK("http://evil","Click")'
+
+
+def test_phone_numbers_are_not_mangled(admin, leads):
+    """A leading '+' on a number is not a formula; it must not gain a quote."""
+    phones = {row[1] for row in _rows(_export(admin, accept="text/csv"))[1:]}
+
+    assert "+919812300001" in phones
+
+
+def test_excel_is_told_the_file_is_utf8(admin, leads):
+    """Without a BOM, Excel shows 'Budget (â‚¹)'."""
+    body = _body(_export(admin, accept="text/csv"))
+
+    assert body.startswith("﻿")
+    assert "Budget (₹)" in body
+
+
+def test_times_are_local_not_utc(admin):
+    from datetime import datetime, timezone as dt_tz
+
+    lead = Lead.objects.create(name="Timed", phone="+919812300008")
+    Lead.objects.filter(pk=lead.pk).update(
+        created_at=datetime(2026, 9, 9, 12, 52, 23, 914679, tzinfo=dt_tz.utc)
+    )
+
+    rows = _rows(_export(admin, accept="text/csv"))
+    created = rows[1][rows[0].index("Created At")]
+
+    assert created == "2026-09-09 18:22"  # IST, to the minute

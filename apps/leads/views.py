@@ -263,6 +263,13 @@ class LeadDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     permission_classes = [IsAuthenticatedAgent]
 
+    def get_permissions(self):
+        # Deleting a lead is a manager's call, as bulk assignment is. Any agent
+        # used to be able to soft-delete the leads assigned to them.
+        if self.request.method == "DELETE":
+            return [IsManagerOrAdmin()]
+        return [IsAuthenticatedAgent()]
+
     def get_serializer_class(self):
         if self.request.method in ("PUT", "PATCH"):
             return LeadUpdateSerializer

@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.authentication.models import Agent
-from apps.core.constants import FollowUpType, LeadPriority, LeadSource, LeadStatus
+from apps.core.constants import AgentRole, FollowUpType, LeadPriority, LeadSource, LeadStatus
 from apps.core.utils import normalize_indian_phone
 from apps.leads.models import (
     CallQueue,
@@ -350,6 +350,28 @@ class LeadUpdateSerializer(serializers.ModelSerializer):
             "deal_value", "expected_close_date",
             "pipeline_stage", "tags", "custom_fields",
         ]
+        # Computed by the scoring task (tasks.py); a hand-set value would be
+        # overwritten on the next run and misleads in the meantime.
+        read_only_fields = ["score"]
+
+    def validate_assigned_to(self, value):
+        """
+        Only a manager or admin moves a lead to someone else.
+
+        Bulk assignment has always been manager-only, but this serializer let
+        any agent PATCH `assigned_to` on a lead they could see — handing leads
+        away, or collecting them through a colleague — and nothing checked the
+        new owner was still an active agent.
+        """
+        if self.instance is not None and value == self.instance.assigned_to:
+            return value
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        if actor is not None and actor.role not in (AgentRole.ADMIN, AgentRole.MANAGER):
+            raise serializers.ValidationError("Only a manager or admin can reassign a lead.")
+        if value is not None and not value.is_active:
+            raise serializers.ValidationError(f"{value.name} is deactivated and cannot take leads.")
+        return value
 
     def validate_phone(self, value):
         normalized = normalize_indian_phone(value)

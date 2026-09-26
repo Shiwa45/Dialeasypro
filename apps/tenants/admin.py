@@ -60,6 +60,7 @@ class TenantAdmin(ModelAdmin):
         "gstin",
     ]
     readonly_fields = [
+        "import_fields_link",
         "created_at",
         "updated_at",
         "total_agents",
@@ -76,6 +77,96 @@ class TenantAdmin(ModelAdmin):
     ordering = ["-created_at"]
     inlines = [DomainInline]
     actions = ["suspend_tenants", "activate_tenants", "reset_trial", "sync_subscriptions", "send_welcome_emails"]
+
+    def get_urls(self):
+        from django.urls import path
+
+        return [
+            path(
+                "<int:tenant_id>/import-fields/",
+                self.admin_site.admin_view(self.import_fields_view),
+                name="tenants_tenant_import_fields",
+            ),
+            *super().get_urls(),
+        ]
+
+    @display(description="Import fields")
+    def import_fields_link(self, obj):
+        from django.urls import reverse
+
+        url = reverse("admin:tenants_tenant_import_fields", args=[obj.pk])
+        return format_html('<a class="button" href="{}">Edit fields</a>', url)
+
+    def import_fields_view(self, request, tenant_id):
+        """
+        The spreadsheet columns one client may map onto, edited from the
+        platform panel rather than by the client.
+
+        CustomField lives in the TENANT schema, which Django admin never
+        enters on its own — hence schema_context around every read and write.
+        """
+        from django.contrib import messages
+        from django.shortcuts import get_object_or_404, redirect, render
+        from django.utils.text import slugify
+        from django_tenants.utils import schema_context
+
+        from apps.leads.models import CustomField
+        from apps.tenants.models import Tenant
+
+        tenant = get_object_or_404(Tenant, pk=tenant_id)
+
+        if request.method == "POST":
+            action = request.POST.get("action")
+            with schema_context(tenant.schema_name):
+                if action == "add":
+                    name = (request.POST.get("name") or "").strip()[:100]
+                    if not name:
+                        messages.error(request, "Give the field a label.")
+                    else:
+                        key = slugify(name).replace("-", "_")[:50] or "field"
+                        base, n = key, 2
+                        while CustomField.objects.filter(field_key=key).exists():
+                            key = f"{base[:47]}_{n}"
+                            n += 1
+                        CustomField.objects.create(
+                            name=name,
+                            field_key=key,
+                            field_type=request.POST.get("field_type", "text"),
+                            is_required=bool(request.POST.get("is_required")),
+                            sort_order=int(request.POST.get("sort_order") or 0),
+                        )
+                        messages.success(request, f'Added "{name}" for {tenant.company_name}.')
+
+                elif action in ("toggle", "delete"):
+                    field = CustomField.objects.filter(pk=request.POST.get("field_id")).first()
+                    if field is None:
+                        messages.error(request, "That field no longer exists.")
+                    elif action == "toggle":
+                        field.is_active = not field.is_active
+                        field.save(update_fields=["is_active"])
+                        messages.success(
+                            request,
+                            f'"{field.name}" is now {"active" if field.is_active else "switched off"}.',
+                        )
+                    else:
+                        # Values captured on leads go with it — the confirm in
+                        # the template says so before anyone gets here.
+                        name = field.name
+                        field.delete()
+                        messages.success(request, f'Deleted "{name}".')
+
+            return redirect("admin:tenants_tenant_import_fields", tenant_id=tenant.pk)
+
+        with schema_context(tenant.schema_name):
+            fields = list(CustomField.objects.order_by("sort_order", "name"))
+
+        return render(request, "admin/tenant_import_fields.html", {
+            **self.admin_site.each_context(request),
+            "tenant": tenant,
+            "fields": fields,
+            "field_types": CustomField.FIELD_TYPES,
+            "title": f"Import fields — {tenant.company_name}",
+        })
 
     def save_model(self, request, obj, form, change):
         """When saving from admin, ensure the Subscription row matches the tenant's plan."""
@@ -252,6 +343,16 @@ class TenantAdmin(ModelAdmin):
             {
                 "fields": ("timezone", "language_preference"),
                 "classes": ("collapse",),
+            },
+        ),
+        (
+            "Lead import fields",
+            {
+                "fields": ("import_fields_link",),
+                "description": (
+                    "The spreadsheet columns this client can map onto, on top of the "
+                    "standard ones. Only this panel can change them."
+                ),
             },
         ),
         (

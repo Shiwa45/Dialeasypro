@@ -773,6 +773,20 @@ class LeadImportView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # A batch name is required. "Batch 14" tells nobody where a
+        # consignment came from, and the name is how anyone finds it again
+        # when they come to assign or report on it weeks later.
+        batch_name = str(request.data.get("batch_name") or "").strip()[:150]
+        if not batch_name:
+            return Response(
+                {
+                    "error": "batch_name_required",
+                    "message": "Give this batch a name before importing.",
+                    "detail": {"batch_name": ["Required."]},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Create import job
         job = LeadImportJob.objects.create(
             imported_by=request.user,
@@ -786,7 +800,7 @@ class LeadImportView(APIView):
             # the distribution a no-op.
             default_assigned_to=None if auto_assign else (assigned_to or request.user),
             default_source=request.data.get("source", "manual"),
-            batch_name=str(request.data.get("batch_name") or "").strip()[:150],
+            batch_name=batch_name,
             auto_assign=auto_assign,
             assign_method=assign_method,
             assign_to_agents=assign_to_agents,
@@ -946,46 +960,22 @@ class LeadImportJobDetailView(generics.RetrieveAPIView):
 # Custom Fields
 # ============================================================
 
-class CustomFieldListView(generics.ListCreateAPIView):
+class CustomFieldListView(generics.ListAPIView):
     """
-    GET  /api/v1/leads/custom-fields/  → List tenant's custom fields
-    POST /api/v1/leads/custom-fields/  → Create custom field (admin only)
+    GET /api/v1/leads/custom-fields/  → The tenant's custom fields.
+
+    Read-only by design. These fields are the spreadsheet columns a client may
+    map an import onto, and they are configured for each client from the
+    platform's own panel — Tenants → the tenant → Import fields — not by the
+    client themselves. POST used to be open to any tenant admin.
     """
 
     serializer_class = CustomFieldSerializer
     pagination_class = None  # Small finite list; return plain array
-
-    def get_permissions(self):
-        # Reading custom fields is always allowed (agents must render existing
-        # data); CREATING them is plan-gated on CUSTOM_FIELDS.
-        if self.request.method == "POST":
-            return [IsTenantAdmin(), feature_required(FeatureKey.CUSTOM_FIELDS)()]
-        return [IsAuthenticatedAgent()]
+    permission_classes = [IsAuthenticatedAgent]
 
     def get_queryset(self):
         return CustomField.objects.filter(is_active=True).order_by("sort_order")
-
-    def perform_create(self, serializer):
-        # Check plan limit
-        from apps.plans.models import Subscription
-        from apps.core.constants import SubscriptionStatus
-
-        try:
-            sub = Subscription.objects.filter(
-                status__in=SubscriptionStatus.ACTIVE_STATUSES
-            ).select_related("plan").first()
-            if sub:
-                current = CustomField.objects.filter(is_active=True).count()
-                if current >= sub.plan.custom_fields_limit:
-                    raise PlanLimitExceededException(
-                        limit_type="custom_fields",
-                        current=current,
-                        max_allowed=sub.plan.custom_fields_limit,
-                    )
-        except PlanLimitExceededException:
-            raise
-
-        serializer.save()
 
 
 # ============================================================

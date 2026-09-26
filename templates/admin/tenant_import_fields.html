@@ -1,0 +1,80 @@
+{% extends "admin/base_site.html" %}
+{% block title %}Import fields — {{ tenant.company_name }}{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom:4px;">Import fields — {{ tenant.company_name }}</h1>
+<p style="color:#64748b;max-width:720px;line-height:1.6;">
+  These are the columns this client can map their spreadsheet onto, on top of the
+  standard ones (name, phone, email, city, state, requirement, budget, notes).
+  They are also the extra fields shown on a lead. Only this panel can change
+  them — the client cannot add their own.
+</p>
+
+{% if messages %}
+  <ul class="messagelist">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>
+{% endif %}
+
+<div class="module" style="padding:0;margin-bottom:24px;">
+  <table style="width:100%;">
+    <thead>
+      <tr><th>Field</th><th>Key</th><th>Type</th><th>Required</th><th>Order</th><th>Active</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for f in fields %}
+        <tr>
+          <td>{{ f.name }}</td>
+          <td><code>custom_{{ f.field_key }}</code></td>
+          <td>{{ f.get_field_type_display }}</td>
+          <td>{{ f.is_required|yesno:"Yes,No" }}</td>
+          <td>{{ f.sort_order }}</td>
+          <td>{{ f.is_active|yesno:"Active,Off" }}</td>
+          <td>
+            <form method="post" style="display:inline;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="toggle">
+              <input type="hidden" name="field_id" value="{{ f.pk }}">
+              <button type="submit" class="button">{% if f.is_active %}Switch off{% else %}Switch on{% endif %}</button>
+            </form>
+            <form method="post" style="display:inline;"
+                  onsubmit="return confirm('Delete {{ f.name|escapejs }}? Values already captured on leads are deleted with it.');">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="field_id" value="{{ f.pk }}">
+              <button type="submit" class="button" style="background:#c81e1e;">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" style="padding:16px;color:#64748b;">
+          No custom fields yet — this client maps the standard columns only.
+        </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="module" style="padding:16px;">
+  <h2 style="margin-top:0;">Add a field</h2>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="add">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+      <label>Label<br><input type="text" name="name" required maxlength="100" placeholder="Property Type"></label>
+      <label>Type<br>
+        <select name="field_type">
+          {% for value, label in field_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Order<br><input type="number" name="sort_order" value="0" style="width:80px;"></label>
+      <label style="display:flex;gap:6px;align-items:center;padding-bottom:6px;">
+        <input type="checkbox" name="is_required"> Required
+      </label>
+      <button type="submit" class="default">Add field</button>
+    </div>
+  </form>
+</div>
+
+<p style="margin-top:20px;">
+  <a href="{% url 'admin:tenants_tenant_change' tenant.pk %}">← Back to {{ tenant.company_name }}</a>
+</p>
+{% endblock %}

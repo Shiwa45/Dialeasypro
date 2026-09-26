@@ -204,6 +204,9 @@ def _post_import(agent, **extra):
         "file": SimpleUploadedFile("leads.csv", CSV.encode(), content_type="text/csv"),
         "column_mapping": '{"name": "name", "phone": "phone", "city": "city"}',
         "source": LeadSource.CSV_IMPORT,
+        # Required since the import screen made it required: a consignment
+        # nobody named is one nobody can find again.
+        "batch_name": "Test batch",
         **extra,
     }
     request = APIRequestFactory().post("/api/v1/leads/import/", payload, format="multipart")
@@ -283,3 +286,14 @@ def test_stale_agent_ids_are_dropped(admin_agent, agents):
     assert res.status_code == 202, res.data
     job = LeadImportJob.objects.latest("created_at")
     assert job.assign_to_agents == [a1.pk]
+
+
+def test_an_import_without_a_batch_name_is_refused(admin_agent, agents):
+    """
+    The name is how anyone finds the consignment again when they come to
+    assign or report on it. "Batch 14" says nothing about where it came from.
+    """
+    res = _post_import(admin_agent, batch_name="   ")
+
+    assert res.status_code == 400, res.data
+    assert res.data["error"] == "batch_name_required"

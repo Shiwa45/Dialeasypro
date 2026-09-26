@@ -631,14 +631,14 @@ def _campaign_halted(campaign_or_id, tag: str) -> bool:
 
 
 def _current_plan():
-    from apps.core.constants import SubscriptionStatus
-    from apps.plans.models import Subscription
+    """
+    This tenant's plan. Subscription lives in the shared schema, so it must be
+    filtered by tenant — the unfiltered query returned whichever tenant's
+    subscription came first and enforced that plan's caps on everyone.
+    """
+    from apps.core.quotas import current_plan
 
-    return (
-        Subscription.objects.filter(status__in=SubscriptionStatus.ACTIVE_STATUSES)
-        .select_related("plan")
-        .first()
-    )
+    return current_plan()
 
 
 def _enforce_daily_limit(channel: str, count: int):
@@ -657,12 +657,11 @@ def _enforce_daily_limit(channel: str, count: int):
     from apps.communications.models import EmailLog, SMSLog, WhatsAppMessage
     from apps.core.exceptions import PlanLimitExceededException
 
-    sub = _current_plan()
-    if not sub:
+    plan = _current_plan()
+    if not plan:
         return
 
     today = timezone.localdate()
-    plan = sub.plan
 
     if channel == "whatsapp":
         limit = plan.max_whatsapp_bulk_per_day

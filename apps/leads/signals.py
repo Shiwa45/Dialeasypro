@@ -106,20 +106,18 @@ def _check_lead_plan_limit(lead: Lead):
     Sends alert to admin via WebSocket if limit is exceeded.
     """
     try:
-        from apps.plans.models import Subscription
-        from apps.core.constants import SubscriptionStatus
         from apps.core.consumers import broadcast_to_monitors
+        from apps.core.quotas import current_plan
         from django.db import connection
 
-        sub = Subscription.objects.filter(
-            status__in=SubscriptionStatus.ACTIVE_STATUSES
-        ).select_related("plan").first()
-
-        if not sub:
+        # This tenant's plan — Subscription is in the shared schema, and the
+        # unfiltered query compared against whichever tenant came first.
+        plan = current_plan()
+        if not plan:
             return
 
         current_count = Lead.objects.filter(is_deleted=False).count()
-        limit = sub.plan.max_leads
+        limit = plan.max_leads
 
         if current_count >= limit:
             logger.warning(

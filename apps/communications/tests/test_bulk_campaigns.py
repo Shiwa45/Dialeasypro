@@ -250,10 +250,8 @@ def test_daily_limit_counts_what_was_already_sent(leads):
         max_email_bulk_per_day = 4
         max_whatsapp_bulk_per_day = 4
 
-    class _Sub:
-        plan = _Plan()
 
-    with patch("apps.communications.tasks._current_plan", return_value=_Sub()):
+    with patch("apps.communications.tasks._current_plan", return_value=_Plan()):
         _enforce_daily_limit("sms", 1)  # 3 + 1 = 4, at the cap
         with pytest.raises(PlanLimitExceededException):
             _enforce_daily_limit("sms", 2)  # 3 + 2 = 5, over
@@ -271,10 +269,8 @@ def test_a_zero_limit_means_unlimited():
     class _Plan:
         max_sms_per_day = 0
 
-    class _Sub:
-        plan = _Plan()
 
-    with patch("apps.communications.tasks._current_plan", return_value=_Sub()):
+    with patch("apps.communications.tasks._current_plan", return_value=_Plan()):
         _enforce_daily_limit("sms", 10_000)  # must not raise
 
 
@@ -410,11 +406,9 @@ def test_a_cap_breach_records_a_readable_reason(leads):
     class _Plan:
         max_sms_per_day = 1
 
-    class _Sub:
-        plan = _Plan()
 
     with patch("apps.communications.tasks._resolve_campaign_audience", return_value=leads):
-        with patch("apps.communications.tasks._current_plan", return_value=_Sub()):
+        with patch("apps.communications.tasks._current_plan", return_value=_Plan()):
             with pytest.raises(Exception):
                 send_bulk_sms_campaign(TEST_SCHEMA, str(campaign.pk))
 

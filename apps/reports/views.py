@@ -25,6 +25,7 @@ from apps.authentication.permissions import (
     IsAuthenticatedAgent,
     IsManagerOrAdmin,
 )
+from apps.calls.scoping import sees_everything
 from apps.core.constants import AgentRole, FeatureKey, LeadStatus, LeadSource
 
 logger = logging.getLogger(__name__)
@@ -205,8 +206,10 @@ class CallAnalyticsReportView(APIView):
         from apps.calls.models import CallLog
 
         agent = request.user
-        # Plain agents see only their own call analytics; managers/admins see all.
-        is_scoped = agent.role == AgentRole.AGENT
+        # Tenant-wide for admins and managers; everyone else sees their own.
+        # This used to restrict only the "agent" role, so HR, Accounts and
+        # Read-only users got the whole tenant's call analytics.
+        is_scoped = not sees_everything(agent)
         scope_key = f"agent{agent.pk}" if is_scoped else "all"
 
         params = request.query_params
@@ -292,8 +295,8 @@ class ConversionFunnelView(APIView):
         from apps.leads.models import Lead
 
         agent = request.user
-        # Plain agents see only their own pipeline; managers/admins see all.
-        is_scoped = agent.role == AgentRole.AGENT
+        # Tenant-wide for admins and managers; everyone else sees their own.
+        is_scoped = not sees_everything(agent)
         scope_key = f"agent{agent.pk}" if is_scoped else "all"
 
         params = request.query_params
@@ -354,7 +357,7 @@ class DailyActivityView(APIView):
         call_qs = CallLog.objects.filter(started_at__date=today)
         fu_qs = FollowUp.objects.filter(scheduled_at__date=today)
 
-        if agent.role == AgentRole.AGENT:
+        if not sees_everything(agent):
             lead_qs = lead_qs.filter(assigned_to=agent)
             call_qs = call_qs.filter(agent=agent)
             fu_qs = fu_qs.filter(assigned_to=agent)
@@ -373,7 +376,7 @@ class DailyActivityView(APIView):
                     next_followup_at__lt=timezone.now(),
                     next_followup_at__isnull=False,
                     is_deleted=False,
-                    **({"assigned_to": agent} if agent.role == AgentRole.AGENT else {}),
+                    **({} if sees_everything(agent) else {"assigned_to": agent}),
                 ).count(),
             },
             "calls": {

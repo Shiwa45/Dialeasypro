@@ -29,6 +29,7 @@ from apps.authentication.permissions import (
     IsTenantAdmin,
 )
 from apps.calls.models import CallDisposition, CallLog, CallRecording
+from apps.calls.scoping import calls_visible_to
 from apps.calls.serializers import (
     CallDispositionSerializer,
     CallLogCreateSerializer,
@@ -60,9 +61,8 @@ class CallLogListCreateView(generics.ListCreateAPIView):
             "agent", "lead", "disposition", "recording"
         ).order_by("-started_at")
 
-        # Role-based scoping
-        if agent.role == AgentRole.AGENT:
-            qs = qs.filter(agent=agent)
+        # Secure by default, like leads — see calls/scoping.py.
+        qs = calls_visible_to(agent, qs)
 
         params = self.request.query_params
         if lead_id := params.get("lead"):
@@ -147,9 +147,7 @@ class CallLogDetailView(generics.RetrieveAPIView):
     def get_queryset(self):
         agent = self.request.user
         qs = CallLog.objects.select_related("agent", "lead", "disposition", "recording")
-        if agent.role == AgentRole.AGENT:
-            qs = qs.filter(agent=agent)
-        return qs
+        return calls_visible_to(agent, qs)
 
 
 def _queue_ai_pipeline(call) -> None:
@@ -197,10 +195,7 @@ class CallRecordingUploadView(APIView):
 
         # Only the owning agent (or a manager/admin) may attach a recording.
         try:
-            qs = CallLog.objects.all()
-            if agent.role == AgentRole.AGENT:
-                qs = qs.filter(agent=agent)
-            call = qs.get(pk=pk)
+            call = calls_visible_to(agent).get(pk=pk)
         except CallLog.DoesNotExist:
             return Response(
                 {"error": "not_found", "message": "Call not found."},
@@ -363,13 +358,30 @@ class ClickToCallView(APIView):
         serializer.is_valid(raise_exception=True)
 
         lead_id = serializer.validated_data["lead_id"]
-        try:
-            lead = Lead.objects.get(pk=lead_id, is_deleted=False)
-        except Lead.DoesNotExist:
+        agent = request.user
+        # Only a lead this agent may see. The lookup was unscoped, so any agent
+        # could dial — and log a call against — any lead in the tenant.
+        from apps.leads.views import leads_visible_to
+
+        lead = leads_visible_to(agent).filter(pk=lead_id).first()
+        if lead is None:
             return Response({"error": "lead_not_found"}, status=404)
 
-        phone = serializer.validated_data.get("phone_number") or lead.phone
-        agent = request.user
+        # And only that lead's own numbers. `phone_number` used to override the
+        # lead's number freely, so any number could be dialled on the tenant's
+        # telephony account.
+        requested = serializer.validated_data.get("phone_number")
+        if requested:
+            from apps.core.utils import normalize_indian_phone
+
+            allowed = {n for n in (lead.phone, lead.alternate_phone) if n}
+            if normalize_indian_phone(requested) not in allowed:
+                return Response(
+                    {"error": "number_not_on_lead",
+                     "message": "You can only call a number saved on this lead."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        phone = requested and normalize_indian_phone(requested) or lead.phone
 
         # Create CallLog in initiated state
         call = CallLog.objects.create(
@@ -608,9 +620,7 @@ class CallStatsView(APIView):
         date_from = params.get("date_from")
         date_to = params.get("date_to")
 
-        qs = CallLog.objects.all()
-        if agent.role == AgentRole.AGENT:
-            qs = qs.filter(agent=agent)
+        qs = calls_visible_to(agent)
         if date_from:
             qs = qs.filter(started_at__date__gte=date_from)
         if date_to:

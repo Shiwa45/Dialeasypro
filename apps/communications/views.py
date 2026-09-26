@@ -155,7 +155,14 @@ class WhatsAppMessageListView(generics.ListAPIView):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        qs = WhatsAppMessage.objects.select_related("sent_by", "template")
+        # Only threads on leads this person may see. `?lead=` was not checked
+        # at all, and with no `lead` the endpoint returned every WhatsApp
+        # message in the tenant.
+        from apps.leads.views import leads_visible_to
+
+        qs = WhatsAppMessage.objects.select_related("sent_by", "template").filter(
+            lead__in=leads_visible_to(self.request.user)
+        )
         if lead_id := self.request.query_params.get("lead"):
             qs = qs.filter(lead_id=lead_id)
         return qs.order_by("created_at")
@@ -180,9 +187,11 @@ class SendWhatsAppView(APIView):
         from apps.leads.models import Lead
 
         lead_id = serializer.validated_data["lead_id"]
-        try:
-            lead = Lead.objects.get(pk=lead_id, is_deleted=False)
-        except Lead.DoesNotExist:
+        # Only a lead this agent may see; the lookup was unscoped.
+        from apps.leads.views import leads_visible_to
+
+        lead = leads_visible_to(request.user).filter(pk=lead_id).first()
+        if lead is None:
             return Response({"error": "lead_not_found"}, status=404)
 
         send_single_whatsapp.apply_async(
@@ -213,9 +222,11 @@ class SendSMSView(APIView):
         from apps.leads.models import Lead
 
         lead_id = serializer.validated_data["lead_id"]
-        try:
-            lead = Lead.objects.get(pk=lead_id, is_deleted=False)
-        except Lead.DoesNotExist:
+        # Only a lead this agent may see; the lookup was unscoped.
+        from apps.leads.views import leads_visible_to
+
+        lead = leads_visible_to(request.user).filter(pk=lead_id).first()
+        if lead is None:
             return Response({"error": "lead_not_found"}, status=404)
 
         if lead.is_dnd:

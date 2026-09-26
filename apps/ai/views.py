@@ -28,11 +28,15 @@ from apps.core.permissions import (
 
 
 def _visible_calls(agent):
-    """A plain agent only ever sees their own calls."""
-    qs = CallLog.objects.all()
-    if agent.role == AgentRole.AGENT:
-        qs = qs.filter(agent=agent)
-    return qs
+    """
+    Calls this person may see — the same rule as the call log.
+
+    Only the "agent" role used to be restricted, so HR, Accounts and Read-only
+    users could open any call's transcript and AI analysis.
+    """
+    from apps.calls.scoping import calls_visible_to
+
+    return calls_visible_to(agent, CallLog.objects.all())
 
 
 class _CallScopedView(APIView):

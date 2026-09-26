@@ -32,6 +32,22 @@ logger = logging.getLogger(__name__)
 CACHE_TTL = 300  # 5 minutes
 
 
+def _report_key(kind: str, *parts) -> str:
+    """
+    A report cache key that belongs to ONE tenant.
+
+    The keys used to be `report:{kind}:{from}:{to}...` with nothing naming the
+    tenant, on a cache whose prefix is the same for everyone. Whichever tenant
+    computed a report first had it served to every other tenant asking for the
+    same dates within five minutes — agent names and performance, lead
+    sources, call analytics and funnel. Every other key in the codebase
+    already carries the schema; these four did not.
+    """
+    from django.db import connection
+
+    return ":".join(["report", connection.schema_name, kind, *[str(p) for p in parts]])
+
+
 def _cached(key: str, compute_fn, ttl: int = CACHE_TTL):
     """Simple cache helper — compute_fn() result cached at key."""
     result = cache.get(key)
@@ -58,11 +74,11 @@ class AgentPerformanceReportView(APIView):
         from apps.authentication.models import Agent
 
         params = request.query_params
-        date_from = params.get("date_from", (timezone.now() - timedelta(days=30)).date().isoformat())
+        date_from = params.get("date_from", (timezone.localdate() - timedelta(days=30)).isoformat())
         date_to = params.get("date_to", timezone.localdate().isoformat())
         agent_id = params.get("agent_id")
 
-        cache_key = f"report:agent_perf:{date_from}:{date_to}:{agent_id or 'all'}"
+        cache_key = _report_key("agent_perf", date_from, date_to, agent_id or "all")
 
         def compute():
             agents_qs = Agent.objects.filter(is_active=True)
@@ -132,10 +148,10 @@ class LeadSourceReportView(APIView):
         from apps.leads.models import Lead
 
         params = request.query_params
-        date_from = params.get("date_from", (timezone.now() - timedelta(days=30)).date().isoformat())
+        date_from = params.get("date_from", (timezone.localdate() - timedelta(days=30)).isoformat())
         date_to = params.get("date_to", timezone.localdate().isoformat())
 
-        cache_key = f"report:lead_sources:{date_from}:{date_to}"
+        cache_key = _report_key("lead_sources", date_from, date_to)
 
         def compute():
             qs = Lead.objects.filter(
@@ -194,10 +210,10 @@ class CallAnalyticsReportView(APIView):
         scope_key = f"agent{agent.pk}" if is_scoped else "all"
 
         params = request.query_params
-        date_from = params.get("date_from", (timezone.now() - timedelta(days=30)).date().isoformat())
+        date_from = params.get("date_from", (timezone.localdate() - timedelta(days=30)).isoformat())
         date_to = params.get("date_to", timezone.localdate().isoformat())
 
-        cache_key = f"report:call_analytics:{scope_key}:{date_from}:{date_to}"
+        cache_key = _report_key("call_analytics", scope_key, date_from, date_to)
 
         def compute():
             qs = CallLog.objects.filter(
@@ -281,10 +297,10 @@ class ConversionFunnelView(APIView):
         scope_key = f"agent{agent.pk}" if is_scoped else "all"
 
         params = request.query_params
-        date_from = params.get("date_from", (timezone.now() - timedelta(days=90)).date().isoformat())
+        date_from = params.get("date_from", (timezone.localdate() - timedelta(days=90)).isoformat())
         date_to = params.get("date_to", timezone.localdate().isoformat())
 
-        cache_key = f"report:funnel:{scope_key}:{date_from}:{date_to}"
+        cache_key = _report_key("funnel", scope_key, date_from, date_to)
 
         def compute():
             qs = Lead.objects.filter(

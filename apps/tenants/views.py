@@ -17,6 +17,7 @@ import logging
 
 from rest_framework import status
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -54,6 +55,10 @@ class TenantRegistrationAPIView(APIView):
     """
 
     permission_classes = [AllowAny]
+    # throttle_scope only takes effect with ScopedRateThrottle, which was not
+    # enabled, and no "registration" rate existed — the declared limit was
+    # never applied.
+    throttle_classes = [ScopedRateThrottle]
     throttle_scope = "registration"
 
     def post(self, request):
@@ -128,7 +133,10 @@ class TenantCheckSubdomainAPIView(APIView):
     """
 
     permission_classes = [AllowAny]
-    throttle_scope = "registration"
+    # Separate from registration: checking availability as someone types used
+    # to draw on the same budget and could exhaust it before they submitted.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "subdomain_check"
 
     def get(self, request):
         from apps.core.utils import slugify_company_name

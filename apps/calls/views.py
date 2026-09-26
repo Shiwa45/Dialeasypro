@@ -515,6 +515,12 @@ class CallProviderWebhookView(APIView):
     """
 
     permission_classes = [AllowAny]  # Validated via provider-specific signature
+    # Not rate-limited. A provider posts every delivery and read receipt from
+    # a handful of addresses; under the default anonymous throttle
+    # (20/hour per IP) the 21st callback in an hour got a 429, and a campaign
+    # of any size lost almost all of its statuses. Keeping strangers out is
+    # the job of authentication, not of a throttle.
+    throttle_classes = []
 
     def post(self, request, provider):
         payload = request.data

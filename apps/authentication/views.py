@@ -36,6 +36,7 @@ from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.throttling import ScopedRateThrottle
 
 from apps.authentication.models import Agent, AgentLoginSession, Team
 from apps.authentication.permissions import (
@@ -87,6 +88,10 @@ class TenantInfoAPIView(APIView):
     """
     authentication_classes = []
     permission_classes = [AllowAny]
+    # Its own scope rather than the shared 20/hour anonymous budget, which an
+    # office full of phones behind one address would exhaust.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "tenant_info"
 
     def get(self, request):
         from django.db import connection
@@ -112,7 +117,6 @@ class TenantInfoAPIView(APIView):
             )
 
 
-from rest_framework.throttling import ScopedRateThrottle
 
 
 class CompanyProfileAPIView(APIView):
@@ -261,6 +265,11 @@ class AgentRefreshTokenAPIView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    # Was under the default anonymous 20/hour per IP: twenty agents behind
+    # one office address used it up within the hour, refreshes started
+    # answering 429, and the apps signed everyone out.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "token_refresh"
 
     def post(self, request):
         from rest_framework_simplejwt.tokens import RefreshToken

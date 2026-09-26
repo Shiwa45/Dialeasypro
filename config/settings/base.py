@@ -336,6 +336,17 @@ REST_FRAMEWORK = {
         "anon": "20/hour",
         "user": "1000/hour",
         "login": "10/minute",
+        # Refreshing needs a token we signed, so there is nothing to guess;
+        # the limit is about runaway clients. Per IP, and an office behind one
+        # public address can hold a hundred agents.
+        "token_refresh": "120/minute",
+        # The mobile app's workspace check, before sign-in.
+        "tenant_info": "60/minute",
+        # Creating a tenant builds a whole PostgreSQL schema.
+        "registration": "10/hour",
+        # Availability checks as someone types a subdomain: kept apart from
+        # registration so typing cannot use up the signup allowance.
+        "subdomain_check": "60/minute",
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "rest_framework.openapi.AutoSchema",

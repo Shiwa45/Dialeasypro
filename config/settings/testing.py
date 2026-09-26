@@ -41,7 +41,12 @@ SESSION_ENGINE = "django.contrib.sessions.backends.db"
 REST_FRAMEWORK = {
     **REST_FRAMEWORK,  # noqa: F405
     "DEFAULT_THROTTLE_CLASSES": [],
-    "DEFAULT_THROTTLE_RATES": {},
+    # Every scope a view names still needs a rate, or ScopedRateThrottle
+    # raises ImproperlyConfigured on the request. Set them out of reach.
+    "DEFAULT_THROTTLE_RATES": {
+        scope: "100000/minute"
+        for scope in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]  # noqa: F405
+    },
 }
 
 # ---- Testing: No password validation ----------------------

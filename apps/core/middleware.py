@@ -22,8 +22,6 @@ Custom middleware for TeleCRM:
 4. MaintenanceModeMiddleware
    - Returns 503 if MAINTENANCE_MODE=True in settings
 """
-import base64
-import json
 import logging
 import time
 
@@ -58,20 +56,54 @@ class TenantSchemaFromTokenMiddleware(MiddlewareMixin):
     that arrive before a token is available (e.g. the initial token-refresh
     call after a cold page load).
 
-    Security: Switching schema based on an unverified claim is safe because:
-      - AgentJWTAuthentication verifies signature + expiry and confirms the
-        agent exists in that schema — a forged token is rejected at that layer.
-      - The public schema is never targeted via this path.
+    Security. This used to switch on an UNVERIFIED token claim or on the
+    header, for every /api/ request, arguing that JWT authentication would
+    reject a forgery later. That holds only for authenticated endpoints: an
+    anonymous request (the lead webhooks, tenant-info) has no later check, so
+    anyone could aim one at any tenant by schema name without knowing its
+    domain. The rules are now:
+
+      1. When the HOST already names a tenant, the host wins. Only a token
+         with a VALID SIGNATURE can name a different one (the user's own
+         tenant — the auth backend resolves the agent there). The header can
+         never override a tenant host.
+      2. When the host names no tenant (the apex domain, or an IP address in
+         development), a signed token may name one; the header may only do so
+         for the sign-in endpoints that run before a token exists.
+      3. The public schema is never targeted.
+
+    Signatures are checked with expiry ignored: an expired token still proves
+    which tenant issued it, and routing it there lets the auth backend answer
+    401 — which is what makes the clients refresh — instead of a 404.
     """
+
+    # Endpoints that legitimately run before the client holds a token, on a
+    # host that may not name the tenant: signing in, refreshing, and the
+    # mobile app's workspace check.
+    PRE_AUTH_PATHS = (
+        '/api/v1/auth/login/',
+        '/api/v1/auth/refresh/',
+        '/api/v1/auth/tenant-info/',
+    )
 
     def process_request(self, request):
         if not request.path.startswith('/api/'):
             return None
 
-        schema_name = (
-            self._schema_from_bearer(request)
-            or self._schema_from_header(request)
-        )
+        host_schema = connection.schema_name
+        host_is_tenant = bool(host_schema) and host_schema != 'public'
+        token_schema = self._schema_from_bearer(request)
+
+        if host_is_tenant:
+            # Only a genuinely signed token may move the request elsewhere.
+            schema_name = token_schema if token_schema and token_schema != host_schema else None
+            if schema_name is None:
+                self._ensure_tenant_urlconf(request)
+                return None
+        else:
+            schema_name = token_schema
+            if not schema_name and request.path in self.PRE_AUTH_PATHS:
+                schema_name = self._schema_from_header(request)
 
         if not schema_name or schema_name == 'public':
             return None
@@ -146,22 +178,29 @@ class TenantSchemaFromTokenMiddleware(MiddlewareMixin):
     @staticmethod
     def _decode_jwt_schema(token_string: str) -> str | None:
         """
-        Extracts the tenant_schema claim from a JWT without verifying the
-        signature or checking expiry.  Full verification is AgentJWTAuthentication's
-        responsibility.
+        The tenant_schema claim from a token WE signed — None for anything else.
+
+        The signature is verified; expiry is not. A forged token used to be
+        enough to pick the schema, because this read the claim without
+        checking who wrote it. An expired token is still accepted here: it
+        proves which tenant issued it, and routing it there lets the auth
+        backend answer 401 (which triggers the client's refresh) rather than
+        a confusing 404 from the public URL conf.
         """
         try:
-            parts = token_string.split('.')
-            if len(parts) != 3:
-                return None
-            payload_b64 = parts[1]
-            # JWT uses URL-safe base64 without padding; add padding back.
-            payload_b64 += '=' * (-len(payload_b64) % 4)
-            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-            schema = payload.get('tenant_schema', '')
-            return schema if schema and schema != 'public' else None
+            import jwt
+
+            simple_jwt = getattr(settings, 'SIMPLE_JWT', {})
+            payload = jwt.decode(
+                token_string,
+                simple_jwt.get('SIGNING_KEY', settings.SECRET_KEY),
+                algorithms=[simple_jwt.get('ALGORITHM', 'HS256')],
+                options={'verify_exp': False, 'verify_aud': False},
+            )
         except Exception:
             return None
+        schema = payload.get('tenant_schema', '')
+        return schema if schema and schema != 'public' else None
 
     @staticmethod
     def _sync_request_tenant(request, schema_name: str):

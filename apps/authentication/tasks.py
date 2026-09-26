@@ -64,14 +64,25 @@ def send_agent_welcome_email(self, schema_name: str, agent_id: int):
             logger.warning(f"[Task] Agent {agent_id} not found in {schema_name}")
             return
 
-        login_url = f"https://{schema_name}.{settings.BASE_DOMAIN}/crm/login/"
+        # The link used to be /crm/login/ on the API host — the old
+        # server-rendered UI, which 500s. People sign in to the React app with
+        # their workspace ID (the tenant's subdomain).
+        from apps.tenants.models import Domain
+
+        domain = (
+            Domain.objects.filter(tenant__schema_name=schema_name)
+            .order_by("-is_primary").values_list("domain", flat=True).first()
+        )
+        workspace = domain.split(".")[0] if domain else schema_name
+        login_line = f"Sign in at: {settings.FRONTEND_URL}\n" if settings.FRONTEND_URL else ""
 
         send_mail(
             subject="Welcome to TeleCRM — Your account is ready",
             message=(
                 f"Hi {agent.name},\n\n"
                 f"Your TeleCRM agent account has been created.\n\n"
-                f"Login URL: {login_url}\n"
+                f"{login_line}"
+                f"Workspace ID: {workspace}\n"
                 f"Email: {agent.email}\n"
                 f"Password: You'll receive your temporary password separately.\n\n"
                 f"Please change your password on first login.\n\n"

@@ -577,6 +577,11 @@ BASE_DOMAINS = config(
     cast=lambda v: [d.strip() for d in v.split(",") if d.strip()],
 )
 SUPER_ADMIN_DOMAIN = config("SUPER_ADMIN_DOMAIN", default="admin.telecrm.in")
+# Where people use the CRM — the React app, which is hosted separately from
+# this API. Links in emails and the API host's own root point here. Empty
+# means "not configured": the root then answers with a short JSON note and
+# emails leave the link out, rather than pointing at a page that 500s.
+FRONTEND_URL = config("FRONTEND_URL", default="").rstrip("/")
 DEFAULT_TRIAL_DAYS = config("DEFAULT_TRIAL_DAYS", default=14, cast=int)
 MAINTENANCE_MODE = config("MAINTENANCE_MODE", default=False, cast=bool)
 ALLOW_NEW_REGISTRATIONS = config("ALLOW_NEW_REGISTRATIONS", default=True, cast=bool)

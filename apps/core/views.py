@@ -18,6 +18,25 @@ from django.views import View
 logger = logging.getLogger(__name__)
 
 
+class ApiRootView(View):
+    """
+    GET / on a tenant host.
+
+    This used to redirect to /crm/, the old server-rendered UI, whose
+    templates no longer exist — so opening the API host in a browser showed a
+    server error. The CRM is the React app; send people there when we know
+    where it is.
+    """
+
+    def get(self, request):
+        from django.conf import settings
+        from django.shortcuts import redirect
+
+        if settings.FRONTEND_URL:
+            return redirect(settings.FRONTEND_URL)
+        return JsonResponse({"service": "DialEasy Pro API", "health": "/health/"})
+
+
 class HealthCheckView(View):
     """
     Health check endpoint for infrastructure monitoring.

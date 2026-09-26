@@ -5,28 +5,22 @@ URL configuration for TENANT schemas (served on tenant subdomains).
 E.g.: acmerealty.telecrm.in → this URL conf
 
 Routes:
-  /crm/          → Tenant Admin MVT views (Django templates + HTMX)
-  /api/v1/       → DRF REST API (for Flutter mobile app)
+  /api/v1/       → DRF REST API (React web app and Flutter mobile app)
   /health/       → Health check endpoint
   /ws/           → WebSocket connections (Django Channels)
 """
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import include, path, re_path
-from django.views.generic import RedirectView
 from django.views.static import serve as media_serve
 
-from apps.core.views import HealthCheckView
+from apps.core.views import ApiRootView, HealthCheckView
 
 urlpatterns = [
-    # ---- Root redirect to tenant admin login ---------------
-    path("", RedirectView.as_view(url="/crm/", permanent=False), name="root"),
-
-    # ---- Tenant Admin (Django MVT) -------------------------
-    # All CRM web UI lives here
-    path("crm/", include("apps.authentication.urls", namespace="tenant_admin")),
-    path("crm/leads/", include("apps.leads.urls")),
-    path("crm/calls/", include("apps.calls.urls")),
+    # ---- Root: to the React app, or a short note -----------
+    # The old server-rendered UI (/crm/) is no longer mounted: none of its
+    # templates exist, so every page of it was a 500. The CRM is the React app.
+    path("", ApiRootView.as_view(), name="root"),
 
     # ---- REST API (for Flutter mobile app) -----------------
     path("api/v1/auth/", include(("apps.authentication.api_urls", "authentication"), namespace="api_auth")),

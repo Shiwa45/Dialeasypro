@@ -18,7 +18,6 @@ from django.views.generic import RedirectView
 
 from apps.core.views import HealthCheckView
 from apps.plans.webhooks import RazorpayWebhookView
-from apps.superadmin.views import SuperAdminDashboardView
 
 admin.site.site_header = "TeleCRM Super Admin"
 admin.site.site_title = "TeleCRM"
@@ -31,8 +30,8 @@ urlpatterns = [
     # ---- Django Admin (Super Admin Panel with Unfold) ------
     path(settings.ADMIN_URL, admin.site.urls),
 
-    # ---- Super Admin Custom Views --------------------------
-    path("superadmin-dashboard/", SuperAdminDashboardView.as_view(), name="superadmin_dashboard"),
+    # (superadmin-dashboard/ was removed: its template never existed, so it
+    # only ever returned 500. The admin index is the dashboard.)
 
     # ---- Public API (no auth required) ---------------------
     # Includes: /register/, /check-subdomain/, /plans/

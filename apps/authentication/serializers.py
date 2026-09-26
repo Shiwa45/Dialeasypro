@@ -167,6 +167,29 @@ class AgentUpdateSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_role(self, value):
+        """
+        Nobody may grant a role at or above their own.
+
+        The permission on this endpoint checks the actor against the agent's
+        CURRENT role only, and `role` accepted anything — so a manager could
+        PATCH an agent to "admin", and IsTenantAdmin grants on role alone. A
+        manager could mint tenant admins. Only an admin may hand out admin or
+        manager; a manager may assign roles below manager.
+        """
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        if actor is None or value == getattr(self.instance, "role", None):
+            return value
+
+        if actor.role != AgentRole.ADMIN:
+            actor_level = AgentRole.HIERARCHY.get(actor.role, 0)
+            if AgentRole.HIERARCHY.get(value, 0) >= actor_level:
+                raise serializers.ValidationError(
+                    "You can only assign roles below your own."
+                )
+        return value
+
 
 class PasswordChangeSerializer(serializers.Serializer):
     """Change agent's own password."""

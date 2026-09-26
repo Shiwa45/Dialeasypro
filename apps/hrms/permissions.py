@@ -28,6 +28,21 @@ def is_hr_manager(agent) -> bool:
     return has_capability(agent, Cap.HRMS_VIEW_ALL)
 
 
+def is_self_approval(agent, employee) -> bool:
+    """
+    True when `agent` would be approving their own request.
+
+    Nothing checked this, so an HR manager could approve their own leave and
+    reimburse their own expense claims. The tenant admin is exempt: there is
+    nobody above them to approve theirs.
+    """
+    from apps.core.constants import AgentRole
+
+    if employee is None or employee.agent_id != agent.pk:
+        return False
+    return agent.role != AgentRole.ADMIN
+
+
 def can_approve(agent) -> bool:
     """True when this agent may approve/reject leave and expense claims."""
     return has_capability(agent, Cap.HRMS_APPROVE)

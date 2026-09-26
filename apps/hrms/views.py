@@ -35,7 +35,9 @@ from apps.hrms.models import (
     Payslip,
     SalaryStructure,
 )
-from apps.hrms.permissions import employee_for, is_hr_manager, scope_to_visible
+from apps.hrms.permissions import (
+    employee_for, is_hr_manager, is_self_approval, scope_to_visible,
+)
 from apps.hrms.serializers import (
     AttendanceSerializer,
     EmployeeSerializer,
@@ -315,6 +317,13 @@ class LeaveRequestListCreateView(generics.ListCreateAPIView):
         serializer.save(employee=employee)
 
 
+# Rejecting your own request is allowed — it is the same as withdrawing it.
+SELF_APPROVAL_REFUSED = {
+    "error": "self_approval",
+    "message": "You can't approve your own request. Ask another manager or the admin.",
+}
+
+
 class LeaveDecisionView(APIView):
     """POST /api/v1/hrms/leave/{id}/{approve|reject|cancel}/"""
 
@@ -341,6 +350,8 @@ class LeaveDecisionView(APIView):
                 return Response(
                     {"error": "forbidden", "message": "Only managers can decide leave."}, status=403
                 )
+            if action == "approve" and is_self_approval(request.user, leave.employee):
+                return Response(SELF_APPROVAL_REFUSED, status=403)
             fn = leave_svc.approve_leave if action == "approve" else leave_svc.reject_leave
             args = (leave, request.user, note)
 
@@ -383,9 +394,11 @@ class ExpenseDecisionView(APIView):
     required_capability = Cap.HRMS_APPROVE
 
     def post(self, request, pk, action):
-        claim = ExpenseClaim.objects.filter(pk=pk).first()
+        claim = ExpenseClaim.objects.filter(pk=pk).select_related("employee").first()
         if claim is None:
             return Response({"error": "not_found"}, status=404)
+        if action == "approve" and is_self_approval(request.user, claim.employee):
+            return Response(SELF_APPROVAL_REFUSED, status=403)
         if claim.status != ApprovalStatus.PENDING:
             return Response(
                 {"error": "invalid_transition", "message": f"Claim is already {claim.status}."},

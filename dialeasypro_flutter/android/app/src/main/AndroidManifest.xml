@@ -72,7 +72,11 @@
         android:name="${applicationName}"
         android:icon="@drawable/ic_launcher"
         android:requestLegacyExternalStorage="true"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
+        <!-- Release builds speak HTTPS only: a mistyped or downgraded
+             workspace URL must not send login tokens in the clear. Debug
+             builds re-enable plain HTTP for a LAN dev server, in
+             src/debug/AndroidManifest.xml. -->
 
         <activity
             android:name=".MainActivity"

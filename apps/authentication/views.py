@@ -494,6 +494,11 @@ class AgentDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
         return Agent.objects.all()
 
     def perform_destroy(self, instance):
+        # Never yourself, and never the last admin — see check_admin_removal.
+        from apps.authentication.serializers import check_admin_removal
+
+        check_admin_removal(self.request.user, instance, deactivating=True)
+
         # Soft-delete: deactivate instead of hard delete
         instance.is_active = False
         instance.save(update_fields=["is_active"])

@@ -137,6 +137,34 @@ class AgentCreateSerializer(serializers.ModelSerializer):
         return agent
 
 
+def check_admin_removal(actor, target, *, deactivating=False, new_role=None):
+    """
+    Refuse a change that would lock the tenant out of its own admin screens.
+
+    Nothing stopped an admin deactivating their own account, or the tenant's
+    only admin being deactivated or demoted — leaving nobody who could manage
+    agents, billing or integrations, and a support ticket to get back in.
+    Raises ValidationError; returns nothing when the change is fine.
+    """
+    if deactivating and actor is not None and actor.pk == target.pk:
+        raise serializers.ValidationError(
+            {"is_active": "You can't deactivate your own account."}
+        )
+
+    losing_admin = deactivating or (new_role is not None and new_role != AgentRole.ADMIN)
+    if not (losing_admin and target.is_active and target.role == AgentRole.ADMIN):
+        return
+
+    other_admins = Agent.objects.filter(
+        role=AgentRole.ADMIN, is_active=True
+    ).exclude(pk=target.pk)
+    if not other_admins.exists():
+        field = "is_active" if deactivating else "role"
+        raise serializers.ValidationError(
+            {field: "This is the only admin. Make someone else an admin first."}
+        )
+
+
 class AgentUpdateSerializer(serializers.ModelSerializer):
     """Update agent details (no password change here — separate endpoint)."""
 
@@ -189,6 +217,17 @@ class AgentUpdateSerializer(serializers.ModelSerializer):
                     "You can only assign roles below your own."
                 )
         return value
+
+    def validate(self, data):
+        if self.instance is not None:
+            request = self.context.get("request")
+            check_admin_removal(
+                getattr(request, "user", None),
+                self.instance,
+                deactivating=data.get("is_active") is False and self.instance.is_active,
+                new_role=data.get("role"),
+            )
+        return data
 
 
 class PasswordChangeSerializer(serializers.Serializer):

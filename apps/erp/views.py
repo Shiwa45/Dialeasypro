@@ -13,6 +13,9 @@ import logging
 
 from django.db import transaction
 from django.http import StreamingHttpResponse
+from rest_framework.renderers import JSONRenderer
+
+from apps.core.renderers import CSVRenderer
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
@@ -550,6 +553,10 @@ class TallyExportView(APIView):
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.TALLY_INTEGRATION
     required_capability = Cap.ERP_EXPORT
+    # So a client that asks for `Accept: text/csv` on a CSV endpoint is not
+    # refused with 406 during negotiation, before this view runs. JSON stays
+    # first so errors still render as JSON.
+    renderer_classes = [JSONRenderer, CSVRenderer]
 
     COLUMNS = [
         "Invoice Number", "Invoice Date", "Customer Name", "Customer GSTIN",

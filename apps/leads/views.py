@@ -27,12 +27,14 @@ from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.parsers import MultiPartParser
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.constants import AgentRole, LeadStatus
 from apps.core.exceptions import PlanLimitExceededException
 from apps.core.pagination import LargeResultsSetPagination, StandardResultsSetPagination
+from apps.core.renderers import CSVRenderer
 from apps.leads.models import (
     CallQueue,
     CallQueueMembership,
@@ -1087,6 +1089,12 @@ class LeadExportView(APIView):
 
     permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
     required_feature = FeatureKey.LEAD_EXPORT
+    # JSON first, so a plan-limit or permission refusal still renders as JSON
+    # for a client that asked for anything. CSVRenderer is declared so that a
+    # client asking for `Accept: text/csv` — which the CRM's Export button
+    # does — negotiates successfully instead of being refused with 406 before
+    # this method is ever reached.
+    renderer_classes = [JSONRenderer, CSVRenderer]
 
     def get(self, request):
         import csv

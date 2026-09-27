@@ -117,6 +117,19 @@ class TenantAdmin(ModelAdmin):
 
         if request.method == "POST":
             action = request.POST.get("action")
+            if action == "lead_form":
+                # Tenant is in the public schema — no schema_context needed.
+                tenant.lead_form_settings = {
+                    key: {
+                        "show": bool(request.POST.get(f"{key}_show")),
+                        "label": (request.POST.get(f"{key}_label") or "").strip()[:40],
+                    }
+                    for key in Tenant.LEAD_FORM_FIELDS
+                }
+                tenant.save(update_fields=["lead_form_settings"])
+                messages.success(request, f"Lead form updated for {tenant.company_name}.")
+                return redirect("admin:tenants_tenant_import_fields", tenant_id=tenant.pk)
+
             with schema_context(tenant.schema_name):
                 if action == "add":
                     name = (request.POST.get("name") or "").strip()[:100]
@@ -128,10 +141,19 @@ class TenantAdmin(ModelAdmin):
                         while CustomField.objects.filter(field_key=key).exists():
                             key = f"{base[:47]}_{n}"
                             n += 1
+                        field_type = request.POST.get("field_type", "text")
+                        # A dropdown with no options renders as an empty
+                        # picker in the app — there was no way to give it any.
+                        options = [
+                            o.strip()[:100]
+                            for o in (request.POST.get("options") or "").split(",")
+                            if o.strip()
+                        ] if field_type == "dropdown" else []
                         CustomField.objects.create(
                             name=name,
                             field_key=key,
-                            field_type=request.POST.get("field_type", "text"),
+                            field_type=field_type,
+                            options=options,
                             is_required=bool(request.POST.get("is_required")),
                             sort_order=int(request.POST.get("sort_order") or 0),
                         )
@@ -165,6 +187,9 @@ class TenantAdmin(ModelAdmin):
             "tenant": tenant,
             "fields": fields,
             "field_types": CustomField.FIELD_TYPES,
+            "lead_form": [
+                {"key": key, **value} for key, value in tenant.lead_form().items()
+            ],
             "title": f"Import fields — {tenant.company_name}",
         })
 

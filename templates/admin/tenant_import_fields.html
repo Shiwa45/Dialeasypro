@@ -65,12 +65,34 @@
           {% for value, label in field_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
         </select>
       </label>
+      <label>Dropdown options<br><input type="text" name="options" maxlength="1000" placeholder="1BHK, 2BHK, 3BHK" style="width:220px;"></label>
       <label>Order<br><input type="number" name="sort_order" value="0" style="width:80px;"></label>
       <label style="display:flex;gap:6px;align-items:center;padding-bottom:6px;">
         <input type="checkbox" name="is_required"> Required
       </label>
       <button type="submit" class="default">Add field</button>
     </div>
+  </form>
+</div>
+
+<div class="module" style="padding:16px;margin-top:24px;">
+  <h2 style="margin-top:0;">Lead form — standard fields</h2>
+  <p style="color:#64748b;margin-top:0;">
+    Whether this client's Add Lead form (mobile app) shows these fields, and what they are called.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="lead_form">
+    {% for f in lead_form %}
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;">
+        <label style="display:flex;gap:6px;align-items:center;width:140px;">
+          <input type="checkbox" name="{{ f.key }}_show" {% if f.show %}checked{% endif %}>
+          Show {{ f.key|cut:"_" }}
+        </label>
+        <label>Label <input type="text" name="{{ f.key }}_label" value="{{ f.label }}" maxlength="40"></label>
+      </div>
+    {% endfor %}
+    <button type="submit" class="default">Save lead form</button>
   </form>
 </div>
 

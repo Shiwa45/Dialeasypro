@@ -97,6 +97,12 @@ class Tenant(TenantMixin, TimeStampedModel):
         default=SubscriptionStatus.TRIAL,
         db_index=True,
     )
+    # Which standard money fields this client's lead form shows, and what they
+    # are called — "Budget" means nothing to a distributor, "Order Value" does.
+    # Set from the platform panel (Tenants → Import fields). Missing keys fall
+    # back to LEAD_FORM_DEFAULTS, so an empty dict is the old form.
+    lead_form_settings = models.JSONField(default=dict, blank=True)
+
     max_agents_override = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -262,6 +268,25 @@ class Tenant(TenantMixin, TimeStampedModel):
             base = self._slugify_schema(self.company_name)
             self.schema_name = self._unique_schema_name(base)
         super().save(*args, **kwargs)
+
+    LEAD_FORM_FIELDS = ("budget", "deal_value")
+    LEAD_FORM_DEFAULTS = {
+        "budget": {"show": True, "label": "Budget (₹)"},
+        "deal_value": {"show": True, "label": "Deal Value (₹)"},
+    }
+
+    def lead_form(self) -> dict:
+        """The lead form's standard money fields: {key: {"show", "label"}}."""
+        saved = self.lead_form_settings or {}
+        out = {}
+        for key, default in self.LEAD_FORM_DEFAULTS.items():
+            entry = saved.get(key) or {}
+            label = str(entry.get("label") or "").strip()[:40]
+            out[key] = {
+                "show": bool(entry.get("show", default["show"])),
+                "label": label or default["label"],
+            }
+        return out
 
     def suspend(self, reason: str = "", kind: str = SUSPENDED_ADMIN):
         """

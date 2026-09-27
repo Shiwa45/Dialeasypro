@@ -1004,6 +1004,31 @@ class CustomFieldListView(generics.ListAPIView):
         return CustomField.objects.filter(is_active=True).order_by("sort_order")
 
 
+class LeadFormConfigView(APIView):
+    """
+    GET /api/v1/leads/form-config/
+
+    What this client's Add Lead form shows: the standard money fields (shown
+    or not, and their labels) and the custom fields set for them in the
+    platform panel. One call, so the mobile form renders in one go.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def get(self, request):
+        from django.db import connection
+
+        from apps.tenants.models import Tenant
+
+        tenant = Tenant.objects.filter(schema_name=connection.schema_name).first()
+        standard = tenant.lead_form() if tenant else Tenant.LEAD_FORM_DEFAULTS
+        fields = CustomField.objects.filter(is_active=True).order_by("sort_order", "name")
+        return Response({
+            "standard": standard,
+            "custom_fields": CustomFieldSerializer(fields, many=True).data,
+        })
+
+
 # ============================================================
 # Dashboard Stats & Pipeline
 # ============================================================

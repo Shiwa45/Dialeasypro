@@ -81,8 +81,14 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
         path = "/api/v1/integrations/meta/whatsapp/"
         callback_url = request.build_absolute_uri(path) if request is not None else path
         creds = obj.credentials or {}
+        # Where a BSP (Interakt, WATI, Gupshup, …) posts delivery statuses and
+        # replies. It carries the tenant's secret token; nothing else proves
+        # a post came from the provider.
+        status_path = f"/api/v1/comms/webhook/whatsapp/{obj.provider}/?token={obj.webhook_token}"
+        status_url = request.build_absolute_uri(status_path) if request is not None else status_path
         return {
             "callback_url": callback_url,
+            "status_url": status_url,
             "https": callback_url.startswith("https://"),
             "verify_token_set": bool(creds.get("verify_token")),
             "app_secret_set": bool(creds.get("app_secret")),

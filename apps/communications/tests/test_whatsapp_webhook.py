@@ -26,10 +26,18 @@ def quiet_notifications():
         yield
 
 
-def _post(provider, payload):
-    request = APIRequestFactory().post(f"/api/v1/comms/webhook/whatsapp/{provider}/", payload, format="json")
+def _token():
+    from apps.communications.models import WhatsAppConfig
+
+    return WhatsAppConfig.get_solo().webhook_token
+
+
+def _post(provider, payload, *, token=None, expect=200):
+    token = _token() if token is None else token
+    request = APIRequestFactory().post(
+        f"/api/v1/comms/webhook/whatsapp/{provider}/?token={token}", payload, format="json")
     response = WhatsAppWebhookView.as_view()(request, provider=provider)
-    assert response.status_code == 200
+    assert response.status_code == expect
     return response
 
 
@@ -148,3 +156,34 @@ def test_an_unknown_provider_is_answered_but_not_guessed_at():
     _post("aisensy", {"anything": "at all"})
 
     assert not WhatsAppMessage.objects.exists()
+
+
+# ---- CRIT-5: the webhook must carry the tenant's token -----------------
+
+@pytest.mark.parametrize("token", ["", "guessed"])
+def test_a_forged_reply_is_refused(token):
+    Lead.objects.create(name="Asha", phone="+919812300060")
+
+    _post("interakt", _interakt_reply("919812300060", "click this link"), token=token, expect=401)
+
+    assert _replies() == []
+
+
+def test_a_forged_receipt_is_refused():
+    message = _outbound("abc")
+
+    _post("interakt", {"type": "message_status", "data": {"message_id": "abc", "status": "read"}},
+          token="guessed", expect=401)
+
+    message.refresh_from_db()
+    assert message.status == "sent"
+
+
+def test_settings_show_the_url_to_give_the_provider():
+    from apps.communications.models import WhatsAppConfig
+    from apps.communications.serializers import WhatsAppConfigSerializer
+
+    config = WhatsAppConfig.get_solo()
+    data = WhatsAppConfigSerializer(config).data
+
+    assert data["webhook"]["status_url"].endswith(f"?token={config.webhook_token}")

@@ -30,8 +30,19 @@ def _post(provider, payload):
     return CallProviderWebhookView.as_view()(request, provider=provider)
 
 
+@pytest.fixture
+def exotel_integrated():
+    """Callbacks are only taken from a provider that actually dials."""
+    from apps.calls import views as call_views
+
+    with patch.dict(call_views.PROVIDER_DIALERS, {"exotel": lambda a, b: {}}):
+        yield
+
+
 @pytest.mark.parametrize("duration,expected", [("", 0), ("12.0", 12), (None, 0), ("45", 45)])
-def test_the_call_outcome_is_recorded_whatever_the_duration_looks_like(call, duration, expected):
+def test_the_call_outcome_is_recorded_whatever_the_duration_looks_like(
+    call, exotel_integrated, duration, expected,
+):
     payload = {"CallSid": "CA123", "Status": "no-answer"}
     if duration is not None:
         payload["Duration"] = duration
@@ -46,3 +57,13 @@ def test_the_call_outcome_is_recorded_whatever_the_duration_looks_like(call, dur
 
 def test_an_unsupported_provider_is_told_so():
     assert _post("knowlarity", {"anything": 1}).status_code == 400
+
+
+# ---- CRIT-5: no provider is integrated, so nobody may report calls -------
+
+def test_a_forged_call_outcome_is_refused(call):
+    response = _post("exotel", {"CallSid": "CA123", "Status": "completed", "Duration": "999"})
+
+    assert response.status_code == 403
+    call.refresh_from_db()
+    assert call.duration_seconds == 0

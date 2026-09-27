@@ -583,6 +583,15 @@ class CallProviderWebhookView(APIView):
         if not handler:
             return Response({"error": "unsupported_provider"}, status=400)
 
+        # Only a provider that actually places calls (PROVIDER_DIALERS) may
+        # report on them. This endpoint took unauthenticated posts, so anyone
+        # could overwrite any call's duration and outcome by its call id. No
+        # telephony provider is integrated yet; when one is, it must bring its
+        # own authentication (a signed callback or a per-tenant token) here.
+        if provider not in PROVIDER_DIALERS:
+            logger.warning(f"[Webhook] Call callback refused — {provider} is not integrated")
+            return Response({"error": "provider_not_integrated"}, status=403)
+
         try:
             handler(payload)
         except Exception as exc:

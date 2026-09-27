@@ -598,6 +598,18 @@ class WhatsAppWebhookView(APIView):
     throttle_classes = []
 
     def post(self, request, provider):
+        # The URL must carry this tenant's webhook token. Without it, anyone
+        # could mark messages delivered/read/failed or inject "customer
+        # replies" — with a notification to the agent — into any thread.
+        import hmac
+
+        config = WhatsAppConfig.objects.filter(singleton=1).first()
+        sent = request.query_params.get("token") or request.headers.get("X-Webhook-Token") or ""
+        expected = config.webhook_token if config else ""
+        if not (sent and expected and hmac.compare_digest(sent, expected)):
+            logger.warning(f"[WA Webhook] Unauthenticated post refused ({provider})")
+            return Response({"error": "unauthenticated"}, status=401)
+
         payload = request.data if isinstance(request.data, dict) else {}
         logger.info(f"[WA Webhook] Event from {provider}: {list(payload.keys())}")
 

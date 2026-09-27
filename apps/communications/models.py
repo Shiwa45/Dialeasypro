@@ -106,6 +106,11 @@ class WhatsAppConfig(TimeStampedModel):
     last_webhook_error = models.CharField(max_length=500, blank=True, default="")
     total_inbound_messages = models.PositiveIntegerField(default=0)
 
+    # Secret the provider's status/reply webhook URL carries (?token=). The
+    # BSP webhook (Interakt, WATI, Gupshup, …) accepted anything, so anyone
+    # could mark messages read or inject "customer replies" into a thread.
+    webhook_token = models.CharField(max_length=64, blank=True, default="")
+
     class Meta:
         verbose_name = "WhatsApp Configuration"
         verbose_name_plural = "WhatsApp Configuration"
@@ -116,6 +121,12 @@ class WhatsAppConfig(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         self.singleton = 1
+        if not self.webhook_token:
+            import secrets
+
+            self.webhook_token = secrets.token_urlsafe(32)
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"webhook_token"}
         super().save(*args, **kwargs)
 
     @classmethod

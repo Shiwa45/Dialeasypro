@@ -355,8 +355,18 @@ class LeaveDecisionView(APIView):
             fn = leave_svc.approve_leave if action == "approve" else leave_svc.reject_leave
             args = (leave, request.user, note)
 
+        # Decide against the row as it is NOW, locked. The status check in the
+        # service ran on the copy read above, so two clicks landing together
+        # both saw "pending" and both approved — debiting the balance twice.
+        from django.db import transaction
+
         try:
-            fn(*args)
+            with transaction.atomic():
+                locked = (
+                    LeaveRequest.objects.select_for_update()
+                    .select_related("employee__agent", "leave_type").get(pk=leave.pk)
+                )
+                fn(locked, *args[1:])
         except ValueError as exc:
             return Response({"error": "invalid_transition", "message": str(exc)}, status=400)
 
@@ -399,17 +409,21 @@ class ExpenseDecisionView(APIView):
             return Response({"error": "not_found"}, status=404)
         if action == "approve" and is_self_approval(request.user, claim.employee):
             return Response(SELF_APPROVAL_REFUSED, status=403)
-        if claim.status != ApprovalStatus.PENDING:
+        # One conditional UPDATE: only a claim still pending changes. Checking
+        # and then saving let a double click apply two decisions.
+        decided = ExpenseClaim.objects.filter(pk=claim.pk, status=ApprovalStatus.PENDING).update(
+            status=ApprovalStatus.APPROVED if action == "approve" else ApprovalStatus.REJECTED,
+            decided_by=request.user,
+            decided_at=timezone.now(),
+            decision_note=(request.data.get("note") or "")[:300],
+            updated_at=timezone.now(),
+        )
+        claim.refresh_from_db()
+        if not decided:
             return Response(
                 {"error": "invalid_transition", "message": f"Claim is already {claim.status}."},
                 status=400,
             )
-
-        claim.status = ApprovalStatus.APPROVED if action == "approve" else ApprovalStatus.REJECTED
-        claim.decided_by = request.user
-        claim.decided_at = timezone.now()
-        claim.decision_note = (request.data.get("note") or "")[:300]
-        claim.save(update_fields=["status", "decided_by", "decided_at", "decision_note", "updated_at"])
         return Response(ExpenseClaimSerializer(claim).data)
 
 

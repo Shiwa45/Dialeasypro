@@ -178,8 +178,10 @@ class QuotationDetailView(generics.RetrieveUpdateDestroyAPIView):
         serializer.save()
 
     def perform_destroy(self, instance):
+        # ValidationError, like the update path above: a bare ValueError
+        # surfaced as an HTTP 500 instead of a readable 400.
         if not instance.is_editable:
-            raise ValueError(f"A {instance.status} quotation cannot be deleted.")
+            raise ValidationError(f"A {instance.status} quotation cannot be deleted.")
         instance.delete()
 
 

@@ -97,3 +97,62 @@ def test_the_admin_has_nobody_above_them(admin, view, make):
     obj = make(admin)
 
     assert _decide(view, admin, obj, "approve").status_code == 200
+
+
+# ---- LOW-10: two decisions landing together ------------------------------
+
+def _second_click_lands_first(decide):
+    """
+    Run `decide` in the window between the view reading the row and writing
+    it — where a second click's request lands in real life. The view's
+    self-approval check sits exactly there.
+    """
+    from unittest.mock import patch
+
+    from apps.hrms import views as hrms_views
+
+    real = hrms_views.is_self_approval
+    fired = []
+
+    def check(agent, employee):
+        if not fired:
+            fired.append(1)
+            decide()
+        return real(agent, employee)
+
+    return patch.object(hrms_views, "is_self_approval", side_effect=check)
+
+
+def test_an_expense_is_not_decided_twice(hr, other_hr):
+    claim = _claim(hr)
+
+    def other_rejects():
+        ExpenseClaim.objects.filter(pk=claim.pk).update(
+            status=ApprovalStatus.REJECTED, decided_by=hr)
+
+    with _second_click_lands_first(other_rejects):
+        response = _decide(ExpenseDecisionView, other_hr, claim, "approve")
+
+    assert response.status_code == 400
+    assert claim.status == ApprovalStatus.REJECTED, "the later decision overwrote the earlier one"
+
+
+def test_leave_is_not_approved_twice(hr, other_hr):
+    from apps.hrms.models import LeaveBalance
+    from apps.hrms.services import leave as leave_svc
+
+    paid = LeaveType.objects.create(name="Casual-T", annual_quota_days=Decimal("12"), is_paid=True)
+    start = timezone.localdate() + timedelta(days=10)
+    leave = LeaveRequest.objects.create(
+        employee=hr.employee, leave_type=paid, start_date=start, end_date=start, days=1,
+    )
+
+    def other_approves():
+        leave_svc.approve_leave(LeaveRequest.objects.get(pk=leave.pk), other_hr)
+
+    with _second_click_lands_first(other_approves):
+        response = _decide(LeaveDecisionView, other_hr, leave, "approve")
+
+    assert response.status_code == 400
+    balance = LeaveBalance.objects.get(employee=hr.employee, leave_type=paid, year=start.year)
+    assert balance.used_days == Decimal("1"), "the balance was debited twice"

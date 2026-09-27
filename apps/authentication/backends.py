@@ -85,16 +85,11 @@ class AgentJWTAuthentication(BaseAuthentication):
                         "error": "schema_mismatch",
                         "message": "Invalid token for this tenant.",
                     })
-            elif current_schema and current_schema != "public":
-                # Middleware already set a valid tenant schema but token_schema
-                # is missing or "public" (e.g. old token issued before this claim
-                # was added, or issued on wrong schema). Trust the middleware.
-                logger.warning(
-                    f"[Auth] token_schema missing/public but connection is {current_schema!r}. "
-                    "Trusting middleware schema."
-                )
-                token_schema = current_schema
             else:
+                # No tenant claim (or "public"). This used to be trusted and
+                # resolved in whichever tenant the request was addressed to —
+                # a token that says nothing about its tenant is not one we can
+                # honour anywhere. Every token we issue carries the claim.
                 raise AuthenticationFailed({
                     "error": "schema_mismatch",
                     "message": "Could not determine tenant. Please log in again.",
@@ -111,11 +106,17 @@ class AgentJWTAuthentication(BaseAuthentication):
                 "message": "Agent not found or account deactivated.",
             })
 
-        # Update last_active_at lazily (don't slow down every request)
-        # Use a lightweight update without triggering signals
+        # last_active_at feeds is_online, a five-minute window, so it needs
+        # minute precision at most. It used to be saved on EVERY request — an
+        # extra write per API call. A queryset update skips signals too.
+        from datetime import timedelta
+
         from django.utils import timezone
-        agent.last_active_at = timezone.now()
-        agent.save(update_fields=["last_active_at"])
+
+        now = timezone.now()
+        if agent.last_active_at is None or now - agent.last_active_at > timedelta(seconds=60):
+            type(agent).objects.filter(pk=agent.pk).update(last_active_at=now)
+            agent.last_active_at = now
 
         return (agent, payload)
 

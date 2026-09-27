@@ -221,9 +221,9 @@ class Agent(AbstractBaseUser, TimeStampedModel):
         return self.role_level > other_agent.role_level
 
     def update_last_active(self):
-        """Called on each API request to track agent activity."""
+        """Record activity now. Per-request tracking lives in the JWT backend, throttled."""
         self.last_active_at = timezone.now()
-        self.save(update_fields=["last_active_at"])
+        type(self).objects.filter(pk=self.pk).update(last_active_at=self.last_active_at)
 
     @property
     def is_online(self) -> bool:

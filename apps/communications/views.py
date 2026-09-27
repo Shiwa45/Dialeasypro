@@ -329,7 +329,9 @@ class CampaignAudiencePreviewView(APIView):
     the number shown and the number messaged cannot drift apart.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    # Manager/admin only, like campaigns themselves. Any agent could call
+    # this and count every lead in the tenant, past their own visibility.
+    permission_classes = [IsManagerOrAdmin]
 
     def post(self, request):
         filters = request.data.get("audience_filters") or {}
@@ -387,6 +389,19 @@ class BulkCampaignLaunchView(APIView):
             return Response({"error": "campaign_not_found_or_not_launchable"}, status=404)
 
         require_channel_feature(request, campaign.channel, bulk=True)
+
+        # The template was checked when the campaign was created, but it can
+        # be switched off or its approval withdrawn since — and then every
+        # message fails at the provider, long after the admin has left.
+        template = campaign.template
+        if campaign.channel == "whatsapp" and template is not None:
+            if not template.is_active or template.status != "approved":
+                return Response(
+                    {"error": "template_not_usable",
+                     "message": f'"{template.name}" is no longer an active, approved template. '
+                                "Pick another before launching."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         from apps.communications import tasks as comm_tasks
 

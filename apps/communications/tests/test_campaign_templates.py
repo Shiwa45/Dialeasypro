@@ -231,3 +231,35 @@ def test_a_malformed_filter_is_refused_rather_than_counted_as_everything(admin):
     response.render()
 
     assert response.status_code == 400
+
+
+# ---- LOW-5 / LOW-6 ------------------------------------------------------
+
+def test_an_agent_cannot_count_the_whole_tenant(agent):
+    """Campaigns are manager-only; so is sizing their audience."""
+    assert _preview(agent, {}).status_code == 403
+
+
+def test_a_template_switched_off_after_creation_blocks_the_launch(admin):
+    from unittest.mock import patch
+
+    from apps.communications.models import BulkCampaign
+    from apps.communications.views import BulkCampaignLaunchView
+
+    template = _template(status="approved")
+    campaign = BulkCampaign.objects.create(
+        name="Diwali", channel="whatsapp", status="draft", template=template, audience_filters={},
+    )
+    template.is_active = False
+    template.save(update_fields=["is_active"])
+
+    request = APIRequestFactory().post(f"/api/v1/comms/campaigns/{campaign.pk}/launch/")
+    force_authenticate(request, user=admin)
+    request.has_feature = lambda key: True
+    with patch("apps.communications.tasks.send_bulk_whatsapp_campaign.apply_async") as sender:
+        response = BulkCampaignLaunchView.as_view()(request, pk=campaign.pk)
+
+    assert response.status_code == 400
+    assert not sender.called
+    campaign.refresh_from_db()
+    assert campaign.status == "draft"

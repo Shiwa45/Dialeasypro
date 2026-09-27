@@ -276,8 +276,10 @@ class ApplicationListCreateView(generics.ListCreateAPIView):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
+        # `offer` is a reverse one-to-one read by has_offer on every card; not
+        # joined here, the pipeline board ran one query per application.
         qs = Application.objects.select_related(
-            "candidate", "opening", "stage", "owner",
+            "candidate", "opening", "stage", "owner", "offer",
         ).prefetch_related("interviews")
         p = self.request.query_params
         if opening := p.get("opening"):
@@ -308,7 +310,9 @@ class ApplicationListCreateView(generics.ListCreateAPIView):
 
 class ApplicationDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = ApplicationSerializer
-    queryset = Application.objects.select_related("candidate", "opening", "stage", "owner")
+    queryset = Application.objects.select_related(
+        "candidate", "opening", "stage", "owner", "offer",
+    ).prefetch_related("interviews")
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ATS_CANDIDATES
     required_capability = Cap.ATS_VIEW

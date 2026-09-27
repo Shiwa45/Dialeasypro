@@ -117,9 +117,13 @@ class ApplicationSerializer(serializers.ModelSerializer):
             "days_in_stage", "interview_count", "has_offer", "created_at",
         ]
         # Stage and status move through services/pipeline.py so that no path
-        # can change them without writing an activity row.
+        # can change them without writing an activity row. Candidate and
+        # opening are fixed once the application exists: a PATCH could move
+        # it to another opening (or person) with its stage and history intact.
+        # Creation goes through pipeline_svc.create_application.
         read_only_fields = [
-            "id", "stage", "status", "stage_changed_at", "rejection_reason", "created_at",
+            "id", "candidate", "opening", "stage", "status", "stage_changed_at",
+            "rejection_reason", "created_at",
         ]
 
     def get_interview_count(self, obj) -> int:

@@ -5,13 +5,13 @@ Django Channels WebSocket consumers.
 
 AgentMonitorConsumer
   - URL: /ws/agent-monitor/
-  - Auth: Session (tenant admin must be logged in)
+  - Auth: JWT offered as the "bearer" subprotocol; current role admin/manager
   - Purpose: Real-time feed of all agents' status for the monitoring dashboard
   - Events pushed: agent_status_update, agent_login, agent_logout, call_started
 
 NotificationConsumer
-  - URL: /ws/notifications/{token}/
-  - Auth: JWT token in URL
+  - URL: /ws/notifications/
+  - Auth: JWT offered as the "bearer" subprotocol (URL forms still accepted)
   - Purpose: Per-agent push notifications (new lead, follow-up reminder, etc.)
   - Events pushed: new_lead, followup_reminder, message_received, system_alert
 """
@@ -23,6 +23,68 @@ from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+# Browsers cannot set an Authorization header on a WebSocket, so the token
+# used to travel in the URL (?token= or /ws/notifications/<token>/) — and web
+# servers and proxies write URLs to their access logs, which then held
+# week-long admin tokens. Clients now offer it as a subprotocol,
+# `new WebSocket(url, ["bearer", token])`, which is a header and not logged.
+# The URL forms are still read so tabs opened before a deploy keep working.
+BEARER_SUBPROTOCOL = "bearer"
+
+
+def socket_token(scope) -> tuple[str | None, bool]:
+    """(token, came_as_subprotocol) from a WebSocket scope."""
+    from urllib.parse import parse_qs
+
+    protocols = list(scope.get("subprotocols") or [])
+    if len(protocols) >= 2 and protocols[0] == BEARER_SUBPROTOCOL:
+        return protocols[1], True
+    token = (scope.get("url_route") or {}).get("kwargs", {}).get("token")
+    if not token:
+        query = parse_qs(scope.get("query_string", b"").decode())
+        token = (query.get("token") or [None])[0]
+    return token, False
+
+
+async def authenticate_socket(token: str) -> dict | None:
+    """
+    Verify the JWT, then load the agent it names — as they are NOW.
+
+    The sockets used to trust the claims inside the token. A manager demoted
+    or deactivated after logging in kept watching the live floor until the
+    token expired (about a week in production). The agent must still exist and
+    be active, and `role` is their current role, not the one in the token.
+    """
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def resolve():
+        try:
+            from django_tenants.utils import schema_context
+            from rest_framework_simplejwt.tokens import AccessToken
+
+            payload = AccessToken(token)
+            schema = payload.get("tenant_schema")
+            agent_id = payload.get("agent_id")
+            if not schema or schema == "public" or not agent_id:
+                return None
+
+            from apps.authentication.models import Agent
+
+            with schema_context(schema):
+                agent = (
+                    Agent.objects.filter(pk=agent_id, is_active=True)
+                    .values("pk", "role").first()
+                )
+            if agent is None:
+                return None
+            return {"agent_id": agent["pk"], "role": agent["role"], "tenant_schema": schema}
+        except Exception as exc:
+            logger.debug(f"[WS] token rejected: {exc}")
+            return None
+
+    return await resolve()
 
 
 class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
@@ -36,17 +98,14 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
     """
 
     async def connect(self):
-        """Authenticate via JWT (?token=...) and join the tenant monitoring group."""
-        from urllib.parse import parse_qs
-
-        query = parse_qs(self.scope.get("query_string", b"").decode())
-        token = (query.get("token") or [None])[0]
+        """Authenticate the JWT and join the tenant monitoring group."""
+        token, as_subprotocol = socket_token(self.scope)
         if not token:
             logger.warning("[WS] AgentMonitor: rejected — no token")
             await self.close(code=4001)
             return
 
-        data = await self._verify_token(token)
+        data = await authenticate_socket(token)
         if not data:
             logger.warning("[WS] AgentMonitor: rejected — invalid token")
             await self.close(code=4001)
@@ -78,7 +137,7 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
         self.agent_id = agent_id
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
-        await self.accept()
+        await self.accept(BEARER_SUBPROTOCOL if as_subprotocol else None)
 
         logger.info(f"[WS] AgentMonitor: agent {agent_id} connected to {self.group_name}")
 
@@ -89,27 +148,6 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
                 "timestamp": timezone.now().isoformat(),
             }
         )
-
-    @staticmethod
-    async def _verify_token(token: str) -> dict | None:
-        """Verify the JWT and return agent_id, role, tenant_schema (or None)."""
-        from asgiref.sync import sync_to_async
-
-        @sync_to_async
-        def verify():
-            try:
-                from rest_framework_simplejwt.tokens import AccessToken
-                payload = AccessToken(token)
-                return {
-                    "agent_id": payload.get("agent_id"),
-                    "role": payload.get("role"),
-                    "tenant_schema": payload.get("tenant_schema"),
-                }
-            except Exception as exc:
-                logger.debug(f"[WS] AgentMonitor token verify failed: {exc}")
-                return None
-
-        return await verify()
 
     @staticmethod
     async def _has_monitoring_feature(schema_name: str) -> bool:
@@ -190,22 +228,13 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
 
     async def connect(self):
         """Validate JWT token and connect agent to their notification channel."""
-        from urllib.parse import parse_qs
-
-        # The token may arrive either way. The original route put it in the
-        # path, which is the form most likely to be written verbatim into an
-        # access log or a proxy trace; the query form matches the agent-monitor
-        # socket. Both are accepted so existing clients keep working.
-        token = self.scope["url_route"]["kwargs"].get("token")
-        if not token:
-            query = parse_qs(self.scope.get("query_string", b"").decode())
-            token = (query.get("token") or [None])[0]
+        token, as_subprotocol = socket_token(self.scope)
         if not token:
             await self.close(code=4001)
             return
 
-        # Verify token and get agent info
-        agent_data = await self._verify_token(token)
+        # Verify token, and that the agent is still active
+        agent_data = await authenticate_socket(token)
         if not agent_data:
             logger.warning("[WS] Notifications: rejected — invalid token")
             await self.close(code=4001)
@@ -217,7 +246,7 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
 
         # Join the agent's personal notification group
         await self.channel_layer.group_add(self.group_name, self.channel_name)
-        await self.accept()
+        await self.accept(BEARER_SUBPROTOCOL if as_subprotocol else None)
 
         logger.info(
             f"[WS] Notifications: agent {self.agent_id} connected ({self.schema_name})"
@@ -282,28 +311,6 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
         await self.send_json(event)
 
     # ---- Helpers ----
-
-    async def _verify_token(self, token: str) -> dict | None:
-        """
-        Verify JWT token in a sync-to-async wrapper.
-        Returns {"agent_id": ..., "tenant_schema": ...} or None.
-        """
-        from asgiref.sync import sync_to_async
-
-        @sync_to_async
-        def verify():
-            try:
-                from rest_framework_simplejwt.tokens import AccessToken
-                payload = AccessToken(token)
-                return {
-                    "agent_id": payload.get("agent_id"),
-                    "tenant_schema": payload.get("tenant_schema"),
-                }
-            except Exception as exc:
-                logger.debug(f"[WS] Token verification failed: {exc}")
-                return None
-
-        return await verify()
 
     async def _mark_notification_read(self, notification_id):
         """Mark a notification as acknowledged (for future notification model)."""

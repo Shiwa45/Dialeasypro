@@ -383,6 +383,11 @@ class ClickToCallView(APIView):
                 )
         phone = requested and normalize_indian_phone(requested) or lead.phone
 
+        # The CallLog post_save safety net marks the lead worked and moves it
+        # New -> Attempted as soon as the log exists. If the dial then fails,
+        # the log is deleted and the lead must go back to how it was.
+        before = {"status": lead.status, "has_been_worked": lead.has_been_worked}
+
         # Create CallLog in initiated state
         call = CallLog.objects.create(
             agent=agent,
@@ -391,7 +396,26 @@ class ClickToCallView(APIView):
             phone_number=phone,
         )
 
-        # Mark the lead as worked & advance status (same as manual call logging)
+        # Attempt provider call
+        try:
+            result = _initiate_provider_call(agent, phone, call)
+        except Exception as exc:
+            logger.error(f"[Click-to-call] Failed: {exc}")
+            call.delete()
+            Lead.objects.filter(pk=lead.pk).update(**before)
+            return Response(
+                {"error": "call_failed", "message": "Could not initiate call. Check integration settings."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        call.provider = result.get("provider", "other")
+        call.provider_call_id = result.get("call_id", "")
+        call.save(update_fields=["provider", "provider_call_id"])
+
+        # Mark the lead as worked & advance status (same as manual call
+        # logging) — only now the call has actually gone out. This used to run
+        # before dialling, so a failed call still bumped the contact count and
+        # moved the lead from New to Attempted.
         lead.log_contact(contact_type="call")
         update_fields = ["has_been_worked", "last_dialed_at"]
         lead.has_been_worked = True
@@ -401,26 +425,21 @@ class ClickToCallView(APIView):
             update_fields.append("status")
         lead.save(update_fields=update_fields)
 
-        # Attempt provider call
-        try:
-            result = _initiate_provider_call(agent, phone, call)
-            call.provider = result.get("provider", "other")
-            call.provider_call_id = result.get("call_id", "")
-            call.save(update_fields=["provider", "provider_call_id"])
-
-            return Response({
-                "call_id": str(call.id),
-                "status": "initiated",
-                "message": "Call initiated. Your phone will ring first.",
-                "provider_call_id": result.get("call_id"),
-            })
-        except Exception as exc:
-            logger.error(f"[Click-to-call] Failed: {exc}")
-            call.delete()
-            return Response(
-                {"error": "call_failed", "message": "Could not initiate call. Check integration settings."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        # Only a real provider rings anyone. In manual mode nothing is dialled
+        # — the call is logged and the agent dials from their own phone — so
+        # "your phone will ring first" was untrue.
+        dialed = call.provider != "manual"
+        return Response({
+            "call_id": str(call.id),
+            "status": "initiated",
+            "dialed": dialed,
+            "message": (
+                "Call initiated. Your phone will ring first."
+                if dialed else
+                f"Call logged. Dial {phone} from your phone."
+            ),
+            "provider_call_id": result.get("call_id"),
+        })
 
 
 def _initiate_provider_call(agent, phone: str, call: CallLog) -> dict:
@@ -435,13 +454,21 @@ def _initiate_provider_call(agent, phone: str, call: CallLog) -> dict:
     # In production, tenant settings will have the provider config
     provider = GlobalSettings.get("default_call_provider", "manual")
 
-    if provider == "exotel":
-        return _call_via_exotel(agent.phone, phone)
-    elif provider == "mcube":
-        return _call_via_mcube(agent.phone, phone)
-    else:
-        # Manual mode — just log it, no actual dial
-        return {"provider": "manual", "call_id": f"manual_{call.id}"}
+    dialer = PROVIDER_DIALERS.get(provider)
+    if dialer is not None:
+        return dialer(agent.phone, phone)
+
+    if provider not in ("manual", "", None):
+        # A provider with no working integration. Exotel and MCUBE were
+        # routed to stubs that raise, and this setting is platform-wide, so
+        # choosing either broke click-to-call for every tenant at once. Log
+        # the call as manual instead, and say so loudly.
+        logger.warning(
+            f"[Click-to-call] default_call_provider={provider!r} has no integration; "
+            f"logging the call as manual."
+        )
+    # Manual mode — just log it, no actual dial
+    return {"provider": "manual", "call_id": f"manual_{call.id}"}
 
 
 def _call_via_exotel(agent_phone: str, lead_phone: str) -> dict:
@@ -452,6 +479,12 @@ def _call_via_exotel(agent_phone: str, lead_phone: str) -> dict:
 def _call_via_mcube(agent_phone: str, lead_phone: str) -> dict:
     """MCUBE click-to-call API. Implement when MCUBE credentials are configured."""
     raise NotImplementedError("MCUBE integration not configured")
+
+
+# Providers that can actually place a call. Add one here when its integration
+# is real; until then _call_via_exotel / _call_via_mcube stay out, because a
+# stub that raises takes click-to-call down for every tenant.
+PROVIDER_DIALERS = {}
 
 
 class CallDispositionListView(generics.ListCreateAPIView):

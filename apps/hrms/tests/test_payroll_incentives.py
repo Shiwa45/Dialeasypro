@@ -156,3 +156,62 @@ def test_a_finalized_payslip_is_never_silently_rebuilt(employee):
 
     with pytest.raises(ValueError):
         build_payslip(employee, PERIOD, recompute=True)
+
+
+# ============================================================
+# Net pay never goes negative (MED-14)
+# ============================================================
+
+def _short_month(employee, *, worked=2):
+    """Mark every day of PERIOD absent except the first `worked`."""
+    from apps.hrms.constants import AttendanceStatus
+    from apps.hrms.models import Attendance
+
+    day = PERIOD
+    while day.month == PERIOD.month:
+        status = AttendanceStatus.PRESENT if day.day <= worked else AttendanceStatus.ABSENT
+        Attendance.objects.create(employee=employee, date=day, status=status)
+        day += timedelta(days=1)
+
+
+@pytest.mark.django_db
+def test_deductions_cannot_push_net_pay_below_zero(employee):
+    """The example from the review: 2 of 30 days worked, full deductions."""
+    SalaryStructure.objects.filter(employee=employee).update(
+        pf_employee=Decimal("1800.00"), professional_tax=Decimal("200.00"),
+        tds=Decimal("3000.00"),
+    )
+    _short_month(employee, worked=1)  # gross 40,000 * 1/30 = 1,333.33
+
+    slip = build_payslip(employee, PERIOD)
+
+    assert slip.net_pay >= 0
+    assert slip.total_deductions == slip.gross_earnings
+    assert slip.breakdown["deductions_capped"] is True
+    assert slip.breakdown["deductions_recorded"] == "5000.00"
+
+
+@pytest.mark.django_db
+def test_deductions_never_eat_a_reimbursement(employee):
+    SalaryStructure.objects.filter(employee=employee).update(tds=Decimal("5000.00"))
+    _short_month(employee, worked=1)
+    ExpenseClaim.objects.create(
+        employee=employee, date=PERIOD, category="travel",
+        amount=Decimal("700.00"), status=ApprovalStatus.APPROVED,
+    )
+
+    slip = build_payslip(employee, PERIOD)
+
+    assert slip.net_pay == Decimal("700.00")
+
+
+@pytest.mark.django_db
+def test_a_normal_month_is_unchanged(employee):
+    SalaryStructure.objects.filter(employee=employee).update(pf_employee=Decimal("1800.00"))
+    _short_month(employee, worked=31)
+
+    slip = build_payslip(employee, PERIOD)
+
+    assert slip.total_deductions == Decimal("1800.00")
+    assert slip.net_pay == Decimal("38200.00")
+    assert slip.breakdown["deductions_capped"] is False

@@ -108,7 +108,13 @@ def build_payslip(employee: Employee, period_month: date, *, recompute: bool = F
 
     gross_full = structure.gross
     gross = (gross_full * ratio).quantize(TWO_PLACES)
-    deductions = structure.total_deductions.quantize(TWO_PLACES)
+    # The flat monthly deductions come out of the wages earned this month and
+    # never more. Gross is pro-rated by days worked but the deductions were
+    # taken whole, so a short month produced a NEGATIVE net pay — and ate the
+    # employee's incentives and expense reimbursements on the way down. The
+    # recorded amount is kept in the breakdown so the shortfall is visible.
+    deductions_recorded = structure.total_deductions.quantize(TWO_PLACES)
+    deductions = min(deductions_recorded, gross)
 
     # "Not yet paid, OR already linked to THIS slip."
     #
@@ -166,6 +172,8 @@ def build_payslip(employee: Employee, period_month: date, *, recompute: bool = F
                 "professional_tax": str(structure.professional_tax),
                 "tds": str(structure.tds),
             },
+            "deductions_recorded": str(deductions_recorded),
+            "deductions_capped": deductions < deductions_recorded,
             "statutory_note": (
                 "Deductions are the flat amounts recorded on the salary structure; "
                 "they are not derived from statutory slabs."

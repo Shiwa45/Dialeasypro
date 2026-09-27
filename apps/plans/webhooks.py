@@ -172,12 +172,19 @@ class RazorpayWebhookView(View):
         # own schedule besides. Without this check every retry raised a second
         # GST invoice for one payment, each with its own sequential number,
         # which is a filing problem that cannot be quietly deleted afterwards.
+        from django.db import transaction
+
         from apps.plans.models import Invoice
 
-        if payment_id and Invoice.objects.filter(razorpay_payment_id=payment_id).exists():
-            logger.info(f"[Webhook] Invoice already exists for payment {payment_id} — skipping")
-        else:
-            _create_invoice_for_subscription(subscription, payment_id, payment_data)
+        # Check and create under a lock on the subscription row: two
+        # redeliveries arriving together both passed an unlocked exists()
+        # check and raised two invoices. The lock makes them take turns.
+        with transaction.atomic():
+            Subscription.objects.select_for_update().filter(pk=subscription.pk).first()
+            if payment_id and Invoice.objects.filter(razorpay_payment_id=payment_id).exists():
+                logger.info(f"[Webhook] Invoice already exists for payment {payment_id} — skipping")
+            else:
+                _create_invoice_for_subscription(subscription, payment_id, payment_data)
 
         logger.info(
             f"[Webhook] Subscription charged: {sub_id} — payment: {payment_id}"

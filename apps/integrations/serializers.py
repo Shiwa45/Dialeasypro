@@ -64,8 +64,13 @@ class LeadSourceConfigSerializer(serializers.ModelSerializer):
         Built from the request host so it is always the tenant's own domain
         (e.g. https://demo.telecrm.in/api/v1/integrations/meta/).
         """
-        path = DEDICATED_WEBHOOK_PATHS.get(obj.source) or (
-            f"/api/v1/integrations/webhook/{obj.webhook_token}/"
+        # Dedicated URLs carry the config's token: without a provider
+        # signature it is the only proof a delivery is genuine, and a bare
+        # URL is refused.
+        dedicated = DEDICATED_WEBHOOK_PATHS.get(obj.source)
+        path = (
+            f"{dedicated}?token={obj.webhook_token}" if dedicated
+            else f"/api/v1/integrations/webhook/{obj.webhook_token}/"
         )
         request = self.context.get("request")
         if request is not None:

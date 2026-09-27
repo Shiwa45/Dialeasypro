@@ -42,11 +42,16 @@ def indiamart():
     return LeadSourceConfig.objects.create(source=LeadSource.INDIAMART, is_active=True)
 
 
-def _deliver(phone="9812300001", name="Webhook Lead"):
-    """One IndiaMART enquiry, the way their Lead Manager posts it."""
+def _deliver(phone="9812300001", name="Webhook Lead", *, token=True):
+    """
+    One IndiaMART enquiry, the way their Lead Manager posts it — to the URL
+    the Integrations screen gives out, which carries the config's token.
+    """
     body = json.dumps({"NAME": name, "MOBILE": phone, "EMAIL": "buyer@example.com"})
+    config = LeadSourceConfig.objects.filter(source=LeadSource.INDIAMART).first()
+    query = f"?token={config.webhook_token}" if token and config else ""
     request = RequestFactory().post(
-        "/api/v1/integrations/indiamart/", data=body, content_type="application/json",
+        f"/api/v1/integrations/indiamart/{query}", data=body, content_type="application/json",
     )
     return IndiaMArtWebhookView.as_view()(request)
 
@@ -126,18 +131,17 @@ def test_the_rejection_is_recorded_so_someone_can_see_why(indiamart):
     assert "switched off" in log.error
 
 
-def test_a_source_that_was_never_configured_is_unaffected(admin):
+def test_a_source_that_was_never_configured_accepts_nothing(admin):
     """
-    No config at all is not the same as one switched off. Tenants receiving
-    leads on a source they never opened a config row for must keep receiving
-    them — this fix must not silently cut them off.
+    With no config there is nothing to authenticate a delivery against, and
+    the URL is predictable — this used to let anyone create leads (HIGH-10).
     """
     assert not LeadSourceConfig.objects.filter(source=LeadSource.INDIAMART).exists()
 
     response = _deliver(phone="9812300006")
 
-    assert response.status_code == 200
-    assert Lead.objects.filter(phone__contains="9812300006").exists()
+    assert response.status_code == 401
+    assert not Lead.objects.filter(phone__contains="9812300006").exists()
 
 
 # ---- What the admin sees -----------------------------------------------

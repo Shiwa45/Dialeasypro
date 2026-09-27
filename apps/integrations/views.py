@@ -45,10 +45,17 @@ logger = logging.getLogger(__name__)
 # Base Webhook View
 # ============================================================
 
+UNAUTHENTICATED_MESSAGE = (
+    "Unauthenticated delivery refused. Copy the webhook URL again from "
+    "Integrations — it now carries this integration's token — or set the "
+    "provider's signing secret."
+)
+
+
 class BaseWebhookView(View):
     """
     Base class for all lead source webhook handlers.
-    Subclasses implement parse_payload() and optionally validate_signature().
+    Subclasses implement parse_payload() and signature_valid() / provider_key_valid().
     """
 
     source = None   # Override in subclass: LeadSource.INDIAMART etc.
@@ -92,12 +99,18 @@ class BaseWebhookView(View):
             payload=payload,
         )
 
-        # Validate signature if configured
-        if not self.validate_signature(request, raw_body, config):
-            log.error = "Signature validation failed"
+        # Every delivery must prove where it came from. This used to check a
+        # signature only when a secret happened to be configured, so with no
+        # secret — or no integration set up at all — anyone who knew the
+        # (predictable) URL could create leads and burn the lead quota.
+        if not self.is_authentic(request, raw_body, config, payload):
+            log.error = UNAUTHENTICATED_MESSAGE
             log.save(update_fields=["error"])
-            logger.warning(f"[Integration] Signature fail — source={self.source}")
-            return HttpResponse("Invalid signature", status=401)
+            if config:
+                config.error_message = UNAUTHENTICATED_MESSAGE
+                config.save(update_fields=["error_message"])
+            logger.warning(f"[Integration] Unauthenticated delivery refused — source={self.source}")
+            return HttpResponse("Unauthenticated webhook", status=401)
 
         # Parse and create leads
         try:
@@ -139,9 +152,33 @@ class BaseWebhookView(View):
 
         return JsonResponse({"status": "ok"})
 
-    def validate_signature(self, request, raw_body: bytes, config) -> bool:
-        """Override to implement provider-specific signature validation."""
-        return True
+    def is_authentic(self, request, raw_body: bytes, config, payload) -> bool:
+        """
+        True when the delivery proves it is for this tenant's integration:
+        a valid provider signature, the config's webhook token (in the URL as
+        ?token= or an X-Webhook-Token header), or a provider key in the body.
+        No config means nothing to prove it against — refused.
+        """
+        if config is None:
+            return False
+        return (
+            self.signature_valid(request, raw_body, config)
+            or self.token_valid(request, config)
+            or self.provider_key_valid(payload, config)
+        )
+
+    @staticmethod
+    def token_valid(request, config) -> bool:
+        sent = request.GET.get("token") or request.headers.get("X-Webhook-Token") or ""
+        return bool(sent and config.webhook_token) and hmac.compare_digest(sent, config.webhook_token)
+
+    def signature_valid(self, request, raw_body: bytes, config) -> bool:
+        """Provider signature, verified against a configured secret. Override."""
+        return False
+
+    def provider_key_valid(self, payload, config) -> bool:
+        """A shared key the provider puts in the body. Override."""
+        return False
 
     def process_payload(self, payload: dict, config, request) -> tuple:
         """Override to implement provider-specific lead creation."""
@@ -285,12 +322,10 @@ class IndiaMArtWebhookView(BaseWebhookView):
 
     source = LeadSource.INDIAMART
 
-    def validate_signature(self, request, raw_body: bytes, config) -> bool:
-        if not config:
-            return True  # No config = no validation
+    def signature_valid(self, request, raw_body: bytes, config) -> bool:
         secret = config.credentials.get("webhook_secret", "")
         if not secret:
-            return True
+            return False
         signature = request.headers.get("X-Im-Signature", "")
         expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)
@@ -365,13 +400,11 @@ class MetaLeadAdsWebhookView(BaseWebhookView):
 
         return HttpResponse("Forbidden", status=403)
 
-    def validate_signature(self, request, raw_body: bytes, config) -> bool:
+    def signature_valid(self, request, raw_body: bytes, config) -> bool:
         """Validate X-Hub-Signature-256 from Meta."""
-        if not config:
-            return True
         app_secret = config.credentials.get("app_secret", "")
         if not app_secret:
-            return True
+            return False
         signature = request.headers.get("X-Hub-Signature-256", "")
         if not signature.startswith("sha256="):
             return False
@@ -476,6 +509,12 @@ class GoogleAdsWebhookView(BaseWebhookView):
 
     source = LeadSource.GOOGLE_ADS
 
+    def provider_key_valid(self, payload, config) -> bool:
+        """Google Ads lead forms send the webhook key you set as `google_key`."""
+        expected = config.credentials.get("google_key", "")
+        sent = payload.get("google_key", "") if isinstance(payload, dict) else ""
+        return bool(expected and sent) and hmac.compare_digest(str(sent), expected)
+
     def process_payload(self, payload: dict, config, request) -> tuple:
         from apps.integrations.field_mapping import apply_field_mapping
 
@@ -517,16 +556,23 @@ class GenericWebhookView(BaseWebhookView):
 
     def post(self, request, token, *args, **kwargs):
         # Find config by token (overrides base class which uses source)
-        try:
-            config = LeadSourceConfig.objects.get(webhook_token=token, is_active=True)
-            self.source = config.source
-        except LeadSourceConfig.DoesNotExist:
+        config = LeadSourceConfig.objects.filter(webhook_token=token).first() if token else None
+        if config is None or not hmac.compare_digest(token, config.webhook_token):
             return HttpResponse("Invalid webhook token", status=401)
+        self.source = config.source
+        self._config = config
 
         return super().post(request, token=token, *args, **kwargs)
 
     def _get_config(self):
-        return None  # Overridden in post()
+        # The config found by its token. This returned None, so the base
+        # class processed every generic delivery with no config at all — its
+        # field mapping, duplicate rule and assignment were all ignored, and a
+        # switched-off integration kept accepting leads.
+        return self._config
+
+    def is_authentic(self, request, raw_body, config, payload) -> bool:
+        return True  # the token in the path already proved it
 
     def process_payload(self, payload: dict, config, request) -> tuple:
         from apps.integrations.field_mapping import apply_field_mapping

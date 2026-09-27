@@ -350,13 +350,16 @@ class MetaLeadAdsWebhookView(BaseWebhookView):
     def get(self, request, *args, **kwargs):
         """Handle Meta's webhook verification challenge."""
         mode = request.GET.get("hub.mode")
-        token = request.GET.get("hub.verify_token")
+        token = request.GET.get("hub.verify_token") or ""
         challenge = request.GET.get("hub.challenge")
 
         config = self._get_config()
         verify_token = config.credentials.get("verify_token", "") if config else ""
 
-        if mode == "subscribe" and token == verify_token:
+        # A token must be configured: with none set, an empty hub.verify_token
+        # used to equal the empty expected value and pass. Constant-time, like
+        # the WhatsApp handshake below.
+        if mode == "subscribe" and verify_token and hmac.compare_digest(token, verify_token):
             logger.info("[Meta] Webhook verified")
             return HttpResponse(challenge, content_type="text/plain")
 

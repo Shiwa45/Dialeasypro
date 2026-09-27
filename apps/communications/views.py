@@ -583,83 +583,20 @@ class WhatsAppWebhookView(APIView):
     throttle_classes = []
 
     def post(self, request, provider):
-        payload = request.data
+        payload = request.data if isinstance(request.data, dict) else {}
         logger.info(f"[WA Webhook] Event from {provider}: {list(payload.keys())}")
 
+        # Parsing and recording for every provider live in
+        # whatsapp_webhooks.py. Always 200: a provider that gets an error
+        # retries the same event, which cannot fix a payload we can't read.
+        from apps.communications import whatsapp_webhooks
+
         try:
-            if provider == "interakt":
-                self._handle_interakt(payload)
-            elif provider in ["aisensy", "wati", "gupshup", "meta_cloud"]:
-                self._handle_generic(payload, provider)
+            whatsapp_webhooks.handle(provider, payload)
         except Exception as exc:
             logger.error(f"[WA Webhook] Handler error ({provider}): {exc}", exc_info=True)
 
         return Response({"status": "ok"})
-
-    def _handle_interakt(self, payload: dict):
-        """Process Interakt webhook — status updates and inbound messages."""
-        event_type = payload.get("type")
-        data = payload.get("data", {})
-
-        if event_type == "message_status":
-            # Delivery status update
-            msg_id = data.get("message_id", "")
-            new_status = data.get("status", "")  # sent, delivered, read, failed
-            if msg_id and new_status:
-                from django.utils import timezone as tz
-                update = {"status": new_status}
-                if new_status == "delivered":
-                    update["delivered_at"] = tz.now()
-                elif new_status == "read":
-                    update["read_at"] = tz.now()
-                WhatsAppMessage.objects.filter(
-                    provider_message_id=msg_id
-                ).update(**update)
-
-        elif event_type == "inbound_message":
-            # Inbound message from lead
-            phone = data.get("customer_phone_number", "")
-            content = data.get("message", {}).get("text", {}).get("body", "")
-            if not phone or not content:
-                return
-
-            from apps.leads.models import Lead
-            try:
-                phone_normalized = f"+91{phone}" if not phone.startswith("+") else phone
-                lead = Lead.objects.get(phone=phone_normalized, is_deleted=False)
-                msg = WhatsAppMessage.objects.create(
-                    lead=lead, direction="inbound",
-                    message_type="text", content=content,
-                    provider="interakt", status="received",
-                    provider_message_id=data.get("wa_message_id", ""),
-                )
-                # Notify the assigned agent via WebSocket
-                if lead.assigned_to_id:
-                    from apps.core.consumers import send_agent_notification
-                    from django.db import connection
-                    send_agent_notification(
-                        schema_name=connection.schema_name,
-                        agent_id=lead.assigned_to_id,
-                        event_type="message_received",
-                        data={
-                            "lead_id": lead.pk,
-                            "lead_name": lead.name,
-                            "channel": "whatsapp",
-                            "message_preview": content[:100],
-                        },
-                    )
-                # Update lead activity
-                from apps.leads.models import LeadActivity
-                LeadActivity.objects.create(
-                    lead=lead, activity_type="whatsapp",
-                    description=f"WhatsApp reply received: {content[:100]}",
-                )
-            except Lead.DoesNotExist:
-                logger.debug(f"[WA Webhook] Inbound from unknown number {phone}")
-
-    def _handle_generic(self, payload: dict, provider: str):
-        """Generic handler for other providers."""
-        logger.info(f"[WA Webhook] Generic handler for {provider} — implement if needed")
 
 
 # ============================================================

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/notification_service.dart';
+import '../../core/services/presence_service.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
 import '../../data/models/models.dart';
@@ -60,7 +61,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<bool> login(String email, String password) async {
-    state = const AuthState(status: AuthStatus.loading);
+    // No global "loading" here. The login screen shows its own spinner, and
+    // flipping the app-wide state to loading rebuilt the router, which let the
+    // dashboard mount before a token existed: its requests 401'd, the app
+    // bounced to the login screen, then jumped in a second later when this
+    // call finished — the "logs out, then logs itself in" flicker.
     try {
       final res = await AuthService.instance.login(email, password);
       await ApiClient.instance.saveTokens(access: res.access, refresh: res.refresh);
@@ -88,6 +93,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // Drop the reminders and the device registration before the token goes.
     // Without this the next person to sign in on this handset keeps receiving
     // the previous agent's follow-ups.
+    // Offline on the Live Agents board while the token still works — the
+    // status call needs it. (The work session's own state resets with the app.)
+    PresenceService.instance.endSession();
     try {
       await NotificationService.instance.cancelAll();
       await NotificationService.instance.clearAnnounced();
@@ -96,16 +104,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
     await ApiClient.instance.clearTokens();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kAgentKey);
-    state = const AuthState(status: AuthStatus.unauthenticated);
-  }
-
-  /// Switch to a different workspace — clears tenant config + tokens
-  Future<void> switchWorkspace() async {
-    await ApiClient.instance.clearTokens();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kAgentKey);
-    // Note: TenantConfig.clear is imported lazily here to avoid circular import
-    // (auth_provider depends on api_client, api_client depends on tenant_config)
+    // A break in progress belongs to this agent, not the next one to sign in.
+    await prefs.remove('work_on_break');
+    await prefs.remove('work_break_reason');
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 
@@ -115,15 +116,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await _cache(fresh);
       state = AuthState(status: AuthStatus.authenticated, agent: fresh);
     } catch (_) {}
-  }
-
-  Future<bool> changePassword({required String oldPw, required String newPw, required String confirmPw}) async {
-    try {
-      await AuthService.instance.changePassword(
-        oldPassword: oldPw, newPassword: newPw, confirmPassword: confirmPw,
-      );
-      return true;
-    } catch (_) { return false; }
   }
 
   Future<void> _cache(Agent agent) async {

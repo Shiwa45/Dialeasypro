@@ -5,14 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/services/phone_service.dart';
 import '../../core/services/whatsapp_service.dart';
-import '../../core/services/recording_service.dart';
 import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../leads/lead_custom_fields.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
+import '../work/work_session.dart';
 import 'dialer_state.dart';
+import 'lead_basics_card.dart';
 
 // ============================================================
 // DialEasypro — Active Dialer Screen
@@ -128,12 +130,13 @@ class _TopBar extends ConsumerWidget {
             state.phase != DialerPhase.dialing) ...[
           const SizedBox(width: 8),
           GestureDetector(
+            // One break for the whole app — see work/work_session.dart.
             onTap: () {
-              final notifier = ref.read(dialerProvider.notifier);
+              final work = ref.read(workSessionProvider.notifier);
               if (state.onBreak) {
-                notifier.endBreak();
+                work.endBreak();
               } else {
-                notifier.goOnBreak();
+                work.takeBreak(reason: 'Break from auto-dialer');
               }
             },
             child: Container(
@@ -313,6 +316,9 @@ class _PreCallView extends ConsumerWidget {
 
         const SizedBox(height: 28),
 
+        LeadBasicsCard(lead: lead),
+        const SizedBox(height: 12),
+
         LeadCustomFields(lead: lead, compact: true, title: 'What we know'),
         const SizedBox(height: 16),
 
@@ -393,28 +399,11 @@ class _InCallView extends ConsumerStatefulWidget {
 
 class _InCallViewState extends ConsumerState<_InCallView> {
   final _notesCtrl = TextEditingController();
-  bool _isRecordingNote = false;
-  String? _voiceNotePath;
 
   @override
   void dispose() {
     _notesCtrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _toggleRecording() async {
-    if (_isRecordingNote) {
-      final path = await VoiceRecorderService.instance.stop();
-      setState(() {
-        _isRecordingNote = false;
-        _voiceNotePath = path;
-      });
-      if (mounted && path != null) AppToast.show(context, 'Voice note saved', isSuccess: true);
-    } else {
-      final ok = await VoiceRecorderService.instance.start();
-      if (ok) setState(() => _isRecordingNote = true);
-      else if (mounted) AppToast.show(context, 'Microphone permission required', isError: true);
-    }
   }
 
   @override
@@ -465,6 +454,9 @@ class _InCallViewState extends ConsumerState<_InCallView> {
             // While the call is live. This is where the agent needs the lead's
             // answers most — in front of them mid-conversation, not on a
             // screen they would have to leave the call to reach.
+            LeadBasicsCard(lead: lead),
+            const SizedBox(height: 12),
+
             LeadCustomFields(lead: lead, compact: true, title: 'What we know'),
             const SizedBox(height: 12),
 
@@ -493,53 +485,22 @@ class _InCallViewState extends ConsumerState<_InCallView> {
 
             const SizedBox(height: 14),
 
-            // Action buttons (voice note, etc.)
-            Row(children: [
-              Expanded(
-                child: BrutalButton(
-                  label: _isRecordingNote ? 'STOP REC' : 'VOICE NOTE',
-                  iconData: _isRecordingNote ? Icons.stop : Icons.mic,
-                  backgroundColor: _isRecordingNote ? AppColors.error : AppColors.purple,
-                  textColor: AppColors.white,
-                  isFullWidth: true,
-                  onPressed: _toggleRecording,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: BrutalButton(
-                  label: 'END CALL',
-                  iconData: Icons.call_end,
-                  backgroundColor: AppColors.error,
-                  textColor: AppColors.white,
-                  isFullWidth: true,
-                  onPressed: () {
-                    HapticFeedback.heavyImpact();
-                    ref.read(dialerProvider.notifier).markCallEnded(
-                      durationSec: duration,
-                      wasConnected: duration > 5,
-                    );
-                  },
-                ),
-              ),
-            ]),
-
-            if (_voiceNotePath != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.successBg,
-                    border: Border.all(color: AppColors.success, width: 1),
-                  ),
-                  child: const Row(children: [
-                    Icon(Icons.check_circle, size: 14, color: AppColors.success),
-                    SizedBox(width: 6),
-                    Text('Voice note recorded', style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 11, color: AppColors.success)),
-                  ]),
-                ),
-              ),
+            // The Cloudinary voice note was removed with its settings: the call
+            // itself is recorded and uploaded by CallRecordingService.
+            BrutalButton(
+              label: 'END CALL',
+              iconData: Icons.call_end,
+              backgroundColor: AppColors.error,
+              textColor: AppColors.white,
+              isFullWidth: true,
+              onPressed: () {
+                HapticFeedback.heavyImpact();
+                ref.read(dialerProvider.notifier).markCallEnded(
+                  durationSec: duration,
+                  wasConnected: duration > 5,
+                );
+              },
+            ),
           ]),
         );
       },
@@ -548,8 +509,16 @@ class _InCallViewState extends ConsumerState<_InCallView> {
 }
 
 // ─── DISPOSITION VIEW (MANDATORY) ───────────────────────────
-final _dispositionsProvider = FutureProvider<List<CallDisposition>>(
-  (_) => CallsService.instance.getDispositions(),
+/// The call outcomes, fetched fresh each time the disposition view opens.
+///
+/// This was a plain FutureProvider, which caches its FIRST result for the life
+/// of the app — including a failure. One miss (the phone coming back from a
+/// call before the network does, or a token refresh mid-call) left every later
+/// call stuck on "Failed to load dispositions" until the app was killed.
+/// Now it re-fetches, retries once, and falls back to the last list that did
+/// load, so an agent can always finish a call.
+final dispositionsProvider = FutureProvider.autoDispose<List<CallDisposition>>(
+  (_) => CallsService.instance.getDispositionsResilient(),
 );
 
 class _DispositionView extends ConsumerStatefulWidget {
@@ -588,22 +557,12 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
     }
     setState(() => _saving = true);
 
-    // Upload voice note if any
-    String? recordingUrl;
-    final voicePath = VoiceRecorderService.instance.currentPath;
-    if (voicePath != null && !VoiceRecorderService.instance.isRecording) {
-      try {
-        recordingUrl = await VoiceRecorderService.instance.uploadToCloudinary(voicePath);
-      } catch (_) {}
-    }
-
     // Save disposition + call to backend
     await ref.read(dialerProvider.notifier).dispose_(
       dispositionId: _selected!.id,
       dispositionName: _selected!.name,
       notes: _notesCtrl.text,
       wasConnected: _wasConnected,
-      recordingUrl: recordingUrl,
     );
 
     // Schedule auto-followup if disposition requires it or user opted in
@@ -643,7 +602,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
     final lead = widget.state.currentLead;
     final call = widget.state.currentCall;
     if (lead == null || call == null) return const SizedBox.shrink();
-    final dispositionsAsync = ref.watch(_dispositionsProvider);
+    final dispositionsAsync = ref.watch(dispositionsProvider);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -725,7 +684,16 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
 
         dispositionsAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (_, __) => const Text('Failed to load dispositions'),
+          error: (e, __) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Could not load call outcomes: ${ApiClient.errorMessage(e)}',
+                style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.error)),
+            const SizedBox(height: 8),
+            BrutalButton.secondary(
+              label: 'RETRY',
+              iconData: Icons.refresh,
+              onPressed: () => ref.invalidate(dispositionsProvider),
+            ),
+          ]),
           data: (dispositions) {
             if (dispositions.isEmpty) {
               return const Padding(

@@ -15,6 +15,7 @@ import 'features/auth/login_screen.dart';
 import 'features/calls/calls_screen.dart';
 import 'features/communications/whatsapp_send_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
+import 'features/dialer/auto_dial_home.dart';
 import 'features/dialer/dialer_screen.dart';
 import 'features/dialer/queue_starter_screen.dart';
 import 'features/features_provider.dart';
@@ -27,6 +28,7 @@ import 'features/leads/leads_list_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/reports/reports_screen.dart';
 import 'features/setup/setup_wizard_screen.dart';
+import 'features/work/work_session.dart';
 
 final _rootKey = GlobalKey<NavigatorState>();
 final _shellKey = GlobalKey<NavigatorState>();
@@ -59,29 +61,61 @@ void _bindNotificationTaps(GoRouter router) {
   }
 }
 
+/// Pokes the router to re-run its redirect when auth or the work session
+/// changes. The router itself is built ONCE: it used to be rebuilt on every
+/// auth change (ref.watch), which reset navigation to '/' — and while signing
+/// in, let the dashboard mount before a token existed, so the app bounced to
+/// the login screen and back ("logs out, then logs itself in").
+class _RouterRefresh extends ChangeNotifier {
+  void ping() => notifyListeners();
+}
+
 final _routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authProvider);
+  final refresh = _RouterRefresh();
+  ref.listen<AuthState>(authProvider, (prev, next) {
+    if (prev?.status != next.status) refresh.ping();
+  });
+  ref.listen<WorkSessionState>(workSessionProvider, (prev, next) {
+    if (prev?.onBreak != next.onBreak || prev?.live != next.live) refresh.ping();
+  });
+  ref.onDispose(refresh.dispose);
 
   final router = GoRouter(
     navigatorKey: _rootKey,
-    initialLocation: '/',
-    refreshListenable: ValueNotifier(authState.status),
+    initialLocation: '/splash',
+    refreshListenable: refresh,
     redirect: (ctx, state) {
-      if (authState.isLoading) return null;
+      final authState = ref.read(authProvider);
+      final loc = state.matchedLocation;
+
+      // Still reading the saved session: hold on the splash, so no screen
+      // mounts and fires requests before we know who is signed in.
+      if (authState.isLoading) return loc == '/splash' ? null : '/splash';
+
       final isAuth = authState.isAuthenticated;
-      final isLoginPath = state.matchedLocation == '/login';
-      if (!isAuth && !isLoginPath) return '/login';
-      if (isAuth && isLoginPath) return '/';
+      if (!isAuth) return loc == '/login' ? null : '/login';
+      if (loc == '/login' || loc == '/splash') return '/';
+
       // First run: send the agent through permissions and call-recording setup
       // before they start dialling, rather than letting them discover later
       // that nothing was recorded.
-      final isSetupPath = state.matchedLocation == '/setup';
-      if (isAuth && !SetupService.instance.isCompleteSync && !isSetupPath) {
+      final isSetupPath = loc == '/setup';
+      if (!SetupService.instance.isCompleteSync && !isSetupPath) {
         return '/setup';
+      }
+
+      // Working (not on break): auto-dialling only. Leads, manual calls,
+      // WhatsApp and the rest open once the agent takes a break, and ending
+      // the break brings them back here.
+      final work = ref.read(workSessionProvider);
+      if (work.live && !work.onBreak && !allowedWhileWorking(loc) && loc != '/') {
+        return '/auto-dial';
       }
       return null;
     },
     routes: [
+      GoRoute(path: '/splash', builder: (_, __) => const _Splash()),
+
       // Login (outside shell)
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
 
@@ -93,7 +127,9 @@ final _routerProvider = Provider<GoRouter>((ref) {
         navigatorKey: _shellKey,
         builder: (ctx, state, child) => _MainShell(child: child),
         routes: [
-          GoRoute(path: '/', redirect: (_, __) => '/dashboard'),
+          // Signing in lands on Auto Dial (or wherever a break allows).
+          GoRoute(path: '/', redirect: (_, __) => '/auto-dial'),
+          GoRoute(path: '/auto-dial', builder: (_, __) => const AutoDialHome()),
           GoRoute(path: '/dashboard', builder: (_, __) => const DashboardScreen()),
           GoRoute(
             path: '/leads',
@@ -162,12 +198,13 @@ class _MainShell extends ConsumerStatefulWidget {
 
 class _MainShellState extends ConsumerState<_MainShell>
     with WidgetsBindingObserver {
-  int _idx = 0;
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Signed in and past setup: the agent is at work — live, available, idle
+    // time running.
+    Future.microtask(() => ref.read(workSessionProvider.notifier).start());
     // Catch anything left over from a previous session.
     _sweepRecordings();
   }
@@ -205,9 +242,10 @@ class _MainShellState extends ConsumerState<_MainShell>
   }
 
   static const _coreTabs = [
+    _Tab(path: '/auto-dial', icon: Icons.bolt_outlined,      activeIcon: Icons.bolt,      label: 'Auto Dial'),
     _Tab(path: '/dashboard', icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Home'),
     _Tab(path: '/leads',     icon: Icons.people_outline,     activeIcon: Icons.people,    label: 'Leads'),
-    _Tab(path: '/calls',     icon: Icons.phone_outlined,     activeIcon: Icons.phone,     label: 'Calls'),
+    _Tab(path: '/calls',     icon: Icons.history_outlined,   activeIcon: Icons.history,   label: 'History'),
     _Tab(path: '/reports',   icon: Icons.bar_chart_outlined, activeIcon: Icons.bar_chart, label: 'Reports'),
   ];
 
@@ -215,18 +253,40 @@ class _MainShellState extends ConsumerState<_MainShell>
     path: '/my-work', icon: Icons.badge_outlined, activeIcon: Icons.badge, label: 'My Work',
   );
 
-  /// Add-on tabs are appended, never inserted, so `_idx` stays pointing at the
-  /// same tab when the features request resolves after first paint.
+  /// Add-on tabs are appended, never inserted, so the core tabs keep their
+  /// places when the features request resolves after first paint.
   List<_Tab> get _tabs => [
         ..._coreTabs,
         if (ref.features.hasModule(Mod.hrms)) _myWorkTab,
       ];
 
+  /// A locked tab explains itself instead of doing nothing.
+  void _explainLocked(_Tab tab) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text('Take a break to open ${tab.label}. Auto-dialling comes first.'),
+        action: SnackBarAction(
+          label: 'TAKE BREAK',
+          onPressed: () async {
+            final ok = await ref.read(workSessionProvider.notifier)
+                .takeBreak(reason: 'Manual calls & WhatsApp');
+            if (ok && mounted) context.go(tab.path);
+          },
+        ),
+      ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final tabs = _tabs;
-    // If the module is revoked mid-session the list shrinks under us.
-    if (_idx >= tabs.length) _idx = 0;
+    final work = ref.watch(workSessionProvider);
+    final locked = work.live && !work.onBreak;
+    // The highlighted tab follows the location, so a redirect (e.g. back to
+    // Auto Dial when a break ends) moves it too.
+    final loc = GoRouterState.of(context).matchedLocation;
+    final found = tabs.indexWhere((t) => loc == t.path || loc.startsWith('${t.path}/'));
+    final idx = found < 0 ? 0 : found;
 
     return Scaffold(
       body: widget.child,
@@ -237,9 +297,12 @@ class _MainShellState extends ConsumerState<_MainShell>
         child: SafeArea(
           top: false,
           child: BottomNavigationBar(
-            currentIndex: _idx,
+            currentIndex: idx,
             onTap: (i) {
-              setState(() => _idx = i);
+              if (locked && !allowedWhileWorking(tabs[i].path)) {
+                _explainLocked(tabs[i]);
+                return;
+              }
               context.go(tabs[i].path);
             },
             backgroundColor: Colors.transparent,
@@ -254,10 +317,10 @@ class _MainShellState extends ConsumerState<_MainShell>
                   duration: const Duration(milliseconds: 160),
                   curve: Curves.easeOut,
                   padding: EdgeInsets.symmetric(
-                    horizontal: _idx == e.key ? 16 : 0,
-                    vertical: _idx == e.key ? 5 : 0,
+                    horizontal: idx == e.key ? 16 : 0,
+                    vertical: idx == e.key ? 5 : 0,
                   ),
-                  decoration: _idx == e.key
+                  decoration: idx == e.key
                       ? BoxDecoration(
                           gradient: AppColors.mintGradient,
                           borderRadius: BorderRadius.circular(999),
@@ -265,9 +328,9 @@ class _MainShellState extends ConsumerState<_MainShell>
                         )
                       : null,
                   child: Icon(
-                    _idx == e.key ? e.value.activeIcon : e.value.icon,
+                    idx == e.key ? e.value.activeIcon : e.value.icon,
                     size: 21,
-                    color: _idx == e.key ? AppColors.mintInk : null,
+                    color: idx == e.key ? AppColors.mintInk : null,
                   ),
                 ),
               ),
@@ -397,4 +460,17 @@ class _DialEasyproAppState extends ConsumerState<DialEasyproApp>
       ),
     );
   }
+}
+
+/// Shown only while the saved session is being read at start-up.
+class _Splash extends StatelessWidget {
+  const _Splash();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+    body: DecoratedBox(
+      decoration: BoxDecoration(gradient: AppColors.darkGradient),
+      child: Center(child: CircularProgressIndicator(color: AppColors.mint)),
+    ),
+  );
 }

@@ -58,6 +58,66 @@ class LeadCustomField {
   );
 }
 
+/// A custom field a client's lead form asks for (set in the platform panel).
+class LeadFormField {
+  final String key, name, type, placeholder;
+  final bool required;
+  final List<String> options;
+
+  const LeadFormField({
+    required this.key, required this.name, this.type = 'text',
+    this.placeholder = '', this.required = false, this.options = const [],
+  });
+
+  factory LeadFormField.fromJson(Map<String, dynamic> j) => LeadFormField(
+    key: j['field_key'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    type: j['field_type'] as String? ?? 'text',
+    placeholder: j['placeholder'] as String? ?? '',
+    required: j['is_required'] as bool? ?? false,
+    options: [for (final o in (j['options'] as List? ?? const [])) o.toString()],
+  );
+}
+
+/// One standard field's per-client setting: shown or not, and its label.
+class StandardFieldSetting {
+  final bool show;
+  final String label;
+  const StandardFieldSetting({required this.show, required this.label});
+
+  factory StandardFieldSetting.fromJson(Map<String, dynamic>? j, String fallback) =>
+      StandardFieldSetting(
+        show: j?['show'] as bool? ?? true,
+        label: (j?['label'] as String?)?.isNotEmpty == true ? j!['label'] as String : fallback,
+      );
+}
+
+/// What this client's Add Lead form shows.
+class LeadFormConfig {
+  final StandardFieldSetting budget, dealValue;
+  final List<LeadFormField> customFields;
+
+  const LeadFormConfig({
+    this.budget = const StandardFieldSetting(show: true, label: 'Budget (₹)'),
+    this.dealValue = const StandardFieldSetting(show: true, label: 'Deal Value (₹)'),
+    this.customFields = const [],
+  });
+
+  factory LeadFormConfig.fromJson(Map<String, dynamic> j) {
+    final standard = (j['standard'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return LeadFormConfig(
+      budget: StandardFieldSetting.fromJson(
+          (standard['budget'] as Map?)?.cast<String, dynamic>(), 'Budget (₹)'),
+      dealValue: StandardFieldSetting.fromJson(
+          (standard['deal_value'] as Map?)?.cast<String, dynamic>(), 'Deal Value (₹)'),
+      customFields: [
+        for (final f in (j['custom_fields'] as List? ?? const []))
+          if (f is Map) LeadFormField.fromJson(f.cast<String, dynamic>()),
+      ],
+    );
+  }
+}
+
 class Lead {
   final int id;
   final String name, phone, alternatePhone, email, city, state;

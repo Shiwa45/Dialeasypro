@@ -3,14 +3,11 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/services/recording_service.dart';
 import '../../core/services/call_recording_service.dart';
 import '../../core/services/tenant_config.dart';
 import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
-import '../../data/services/services.dart';
 import '../auth/auth_provider.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -21,15 +18,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  final _name = TextEditingController();
-  final _phone = TextEditingController();
-  final _oldPw = TextEditingController();
-  final _newPw = TextEditingController();
-  final _confirmPw = TextEditingController();
-  final _cloudName = TextEditingController();
-  final _uploadPreset = TextEditingController();
   String _waMode = 'native';
-  bool _saving = false, _changingPw = false, _savingCloud = false;
   bool _callRecEnabled = false;
   int _pendingRecordings = 0;
   bool _scanning = false;
@@ -65,30 +54,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    final a = ref.read(currentAgentProvider);
-    _name.text = a?.name ?? '';
-    _phone.text = a?.phone ?? '';
     _loadPrefs();
   }
 
   Future<void> _loadPrefs() async {
     final m = await UserPrefs.getWhatsAppMode();
-    final prefs = await SharedPreferences.getInstance();
     final recEnabled = await CallRecordingService.instance.isEnabled();
     final pending = await CallRecordingService.instance.pendingCount();
     if (mounted) setState(() {
       _waMode = m;
-      _cloudName.text = prefs.getString('cloudinary_name') ?? '';
-      _uploadPreset.text = prefs.getString('cloudinary_preset') ?? '';
       _callRecEnabled = recEnabled;
       _pendingRecordings = pending;
     });
-  }
-
-  @override
-  void dispose() {
-    for (final c in [_name, _phone, _oldPw, _newPw, _confirmPw, _cloudName, _uploadPreset]) c.dispose();
-    super.dispose();
   }
 
   @override
@@ -153,26 +130,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: AppColors.greyDark),
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 10),
-              BrutalButton.secondary(
-                label: 'Switch Workspace',
-                iconData: Icons.swap_horiz,
-                isFullWidth: true,
-                onPressed: () async {
-                  final ok = await showBrutalConfirm(
-                    context: context,
-                    title: 'Switch Workspace?',
-                    message: 'You will be signed out and need to enter another workspace name and credentials.',
-                    confirmLabel: 'Switch',
-                    danger: true,
-                  );
-                  if (ok == true && context.mounted) {
-                    await TenantConfig.instance.clear();
-                    await ref.read(authProvider.notifier).switchWorkspace();
-                    if (context.mounted) context.go('/login');
-                  }
-                },
-              ),
             ]),
           ).animate().fadeIn(delay: 50.ms),
 
@@ -208,67 +165,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ]),
             ]),
           ).animate().fadeIn(delay: 80.ms),
-
-          const SizedBox(height: 14),
-
-          // Profile fields
-          BrutalCard(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const SectionHeader(title: 'Edit Profile', icon: Icons.edit),
-            const SizedBox(height: 14),
-            BrutalTextField(label: 'Full Name', controller: _name),
-            const SizedBox(height: 12),
-            BrutalTextField(label: 'Phone', controller: _phone, keyboardType: TextInputType.phone),
-            const SizedBox(height: 16),
-            BrutalButton.primary(
-              label: _saving ? 'Saving…' : 'Save Profile',
-              isLoading: _saving,
-              onPressed: () async {
-                setState(() => _saving = true);
-                try {
-                  await AuthService.instance.updateProfile({'name': _name.text.trim(), 'phone': _phone.text.trim()});
-                  await ref.read(authProvider.notifier).refreshProfile();
-                  if (mounted) AppToast.show(context, 'Profile updated', isSuccess: true);
-                } catch (_) {
-                  if (mounted) AppToast.show(context, 'Failed', isError: true);
-                }
-                setState(() => _saving = false);
-              },
-            ),
-          ])).animate().fadeIn(delay: 120.ms),
-
-          const SizedBox(height: 14),
-
-          // Cloudinary settings
-          BrutalCard(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const SectionHeader(title: 'Cloudinary (Voice Notes)', icon: Icons.cloud_upload),
-            const SizedBox(height: 4),
-            const Text('Voice notes recorded during calls will be uploaded to your Cloudinary unsigned preset.',
-                style: AppTextStyles.caption),
-            const SizedBox(height: 12),
-            BrutalTextField(label: 'Cloud Name', controller: _cloudName, hint: 'e.g. dialeasypro'),
-            const SizedBox(height: 12),
-            BrutalTextField(label: 'Unsigned Upload Preset', controller: _uploadPreset, hint: 'e.g. voice_notes_unsigned'),
-            const SizedBox(height: 14),
-            BrutalButton.yellow(
-              label: _savingCloud ? 'Saving…' : 'Save Cloudinary',
-              isFullWidth: true,
-              isLoading: _savingCloud,
-              onPressed: () async {
-                setState(() => _savingCloud = true);
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setString('cloudinary_name', _cloudName.text.trim());
-                await prefs.setString('cloudinary_preset', _uploadPreset.text.trim());
-                if (_cloudName.text.trim().isNotEmpty && _uploadPreset.text.trim().isNotEmpty) {
-                  VoiceRecorderService.instance.configure(
-                    cloudName: _cloudName.text.trim(),
-                    uploadPreset: _uploadPreset.text.trim(),
-                  );
-                }
-                setState(() => _savingCloud = false);
-                if (mounted) AppToast.show(context, 'Cloudinary configured', isSuccess: true);
-              },
-            ),
-          ])).animate().fadeIn(delay: 160.ms),
 
           const SizedBox(height: 14),
 
@@ -385,41 +281,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ],
             ],
           ])).animate().fadeIn(delay: 180.ms),
-
-          const SizedBox(height: 14),
-
-          // Change password
-          BrutalCard(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const SectionHeader(title: 'Change Password', icon: Icons.lock),
-            const SizedBox(height: 14),
-            BrutalTextField(label: 'Current Password', controller: _oldPw, obscureText: true),
-            const SizedBox(height: 12),
-            BrutalTextField(label: 'New Password', controller: _newPw, obscureText: true),
-            const SizedBox(height: 12),
-            BrutalTextField(label: 'Confirm New', controller: _confirmPw, obscureText: true),
-            const SizedBox(height: 14),
-            BrutalButton.primary(
-              label: _changingPw ? 'Changing…' : 'Change Password',
-              isLoading: _changingPw,
-              onPressed: () async {
-                if (_newPw.text != _confirmPw.text) {
-                  AppToast.show(context, 'Passwords do not match', isError: true);
-                  return;
-                }
-                setState(() => _changingPw = true);
-                final ok = await ref.read(authProvider.notifier).changePassword(
-                  oldPw: _oldPw.text, newPw: _newPw.text, confirmPw: _confirmPw.text,
-                );
-                setState(() => _changingPw = false);
-                if (mounted) {
-                  if (ok) {
-                    _oldPw.clear(); _newPw.clear(); _confirmPw.clear();
-                    AppToast.show(context, 'Password changed', isSuccess: true);
-                  } else AppToast.show(context, 'Failed', isError: true);
-                }
-              },
-            ),
-          ])).animate().fadeIn(delay: 200.ms),
 
           const SizedBox(height: 14),
 

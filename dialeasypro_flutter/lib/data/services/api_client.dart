@@ -2,6 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/tenant_config.dart';
 
+/// How a token refresh ended. Only [rejected] ends the session.
+enum _Refresh { ok, rejected, unreachable }
+
 class ApiClient {
   ApiClient._();
   static final ApiClient instance = ApiClient._();
@@ -23,7 +26,7 @@ class ApiClient {
 
   // Single-flight refresh: concurrent 401s share ONE refresh call instead of
   // each firing their own (which races and can spuriously fail).
-  Future<bool>? _refreshing;
+  Future<_Refresh>? _refreshing;
 
   Dio get dio {
     if (!_initialized) init();
@@ -63,36 +66,49 @@ class ApiClient {
         final isAuthCall = path.contains('/auth/refresh/') || path.contains('/auth/login/');
 
         if (error.response?.statusCode == 401 && !isAuthCall) {
-          final refreshed = await _tryRefresh();
-          if (refreshed) {
+          final outcome = await _tryRefresh();
+          if (outcome == _Refresh.ok) {
             final prefs = await SharedPreferences.getInstance();
             final token = prefs.getString(_kAccess);
             error.requestOptions.headers['Authorization'] = 'Bearer $token';
             try {
               final retry = await _dio.fetch(error.requestOptions);
               return handler.resolve(retry);
+            } on DioException catch (retryError) {
+              // The session is fine — the refresh just worked. Whatever the
+              // retry failed with (a 500, a 403, a dropped connection) is that
+              // request's problem, not a reason to sign the agent out. This
+              // used to fall through to clearTokens() below.
+              return handler.next(retryError);
+            }
+          }
+          if (outcome == _Refresh.rejected) {
+            // The server refused the refresh token itself: expired, revoked or
+            // the agent was deactivated. Only then is the session over.
+            await clearTokens();
+            try {
+              onSessionExpired?.call();
             } catch (_) {}
           }
-          // Unrecoverable — clear session and notify the app to go to login.
-          await clearTokens();
-          try {
-            onSessionExpired?.call();
-          } catch (_) {}
+          // _Refresh.unreachable: no network, or the server hiccuped. Keep the
+          // session and let this request fail; the next one will refresh.
+          // Treating this as an expired session is what signed agents out
+          // every time the phone lost signal.
         }
         handler.next(error);
       },
     ));
   }
 
-  Future<bool> _tryRefresh() {
+  Future<_Refresh> _tryRefresh() {
     // Reuse an in-flight refresh if one is already running.
     return _refreshing ??= _doRefresh().whenComplete(() => _refreshing = null);
   }
 
-  Future<bool> _doRefresh() async {
+  Future<_Refresh> _doRefresh() async {
     final prefs = await SharedPreferences.getInstance();
     final refresh = prefs.getString(_kRefresh);
-    if (refresh == null || refresh.isEmpty) return false;
+    if (refresh == null || refresh.isEmpty) return _Refresh.rejected;
     try {
       final tenantBase = TenantConfig.instance.apiBaseUrl;
       final headers = <String, dynamic>{'Content-Type': 'application/json'};
@@ -105,11 +121,17 @@ class ApiClient {
       final access = res.data['access'] as String?;
       // Backend may or may not rotate the refresh token; keep the old one if absent.
       final newRefresh = (res.data['refresh'] as String?) ?? refresh;
-      if (access == null) return false;
+      if (access == null) return _Refresh.unreachable;
       await saveTokens(access: access, refresh: newRefresh);
-      return true;
+      return _Refresh.ok;
+    } on DioException catch (e) {
+      // 400/401 from the refresh endpoint means the token itself was refused.
+      // Anything else — no response, a timeout, a 5xx — says nothing about the
+      // session.
+      final code = e.response?.statusCode;
+      return (code == 400 || code == 401) ? _Refresh.rejected : _Refresh.unreachable;
     } catch (_) {
-      return false;
+      return _Refresh.unreachable;
     }
   }
 

@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api_client.dart';
 import '../models/models.dart';
 import 'package:dio/dio.dart';
@@ -39,6 +42,17 @@ class AuthService {
 class LeadsService {
   LeadsService._();
   static final instance = LeadsService._();
+
+  /// What this client's Add Lead form shows (standard money fields + custom
+  /// fields). Falls back to the plain default form if the server is older.
+  Future<LeadFormConfig> getFormConfig() async {
+    try {
+      final r = await _dio.get('/leads/form-config/');
+      return LeadFormConfig.fromJson((r.data as Map).cast<String, dynamic>());
+    } catch (_) {
+      return const LeadFormConfig();
+    }
+  }
 
   Future<PaginatedResponse<Lead>> listLeads({
     int page = 1, int pageSize = 20,
@@ -94,7 +108,7 @@ class CallsService {
 
   Future<PaginatedResponse<CallLog>> listCalls({
     int page = 1, String? leadId, String? direction, String? connected,
-    String? dateFrom, String? dateTo,
+    String? dateFrom, String? dateTo, int? disposition,
   }) async {
     final r = await _dio.get('/calls/', queryParameters: {
       'page': page, 'page_size': 25,
@@ -103,6 +117,7 @@ class CallsService {
       if (connected != null && connected.isNotEmpty) 'connected': connected,
       if (dateFrom != null) 'date_from': dateFrom,
       if (dateTo != null) 'date_to': dateTo,
+      if (disposition != null) 'disposition': disposition,
     });
     return PaginatedResponse.fromJson(r.data, CallLog.fromJson);
   }
@@ -119,7 +134,41 @@ class CallsService {
 
   Future<List<CallDisposition>> getDispositions() async {
     final r = await _dio.get('/calls/dispositions/');
-    return (r.data as List).map((e) => CallDisposition.fromJson(e)).toList();
+    final data = r.data;
+    // A list today; tolerate a paginated shape too, rather than failing the
+    // one screen an agent cannot skip.
+    final list = data is Map ? (data['results'] as List? ?? const []) : data as List;
+    return list.map((e) => CallDisposition.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  static const _kDispositionsCache = 'cached_dispositions';
+
+  /// Dispositions for the post-call screen: retried once, then the last list
+  /// that loaded. Only fails when nothing has ever loaded on this phone.
+  Future<List<CallDisposition>> getDispositionsResilient() async {
+    final prefs = await SharedPreferences.getInstance();
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final fresh = await getDispositions();
+        await prefs.setString(_kDispositionsCache, jsonEncode([
+          for (final d in fresh)
+            {'id': d.id, 'name': d.name, 'slug': d.slug,
+             'is_positive': d.isPositive, 'auto_followup_hours': d.autoFollowupHours},
+        ]));
+        return fresh;
+      } catch (e) {
+        lastError = e;
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
+    }
+    final cached = prefs.getString(_kDispositionsCache);
+    if (cached != null) {
+      return (jsonDecode(cached) as List)
+          .map((e) => CallDisposition.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
+    throw lastError!;
   }
 
   Future<Map<String, dynamic>> getStats() async => (await _dio.get('/calls/stats/')).data;

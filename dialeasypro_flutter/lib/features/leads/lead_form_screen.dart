@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
+import '../../data/models/models.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
 
@@ -31,11 +32,37 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
   bool _loading = false;
   bool _initial = false;
 
+  /// This client's form: which money fields show, their labels, and the
+  /// custom fields the platform set up for them.
+  LeadFormConfig _config = const LeadFormConfig();
+  final Map<String, TextEditingController> _customText = {};
+  final Map<String, String?> _customChoice = {};
+  Map<String, String> _existingCustom = const {};
+
   @override
   void initState() {
     super.initState();
+    _loadConfig();
     if (widget.leadId != null) _load();
   }
+
+  Future<void> _loadConfig() async {
+    final config = await LeadsService.instance.getFormConfig();
+    if (!mounted) return;
+    setState(() {
+      _config = config;
+      for (final f in config.customFields) {
+        final existing = _existingCustom[f.key] ?? '';
+        if (_isChoice(f)) {
+          _customChoice[f.key] = existing.isEmpty ? null : existing;
+        } else {
+          _customText.putIfAbsent(f.key, () => TextEditingController(text: existing));
+        }
+      }
+    });
+  }
+
+  static bool _isChoice(LeadFormField f) => f.type == 'dropdown' || f.type == 'checkbox';
 
   Future<void> _load() async {
     setState(() => _initial = true);
@@ -44,6 +71,12 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
       _name.text = l.name; _phone.text = l.phone; _altPhone.text = l.alternatePhone;
       _email.text = l.email; _city.text = l.city; _state.text = l.state;
       _req.text = l.requirement; _budget.text = l.budget ?? ''; _deal.text = l.dealValue ?? '';
+      _existingCustom = {for (final c in l.customFields) c.key: c.value};
+      // The form config may have arrived first; fill what it already built.
+      for (final e in _existingCustom.entries) {
+        _customText[e.key]?.text = e.value;
+        if (_customChoice.containsKey(e.key)) _customChoice[e.key] = e.value.isEmpty ? null : e.value;
+      }
       setState(() { _source = l.source; _status = l.status; _priority = l.priority; _initial = false; });
     } catch (_) { setState(() => _initial = false); }
   }
@@ -51,6 +84,7 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
   @override
   void dispose() {
     for (final c in [_name, _phone, _altPhone, _email, _city, _state, _req, _budget, _deal]) c.dispose();
+    for (final c in _customText.values) c.dispose();
     super.dispose();
   }
 
@@ -58,6 +92,18 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
     if (_name.text.trim().isEmpty || _phone.text.trim().isEmpty) {
       AppToast.show(context, 'Name and phone required', isError: true);
       return;
+    }
+    final custom = <String, String>{};
+    for (final f in _config.customFields) {
+      final value = _isChoice(f)
+          ? (_customChoice[f.key] ?? '')
+          : (_customText[f.key]?.text.trim() ?? '');
+      if (f.required && value.isEmpty) {
+        AppToast.show(context, '${f.name} is required', isError: true);
+        return;
+      }
+      // On edit, send blanks too so a cleared value is cleared on the server.
+      if (value.isNotEmpty || widget.leadId != null) custom[f.key] = value;
     }
     setState(() => _loading = true);
     final data = {
@@ -68,8 +114,9 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
       if (_city.text.isNotEmpty) 'city': _city.text.trim(),
       if (_state.text.isNotEmpty) 'state': _state.text.trim(),
       if (_req.text.isNotEmpty) 'requirement': _req.text.trim(),
-      if (_budget.text.isNotEmpty) 'budget': _budget.text.trim(),
-      if (_deal.text.isNotEmpty) 'deal_value': _deal.text.trim(),
+      if (_config.budget.show && _budget.text.isNotEmpty) 'budget': _budget.text.trim(),
+      if (_config.dealValue.show && _deal.text.isNotEmpty) 'deal_value': _deal.text.trim(),
+      if (custom.isNotEmpty) 'custom_fields': custom,
       'source': _source, 'status': _status, 'priority': _priority,
     };
     try {
@@ -87,6 +134,60 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
       if (mounted) {
         AppToast.show(context, ApiClient.errorMessage(e), isError: true);
       }
+    }
+  }
+
+  /// One custom field as the right input for its type.
+  Widget _customInput(LeadFormField f) {
+    final label = f.required ? '${f.name} *' : f.name;
+    switch (f.type) {
+      case 'dropdown':
+        final options = {'': '— Select —', for (final o in f.options) o: o};
+        final current = _customChoice[f.key];
+        return _SelectField(
+          label: label,
+          value: options.containsKey(current) ? current ?? '' : '',
+          options: options,
+          onChange: (v) => setState(() => _customChoice[f.key] = v.isEmpty ? null : v),
+        );
+      case 'checkbox':
+        return _SelectField(
+          label: label,
+          value: _customChoice[f.key] ?? '',
+          options: const {'': '— Select —', 'Yes': 'Yes', 'No': 'No'},
+          onChange: (v) => setState(() => _customChoice[f.key] = v.isEmpty ? null : v),
+        );
+      case 'date':
+        final ctrl = _customText[f.key]!;
+        return GestureDetector(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: DateTime.tryParse(ctrl.text) ?? DateTime.now(),
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100),
+            );
+            if (picked != null) {
+              setState(() => ctrl.text =
+                  '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}');
+            }
+          },
+          child: AbsorbPointer(child: BrutalTextField(label: label, controller: ctrl, hint: 'Pick a date')),
+        );
+      default:
+        return BrutalTextField(
+          label: label,
+          controller: _customText[f.key]!,
+          hint: f.placeholder.isEmpty ? null : f.placeholder,
+          keyboardType: switch (f.type) {
+            'number' => TextInputType.number,
+            'phone' => TextInputType.phone,
+            'url' => TextInputType.url,
+            _ => TextInputType.text,
+          },
+          maxLines: f.type == 'textarea' ? 3 : 1,
+          minLines: f.type == 'textarea' ? 2 : 1,
+        );
     }
   }
 
@@ -145,13 +246,28 @@ class _LeadFormScreenState extends ConsumerState<LeadFormScreen> {
                   }).toList()),
                 ]),
                 const SizedBox(height: 12),
+                // Budget / Deal Value are shown and named per client — see
+                // Tenants → Import fields in the platform panel.
                 _Section(title: 'Sales', icon: Icons.trending_up, children: [
-                  BrutalTextField(label: 'Budget (₹)', controller: _budget, hint: '500000', keyboardType: TextInputType.number),
-                  const SizedBox(height: 12),
-                  BrutalTextField(label: 'Deal Value (₹)', controller: _deal, hint: '250000', keyboardType: TextInputType.number),
-                  const SizedBox(height: 12),
+                  if (_config.budget.show) ...[
+                    BrutalTextField(label: _config.budget.label, controller: _budget, hint: '500000', keyboardType: TextInputType.number),
+                    const SizedBox(height: 12),
+                  ],
+                  if (_config.dealValue.show) ...[
+                    BrutalTextField(label: _config.dealValue.label, controller: _deal, hint: '250000', keyboardType: TextInputType.number),
+                    const SizedBox(height: 12),
+                  ],
                   BrutalTextField(label: 'Requirement', controller: _req, hint: 'What does the lead need?', maxLines: 3, minLines: 2),
                 ]),
+                if (_config.customFields.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _Section(title: 'More details', icon: Icons.tune, children: [
+                    for (final f in _config.customFields) ...[
+                      _customInput(f),
+                      const SizedBox(height: 12),
+                    ],
+                  ]),
+                ],
                 const SizedBox(height: 24),
                 BrutalButton.primary(
                   label: _loading ? 'Saving…' : (widget.leadId != null ? 'Save Changes →' : 'Create Lead →'),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/colors.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/services/services.dart';
+import '../work/work_session.dart';
 import 'dialer_state.dart';
 
 // ============================================================
@@ -20,7 +21,12 @@ final _availableQueuesProvider = FutureProvider.autoDispose<List<Map<String, dyn
 });
 
 class QueueStarterScreen extends ConsumerWidget {
-  const QueueStarterScreen({super.key});
+  /// Shown as the Auto Dial home tab: no back button, and [header] (the live
+  /// status strip) above the queues.
+  final bool embedded;
+  final Widget? header;
+  final List<Widget> actions;
+  const QueueStarterScreen({super.key, this.embedded = false, this.header, this.actions = const []});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -29,8 +35,12 @@ class QueueStarterScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Auto-Dialer Queues'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.black), onPressed: () => context.pop()),
+        title: Text(embedded ? 'Auto Dial' : 'Auto-Dialer Queues'),
+        automaticallyImplyLeading: false,
+        leading: embedded
+            ? null
+            : IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.black), onPressed: () => context.pop()),
+        actions: actions,
       ),
       body: RefreshIndicator(
         onRefresh: () async => ref.invalidate(_availableQueuesProvider),
@@ -42,6 +52,7 @@ class QueueStarterScreen extends ConsumerWidget {
           data: (queues) => ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              if (header != null) ...[header!, const SizedBox(height: 16)],
               BrutalCard(
                 padding: const EdgeInsets.all(18),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
@@ -128,8 +139,10 @@ class QueueStarterScreen extends ConsumerWidget {
   }
 
   Future<void> _startQueue(BuildContext context, WidgetRef ref, int queueId) async {
+    // Starting to dial is going back to work.
+    await ref.read(workSessionProvider.notifier).endBreak();
     ref.read(dialerProvider.notifier).startServerQueue(queueId);
-    context.push('/dialer');
+    if (context.mounted) context.push('/dialer');
   }
 }
 

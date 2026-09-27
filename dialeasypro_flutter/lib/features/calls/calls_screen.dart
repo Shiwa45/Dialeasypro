@@ -11,7 +11,17 @@ import '../../data/services/services.dart';
 import '../ai/call_insight_sheet.dart';
 import '../features_provider.dart';
 
-final _callsListProvider = FutureProvider.autoDispose<PaginatedResponse<CallLog>>((_) => CallsService.instance.listCalls());
+/// The outcome the History list is filtered to; null shows every call.
+final _dispositionFilterProvider = StateProvider.autoDispose<int?>((_) => null);
+
+final _callsListProvider = FutureProvider.autoDispose<PaginatedResponse<CallLog>>((ref) {
+  final disposition = ref.watch(_dispositionFilterProvider);
+  return CallsService.instance.listCalls(disposition: disposition);
+});
+
+final _historyDispositionsProvider = FutureProvider.autoDispose<List<CallDisposition>>(
+  (_) => CallsService.instance.getDispositionsResilient(),
+);
 final _callStatsHeaderProvider = FutureProvider.autoDispose<Map<String, dynamic>>((_) => CallsService.instance.getStats());
 
 class CallsScreen extends ConsumerWidget {
@@ -21,11 +31,13 @@ class CallsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final callsAsync = ref.watch(_callsListProvider);
     final statsAsync = ref.watch(_callStatsHeaderProvider);
+    final filter = ref.watch(_dispositionFilterProvider);
+    final dispositions = ref.watch(_historyDispositionsProvider).valueOrNull ?? const <CallDisposition>[];
     final showInsights = ref.features.has(Feat.aiInsights);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Call Log')),
+      appBar: AppBar(title: const Text('History')),
       body: BrutalRefreshIndicator(
         onRefresh: () async {
           ref.invalidate(_callsListProvider);
@@ -53,6 +65,30 @@ class CallsScreen extends ConsumerWidget {
               ).animate().fadeIn();
             },
           )),
+          // Filter by outcome: "all my Interested calls", "everyone I could
+          // not reach today" — the questions agents actually ask of history.
+          if (dispositions.isNotEmpty)
+            SliverToBoxAdapter(child: SizedBox(
+              height: 52,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                children: [
+                  _FilterChip(
+                    label: 'All',
+                    selected: filter == null,
+                    onTap: () => ref.read(_dispositionFilterProvider.notifier).state = null,
+                  ),
+                  for (final d in dispositions)
+                    _FilterChip(
+                      label: d.name,
+                      selected: filter == d.id,
+                      onTap: () => ref.read(_dispositionFilterProvider.notifier).state =
+                          filter == d.id ? null : d.id,
+                    ),
+                ],
+              ),
+            )),
           callsAsync.when(
             loading: () => SliverPadding(padding: const EdgeInsets.all(16), sliver: SliverList(delegate: SliverChildBuilderDelegate(
               (_, i) => const Padding(padding: EdgeInsets.only(bottom: 10), child: ShimmerCard(height: 80)),
@@ -60,11 +96,16 @@ class CallsScreen extends ConsumerWidget {
             ))),
             error: (_, __) => const SliverFillRemaining(child: EmptyStateView(icon: Icons.error_outline, title: 'Failed')),
             data: (res) => res.results.isEmpty
-                ? SliverFillRemaining(child: EmptyStateView(
-                    icon: Icons.phone_disabled, title: 'No calls yet',
-                    message: 'Call a lead and it will appear here',
-                    buttonLabel: 'Go to Leads', onAction: () => context.go('/leads'),
-                  ))
+                ? SliverFillRemaining(child: filter != null
+                    ? const EmptyStateView(
+                        icon: Icons.filter_alt_off, title: 'No calls with this outcome',
+                        message: 'Pick another outcome, or All',
+                      )
+                    : EmptyStateView(
+                        icon: Icons.phone_disabled, title: 'No calls yet',
+                        message: 'Call a lead and it will appear here',
+                        buttonLabel: 'Go to Leads', onAction: () => context.go('/leads'),
+                      ))
                 : SliverPadding(padding: const EdgeInsets.all(16), sliver: SliverList(delegate: SliverChildBuilderDelegate(
                     (_, i) {
                       final c = res.results[i];
@@ -130,4 +171,32 @@ class _CallStat extends StatelessWidget {
     Text(value, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 20, color: AppColors.yellow)),
     Text(sub, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: AppColors.muted)),
   ]);
+}
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _FilterChip({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(right: 8),
+    child: GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.brand : AppColors.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: selected ? AppColors.brand : AppColors.line),
+        ),
+        child: Text(label, style: TextStyle(
+          fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w600, fontSize: 12,
+          color: selected ? AppColors.white : AppColors.text,
+        )),
+      ),
+    ),
+  );
 }

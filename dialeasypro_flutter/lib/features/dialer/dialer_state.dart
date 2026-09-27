@@ -448,9 +448,13 @@ class DialerNotifier extends StateNotifier<DialerState> {
     CallRecordingService.instance.stopMicCapture().then((f) {
       try { f?.deleteSync(); } catch (_) {}
     }).catchError((_) {});
-    // End the session → agent goes offline on the monitoring dashboard.
+    // The queue ends, the work session does not: the agent stays live and
+    // goes back to available (unless on a break). This used to end the whole
+    // presence session, so an agent between queues showed as offline.
     if (_sessionActive) {
-      PresenceService.instance.endSession();
+      if (PresenceService.instance.current != AgentStatus.breakStatus) {
+        PresenceService.instance.report(AgentStatus.available);
+      }
       _sessionActive = false;
     }
     state = const DialerState();
@@ -466,12 +470,14 @@ class DialerNotifier extends StateNotifier<DialerState> {
     await PresenceService.instance.report(AgentStatus.breakStatus, breakReason: reason);
   }
 
-  /// End the break and return to available; resumes the dialer.
-  Future<void> endBreak() async {
+  /// End the break and return to available. By default the dialer resumes;
+  /// the work session passes autoResume: false so the agent resumes it
+  /// themselves from the Auto Dial screen.
+  Future<void> endBreak({bool autoResume = true}) async {
     if (!state.onBreak) return;
     state = state.copyWith(onBreak: false);
     await PresenceService.instance.report(AgentStatus.available);
-    resume();
+    if (autoResume) resume();
   }
 
   /// Mark current call's notes (during call)

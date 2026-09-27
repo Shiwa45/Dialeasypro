@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../core/theme/colors.dart';
 import '../notifications/notification_bell.dart';
 import '../../core/utils/utils.dart';
@@ -204,12 +205,14 @@ class _Greeting extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 8, 12),
       child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(Fmt.date(DateTime.now().toIso8601String()), style: AppTextStyles.caption),
-          const SizedBox(height: 4),
           const Text('Dashboard', style: AppTextStyles.h1),
           const SizedBox(height: 4),
           Text('$greet, ${agent?.name.split(' ').first ?? 'Agent'}',
               style: AppTextStyles.bodyMedium.copyWith(color: AppColors.text2)),
+          const SizedBox(height: 2),
+          // Day and date together, right under the greeting.
+          Text(DateFormat('EEEE, d MMMM yyyy').format(DateTime.now()),
+              style: AppTextStyles.caption.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

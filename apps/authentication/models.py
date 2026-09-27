@@ -181,6 +181,12 @@ class Agent(AbstractBaseUser, TimeStampedModel):
 
     def save(self, *args, **kwargs):
         self.role = self.role.lower()
+        # The owner account is always an admin. `role` is what the API
+        # authorises on (IsTenantAdmin); `is_tenant_admin` only marks the
+        # owner. They used to be able to disagree, so the same person could
+        # hold admin API powers without admin screens, or the reverse.
+        if self.is_tenant_admin:
+            self.role = AgentRole.ADMIN
         super().save(*args, **kwargs)
 
     def __str__(self):

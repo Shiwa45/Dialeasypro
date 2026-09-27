@@ -571,15 +571,17 @@ class CallProviderWebhookView(APIView):
         payload = request.data
         logger.info(f"[Webhook] Call event from {provider}: {list(payload.keys())}")
 
+        # Knowlarity is not here on purpose: there is no Knowlarity dialing
+        # integration, and its handler was an empty `pass` that answered 200
+        # and recorded nothing. Unsupported providers are told so.
         handlers = {
             "exotel": self._handle_exotel,
             "mcube": self._handle_mcube,
-            "knowlarity": self._handle_knowlarity,
         }
 
         handler = handlers.get(provider)
         if not handler:
-            return Response({"error": "unknown_provider"}, status=400)
+            return Response({"error": "unsupported_provider"}, status=400)
 
         try:
             handler(payload)
@@ -592,7 +594,7 @@ class CallProviderWebhookView(APIView):
         """Process Exotel call status webhook."""
         call_sid = payload.get("CallSid")
         status_str = payload.get("Status")  # "completed", "failed", "busy", "no-answer"
-        duration = int(payload.get("Duration", 0))
+        duration = _duration_seconds(payload.get("Duration"))
 
         try:
             call = CallLog.objects.get(provider_call_id=call_sid)
@@ -621,7 +623,7 @@ class CallProviderWebhookView(APIView):
         """Process MCUBE call event webhook."""
         # MCUBE sends different field names — map them
         call_id = payload.get("uniqueid") or payload.get("callid")
-        duration = int(payload.get("duration", 0))
+        duration = _duration_seconds(payload.get("duration"))
         status_str = payload.get("disposition", "")
 
         try:
@@ -634,9 +636,22 @@ class CallProviderWebhookView(APIView):
         call.provider_meta = payload
         call.save(update_fields=["duration_seconds", "is_connected", "provider_meta"])
 
-    def _handle_knowlarity(self, payload: dict):
-        """Process Knowlarity webhook — placeholder."""
-        pass
+
+
+def _duration_seconds(value) -> int:
+    """
+    A provider's duration field as whole seconds; 0 when blank or unreadable.
+
+    int(payload.get("Duration", 0)) raised on "" (a call that never
+    connected), "12.0" or None; the handler's error was swallowed and the
+    webhook still answered 200, so the call's status was never recorded.
+    """
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        if value not in (None, ""):
+            logger.warning(f"[Webhook] Unreadable call duration: {value!r}")
+        return 0
 
 
 class CallStatsView(APIView):

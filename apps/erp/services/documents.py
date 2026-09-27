@@ -264,6 +264,9 @@ def issue_invoice(invoice: CustomerInvoice) -> CustomerInvoice:
 
 @transaction.atomic
 def cancel_invoice(invoice: CustomerInvoice, reason: str = "") -> CustomerInvoice:
+    # The same lock record_payment takes, so a payment and a cancellation
+    # cannot both pass their checks on stale copies of the invoice.
+    invoice = CustomerInvoice.objects.select_for_update().get(pk=invoice.pk)
     if invoice.status == InvoiceStatus.CANCELLED:
         return invoice
     if invoice.amount_paid > 0:
@@ -280,18 +283,20 @@ def cancel_invoice(invoice: CustomerInvoice, reason: str = "") -> CustomerInvoic
 @transaction.atomic
 def record_payment(invoice: CustomerInvoice, *, amount: Decimal, recorded_by=None, **fields) -> Payment:
     """Record a receipt and advance the invoice's payment status."""
-    if invoice.status == InvoiceStatus.CANCELLED:
-        raise ValueError("Cannot record a payment against a cancelled invoice.")
-    if invoice.status == InvoiceStatus.DRAFT:
-        raise ValueError("Issue the invoice before recording payments.")
-
     amount = gst.q2(amount)
     if amount <= 0:
         raise ValueError("Payment amount must be positive.")
 
     # Lock the invoice so two concurrent payments can't both see the old balance
-    # and jointly overshoot the total.
+    # and jointly overshoot the total — and check its status on the LOCKED row.
+    # The checks used to run on the caller's copy before the lock, so a
+    # cancellation landing in between was missed and a cancelled invoice took
+    # a payment.
     locked = CustomerInvoice.objects.select_for_update().get(pk=invoice.pk)
+    if locked.status == InvoiceStatus.CANCELLED:
+        raise ValueError("Cannot record a payment against a cancelled invoice.")
+    if locked.status == InvoiceStatus.DRAFT:
+        raise ValueError("Issue the invoice before recording payments.")
     if amount > locked.amount_due:
         raise ValueError(
             f"Payment ₹{amount} exceeds the outstanding balance of ₹{locked.amount_due}."

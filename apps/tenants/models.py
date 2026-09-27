@@ -116,6 +116,17 @@ class Tenant(TenantMixin, TimeStampedModel):
         db_index=True,
         help_text="Master kill-switch. Set to False to block all logins.",
     )
+    # Why the tenant is suspended. A payment may lift a BILLING suspension
+    # (an expired trial) but never an ADMIN one — the super admin's kill
+    # switch, e.g. for abuse. Both used to look the same, so the next
+    # recurring charge silently re-enabled a tenant suspended for abuse.
+    SUSPENDED_BILLING = "billing"
+    SUSPENDED_ADMIN = "admin"
+    suspension_kind = models.CharField(
+        max_length=10, blank=True, default="",
+        choices=[(SUSPENDED_BILLING, "Billing"), (SUSPENDED_ADMIN, "Super admin")],
+        help_text="Set by suspend(); cleared by activate().",
+    )
     onboarding_completed = models.BooleanField(default=False)
     onboarding_step = models.PositiveSmallIntegerField(
         default=0,
@@ -252,20 +263,27 @@ class Tenant(TenantMixin, TimeStampedModel):
             self.schema_name = self._unique_schema_name(base)
         super().save(*args, **kwargs)
 
-    def suspend(self, reason: str = ""):
-        """Suspend the tenant account."""
+    def suspend(self, reason: str = "", kind: str = SUSPENDED_ADMIN):
+        """
+        Suspend the tenant account.
+
+        `kind` is ADMIN unless billing is the reason: only a BILLING
+        suspension is lifted by the tenant paying.
+        """
         self.subscription_status = SubscriptionStatus.SUSPENDED
         self.is_active = False
+        self.suspension_kind = kind
         if reason:
             self.internal_notes += f"\n[SUSPENDED {timezone.now().date()}] {reason}"
-        self.save(update_fields=["subscription_status", "is_active", "internal_notes"])
+        self.save(update_fields=["subscription_status", "is_active", "suspension_kind", "internal_notes"])
         logger.info(f"[Tenant] Suspended: {self.schema_name} — {reason}")
 
     def activate(self):
         """Activate (or reactivate) the tenant account."""
         self.subscription_status = SubscriptionStatus.ACTIVE
         self.is_active = True
-        self.save(update_fields=["subscription_status", "is_active"])
+        self.suspension_kind = ""
+        self.save(update_fields=["subscription_status", "is_active", "suspension_kind"])
         logger.info(f"[Tenant] Activated: {self.schema_name}")
 
     def set_trial(self, days: int = 14):

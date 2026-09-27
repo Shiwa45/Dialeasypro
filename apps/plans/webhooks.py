@@ -150,10 +150,21 @@ class RazorpayWebhookView(View):
             update_fields=["status", "current_period_start", "current_period_end"]
         )
 
-        # Update tenant
-        subscription.tenant.subscription_status = SubscriptionStatus.ACTIVE
-        subscription.tenant.is_active = True
-        subscription.tenant.save(update_fields=["subscription_status", "is_active"])
+        # Update tenant — but a payment only lifts a BILLING suspension (an
+        # expired trial). This used to set is_active=True unconditionally,
+        # silently re-enabling a tenant the super admin had suspended.
+        tenant = subscription.tenant
+        if tenant.is_active or tenant.suspension_kind != tenant.SUSPENDED_ADMIN:
+            tenant.subscription_status = SubscriptionStatus.ACTIVE
+            tenant.is_active = True
+            tenant.suspension_kind = ""
+            tenant.save(update_fields=["subscription_status", "is_active", "suspension_kind"])
+        else:
+            logger.warning(
+                f"[Webhook] Payment for {tenant.schema_name}, which a super admin "
+                f"suspended — recorded, tenant left suspended."
+            )
+        _refresh_tenant_caches(subscription)
 
         # Create invoice for this charge — unless we already did.
         #
@@ -188,6 +199,7 @@ class RazorpayWebhookView(View):
             subscription.status = SubscriptionStatus.CANCELLED
             subscription.cancelled_at = timezone.now()
             subscription.save(update_fields=["status", "cancelled_at"])
+            _refresh_tenant_caches(subscription)
             logger.info(f"[Webhook] Subscription cancelled: {sub_id}")
         except Subscription.DoesNotExist:
             logger.warning(f"[Webhook] Subscription not found for cancel: {sub_id}")
@@ -211,6 +223,7 @@ class RazorpayWebhookView(View):
             # Update tenant status
             subscription.tenant.subscription_status = SubscriptionStatus.PAST_DUE
             subscription.tenant.save(update_fields=["subscription_status"])
+            _refresh_tenant_caches(subscription)
 
             logger.warning(f"[Webhook] Subscription halted: {sub_id}")
         except Subscription.DoesNotExist:
@@ -227,6 +240,19 @@ class RazorpayWebhookView(View):
             f"[Webhook] Payment failed: {payment_id} — "
             f"{error_code}: {error_description}"
         )
+
+
+def _refresh_tenant_caches(subscription):
+    """
+    Make a subscription change take effect now.
+
+    The tenant's plan, features and active flag are cached; without this a
+    charged, halted or cancelled subscription only applied once the caches
+    expired.
+    """
+    from apps.core.middleware import TenantFeatureFlagMiddleware
+
+    TenantFeatureFlagMiddleware.invalidate_cache(subscription.tenant.schema_name)
 
 
 def _create_invoice_for_subscription(subscription, payment_id: str, payment_data: dict):

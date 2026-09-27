@@ -187,3 +187,78 @@ def test_an_unsigned_webhook_is_rejected(client):
         "/webhooks/razorpay/", data="{}", content_type="application/json",
     )
     assert response.status_code in (400, 401, 404)
+
+
+# ============================================================
+# A payment must not undo the super admin's kill switch (MED-16, MED-17)
+# ============================================================
+
+def _charge(payment_id):
+    from apps.plans.webhooks import RazorpayWebhookView
+
+    RazorpayWebhookView()._handle_subscription_charged({
+        "subscription": {"entity": {
+            "id": "sub_test_1", "current_start": 1767225600, "current_end": 1769904000,
+        }},
+        "payment": {"entity": {"id": payment_id, "amount": 294982}},
+    })
+
+
+def _can_use_the_crm(tenant):
+    from apps.core.middleware import TenantFeatureFlagMiddleware
+
+    tenant.refresh_from_db()
+    return TenantFeatureFlagMiddleware(lambda r: None)._is_tenant_active(tenant)
+
+
+@pytest.mark.django_db
+def test_a_payment_does_not_reopen_a_tenant_suspended_by_the_super_admin(subscription):
+    tenant = subscription.tenant
+    tenant.suspend(reason="Abuse")
+
+    _charge("pay_abuse")
+
+    tenant.refresh_from_db()
+    assert tenant.is_active is False
+    assert not _can_use_the_crm(tenant), "an active subscription must not override the kill switch"
+
+
+@pytest.mark.django_db
+def test_a_payment_does_reopen_an_expired_trial(subscription):
+    tenant = subscription.tenant
+    tenant.suspend(reason="Trial period expired", kind=tenant.SUSPENDED_BILLING)
+
+    _charge("pay_trial")
+
+    tenant.refresh_from_db()
+    assert tenant.is_active is True
+    assert tenant.suspension_kind == ""
+    assert _can_use_the_crm(tenant)
+
+
+@pytest.mark.django_db
+def test_the_super_admin_can_still_lift_their_own_suspension(subscription):
+    tenant = subscription.tenant
+    tenant.suspend(reason="Abuse")
+
+    tenant.activate()
+
+    assert _can_use_the_crm(tenant)
+
+
+@pytest.mark.django_db
+def test_a_cancellation_takes_effect_without_waiting_for_the_cache(subscription):
+    from django.core.cache import cache
+
+    from apps.plans.webhooks import RazorpayWebhookView
+
+    schema = subscription.tenant.schema_name
+    cache.set(f"tenant_active:{schema}", True, timeout=600)
+    cache.set(f"tenant_plan_id:{schema}", subscription.plan_id, timeout=600)
+
+    RazorpayWebhookView()._handle_subscription_cancelled(
+        {"subscription": {"entity": {"id": "sub_test_1"}}}
+    )
+
+    assert cache.get(f"tenant_active:{schema}") is None
+    assert cache.get(f"tenant_plan_id:{schema}") is None

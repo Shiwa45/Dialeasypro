@@ -396,6 +396,12 @@ class TenantFeatureFlagMiddleware(MiddlewareMixin):
         Falls back to querying the Subscription table only when the tenant
         status itself indicates the account is not in an active state.
         """
+        # The super admin's kill switch wins over everything below: a
+        # subscription that is active (the tenant kept paying) must not reopen
+        # an account suspended for abuse.
+        if not tenant.is_active and tenant.suspension_kind == tenant.SUSPENDED_ADMIN:
+            return False
+
         cache_key = f"tenant_active:{tenant.schema_name}"
         cached = cache.get(cache_key)
         if cached is not None:

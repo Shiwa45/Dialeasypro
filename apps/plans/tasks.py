@@ -45,7 +45,7 @@ def check_trial_expirations(self):
 
         if days_remaining <= 0:
             # Trial expired — suspend
-            tenant.suspend(reason="Trial period expired")
+            tenant.suspend(reason="Trial period expired", kind=tenant.SUSPENDED_BILLING)
             suspended_count += 1
             logger.info(f"[Task] Suspended expired trial: {tenant.schema_name}")
 

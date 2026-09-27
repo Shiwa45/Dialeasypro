@@ -15,6 +15,7 @@ lock is released at commit. Callers use @transaction.atomic.
 from datetime import date
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.erp.constants import DocumentType
 from apps.erp.models import DocumentSequence
@@ -22,7 +23,9 @@ from apps.erp.models import DocumentSequence
 
 def financial_year(on: date | None = None) -> str:
     """Indian FY label for a date: April→March. e.g. 2026-27."""
-    on = on or date.today()
+    # IST, not the server clock: from midnight to 5:30 AM on 1 April the
+    # server's date is still 31 March, the previous financial year.
+    on = on or timezone.localdate()
     start = on.year if on.month >= 4 else on.year - 1
     return f"{start}-{str(start + 1)[2:]}"
 
@@ -40,8 +43,14 @@ def next_number(doc_type: str, on: date | None = None) -> str:
 
     fy = financial_year(on)
 
-    # get_or_create then lock: the row must exist before it can be locked.
-    DocumentSequence.objects.get_or_create(doc_type=doc_type, financial_year=fy)
+    # Make sure the row exists, then lock it. get_or_create raced: the first
+    # two documents of a new financial year both missed, both INSERTed, and
+    # the loser's IntegrityError aborted its transaction — a 500. INSERT ...
+    # ON CONFLICT DO NOTHING cannot fail that way, and the lock below still
+    # hands out numbers one at a time.
+    DocumentSequence.objects.bulk_create(
+        [DocumentSequence(doc_type=doc_type, financial_year=fy)], ignore_conflicts=True,
+    )
     seq = DocumentSequence.objects.select_for_update().get(doc_type=doc_type, financial_year=fy)
 
     seq.last_number += 1

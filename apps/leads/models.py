@@ -1037,6 +1037,17 @@ class LeadBatch(TimeStampedModel):
             self.total_leads = actual
         return actual
 
+    @classmethod
+    def recount_ids(cls, batch_ids) -> None:
+        """
+        Recount the given batches after leads left them.
+
+        total_leads is incremented as leads arrive but nothing took it down
+        when they were deleted, so a batch's count only ever went up.
+        """
+        for batch in cls.objects.filter(pk__in={b for b in batch_ids if b}):
+            batch.recount()
+
     def close(self):
         if self.status != self.STATUS_CLOSED:
             self.status = self.STATUS_CLOSED

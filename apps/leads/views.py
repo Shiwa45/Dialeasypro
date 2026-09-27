@@ -42,6 +42,7 @@ from apps.leads.models import (
     FollowUp,
     Lead,
     LeadActivity,
+    LeadBatch,
     LeadImportJob,
     LeadNote,
 )
@@ -284,6 +285,7 @@ class LeadDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_destroy(self, instance):
         instance.is_deleted = True
         instance.save(update_fields=["is_deleted"])
+        LeadBatch.recount_ids([instance.batch_id])
         AuditLog.log(
             action=AuditAction.DELETE,
             actor_type="agent",
@@ -523,7 +525,9 @@ class LeadFlushView(APIView):
             qs = qs.filter(status__in=[s.lower() for s in statuses])
 
         count = qs.count()
+        batch_ids = set(qs.values_list("batch_id", flat=True).distinct())
         qs.delete()  # cascades to notes/followups/activities/custom values
+        LeadBatch.recount_ids(batch_ids)
 
         AuditLog.log(
             action=AuditAction.DELETE,

@@ -148,8 +148,7 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
             if phone in existing_phones:
                 if job.duplicate_action == "skip":
                     duplicates += 1
-                    job.processed_rows += 1
-                    job.save(update_fields=["processed_rows"])
+                    _note_progress(job, row_idx)
                     continue
                 elif job.duplicate_action == "update":
                     # Update the existing lead.
@@ -182,8 +181,7 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
                         raise ValueError("Duplicate number, but no lead found to update")
                     successful += 1
                     duplicates += 1
-                    job.processed_rows += 1
-                    job.save(update_fields=["processed_rows"])
+                    _note_progress(job, row_idx)
                     continue
                 # else: create_new — allow duplicate
 
@@ -235,10 +233,7 @@ def process_lead_import(self, schema_name: str, import_job_id: str):
                 "error": str(exc),
             })
 
-        job.processed_rows = row_idx - 1
-        # Save progress every 100 rows
-        if (row_idx - 1) % 100 == 0:
-            job.save(update_fields=["processed_rows"])
+        _note_progress(job, row_idx)
 
     # --- Plan capacity ----------------------------------------
     # Truncate to what the plan still allows rather than failing the whole job:
@@ -590,6 +585,18 @@ def _apply_mapping(raw_row: dict, column_mapping: dict, default_mapping: dict) -
     return result
 
 
+def _note_progress(job, row_idx: int):
+    """
+    Record how far the import has got, writing the job row every 100 rows.
+
+    Duplicate rows used to save the job one at a time, so re-importing a
+    50,000-row file meant 50,000 extra UPDATEs.
+    """
+    job.processed_rows = row_idx - 1
+    if job.processed_rows % 100 == 0:
+        job.save(update_fields=["processed_rows"])
+
+
 def _merge_row_into_queued(lead: "Lead", extra: dict, row: dict, custom_field_by_key: dict):
     """
     Fold a later row for the same new number into the lead queued for it.
@@ -867,10 +874,13 @@ def cleanup_old_leads(self, schema_name: str, retention_days: int):
     from apps.leads.models import Lead
 
     cutoff = timezone.now() - timedelta(days=retention_days)
-    count = Lead.objects.filter(
-        created_at__lt=cutoff,
-        is_deleted=False,
-    ).update(is_deleted=True)
+    expiring = Lead.objects.filter(created_at__lt=cutoff, is_deleted=False)
+    batch_ids = set(expiring.values_list("batch_id", flat=True).distinct())
+    count = expiring.update(is_deleted=True)
+
+    from apps.leads.models import LeadBatch
+
+    LeadBatch.recount_ids(batch_ids)
 
     logger.info(
         f"[Task] Data retention: archived {count} leads in {schema_name} "

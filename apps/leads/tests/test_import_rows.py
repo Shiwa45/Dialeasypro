@@ -120,3 +120,27 @@ def test_an_unreadable_budget_is_reported_and_the_lead_still_imported():
     assert Lead.objects.get(phone="+919876500012").budget is None
     assert any("negotiable" in e["error"] for e in job.row_errors)
     assert job.successful_rows == 1
+
+
+# ---- LOW-1 --------------------------------------------------------------
+
+def test_duplicate_rows_do_not_save_the_job_one_by_one():
+    """Re-importing a file used to write the job row once per duplicate."""
+    from unittest.mock import patch
+
+    rows = "".join(f"L{i},98765{i:05d},,,\n" for i in range(250))
+    _import("name,phone,city,email,budget\n" + rows)  # first import creates them
+
+    saves = []
+    real_save = LeadImportJob.save
+
+    def counting_save(self, *args, **kwargs):
+        saves.append(kwargs.get("update_fields"))
+        return real_save(self, *args, **kwargs)
+
+    with patch.object(LeadImportJob, "save", counting_save):
+        job = _import("name,phone,city,email,budget\n" + rows, duplicate_action="skip")
+
+    assert job.duplicate_rows == 250
+    progress_saves = [f for f in saves if f == ["processed_rows"]]
+    assert len(progress_saves) <= 3, f"{len(progress_saves)} progress writes for 250 rows"

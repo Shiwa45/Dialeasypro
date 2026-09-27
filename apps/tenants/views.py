@@ -24,6 +24,9 @@ from rest_framework.views import APIView
 from apps.superadmin.models import AuditLog, GlobalSettings
 from apps.core.constants import AuditAction
 from apps.tenants.serializers import TenantPublicSerializer, TenantRegistrationSerializer
+from apps.tenants.throttles import (
+    RegistrationBurstThrottle, RegistrationDailyThrottle, RegistrationPlatformThrottle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,16 +53,16 @@ class TenantRegistrationAPIView(APIView):
       {
         "message": "Account created! Check your email for login credentials.",
         "tenant": { ... },
-        "login_url": "https://acme-realty.telecrm.in/crm/login/"
+        "login_url": "<FRONTEND_URL>", "workspace": "acme-realty"
       }
     """
 
     permission_classes = [AllowAny]
-    # throttle_scope only takes effect with ScopedRateThrottle, which was not
-    # enabled, and no "registration" rate existed — the declared limit was
-    # never applied.
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "registration"
+    # Per-IP burst and daily limits, plus a platform-wide daily cap —
+    # see apps/tenants/throttles.py.
+    throttle_classes = [
+        RegistrationBurstThrottle, RegistrationDailyThrottle, RegistrationPlatformThrottle,
+    ]
 
     def post(self, request):
         # Check if new registrations are allowed
@@ -93,8 +96,11 @@ class TenantRegistrationAPIView(APIView):
 
         # Build login URL
         from django.conf import settings as django_settings
-        login_url = (
-            f"https://{tenant.schema_name}.{django_settings.BASE_DOMAIN}/crm/login/"
+        # The CRM is the React app (FRONTEND_URL); people sign in there with
+        # their workspace ID. This pointed at /crm/login/, the removed
+        # server-rendered UI.
+        login_url = django_settings.FRONTEND_URL or (
+            f"https://{tenant.schema_name}.{django_settings.BASE_DOMAIN}/"
         )
 
         AuditLog.log(
@@ -119,6 +125,7 @@ class TenantRegistrationAPIView(APIView):
                 ),
                 "tenant": TenantPublicSerializer(tenant).data,
                 "login_url": login_url,
+                "workspace": _workspace_of(tenant),
                 "trial_days": tenant.trial_days_remaining,
             },
             status=status.HTTP_201_CREATED,
@@ -162,3 +169,12 @@ class TenantCheckSubdomainAPIView(APIView):
                 "reason": "taken" if taken else None,
             }
         )
+
+
+def _workspace_of(tenant) -> str:
+    """The workspace ID people type at sign-in: the tenant's subdomain."""
+    domain = (
+        tenant.domains.order_by("-is_primary").values_list("domain", flat=True).first()
+        if hasattr(tenant, "domains") else None
+    )
+    return domain.split(".")[0] if domain else tenant.schema_name

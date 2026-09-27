@@ -41,7 +41,6 @@ def test_provider_webhooks_are_not_throttled(view):
 @pytest.mark.parametrize("view,scope", [
     (AgentRefreshTokenAPIView, "token_refresh"),
     (TenantInfoAPIView, "tenant_info"),
-    (TenantRegistrationAPIView, "registration"),
     (TenantCheckSubdomainAPIView, "subdomain_check"),
 ])
 def test_pre_auth_endpoints_use_their_own_scope(view, scope):
@@ -59,4 +58,69 @@ def test_an_office_of_agents_can_refresh():
 
 
 def test_typing_a_subdomain_cannot_use_up_registration():
-    assert TenantCheckSubdomainAPIView.throttle_scope != TenantRegistrationAPIView.throttle_scope
+    scopes = {t.scope for t in TenantRegistrationAPIView.throttle_classes}
+    assert TenantCheckSubdomainAPIView.throttle_scope not in scopes
+
+
+# ---- MED-10: signup builds a schema, so it is limited three ways ---------
+
+def _allowed(throttle_cls, ip, times):
+    from unittest.mock import patch
+
+    from django.core.cache import cache
+    from rest_framework.test import APIRequestFactory
+
+    results = []
+    with patch.object(throttle_cls, "THROTTLE_RATES", RATES):
+        for _ in range(times):
+            request = APIRequestFactory().post("/api/v1/public/register/", REMOTE_ADDR=ip)
+            results.append(throttle_cls().allow_request(request, None))
+    return results
+
+
+@pytest.fixture
+def clean_cache():
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
+def test_one_address_gets_three_signups_an_hour(clean_cache):
+    from apps.tenants.throttles import RegistrationBurstThrottle
+
+    assert _allowed(RegistrationBurstThrottle, "203.0.113.5", 4) == [True, True, True, False]
+
+
+def test_one_address_gets_ten_signups_a_day(clean_cache):
+    from apps.tenants.throttles import RegistrationDailyThrottle
+
+    assert _allowed(RegistrationDailyThrottle, "203.0.113.6", 11)[-2:] == [True, False]
+
+
+def test_the_platform_cap_is_shared_by_every_address(clean_cache):
+    from unittest.mock import patch
+
+    from apps.tenants.throttles import RegistrationPlatformThrottle
+
+    rates = {**RATES, "registration_platform": "2/day"}
+    with patch.object(RegistrationPlatformThrottle, "THROTTLE_RATES", rates):
+        from rest_framework.test import APIRequestFactory
+
+        verdicts = [
+            RegistrationPlatformThrottle().allow_request(
+                APIRequestFactory().post("/", REMOTE_ADDR=f"198.51.100.{i}"), None)
+            for i in range(3)
+        ]
+    assert verdicts == [True, True, False], "different addresses must share the cap"
+
+
+def test_signup_uses_all_three_limits():
+    from apps.tenants.throttles import (
+        RegistrationBurstThrottle, RegistrationDailyThrottle, RegistrationPlatformThrottle,
+    )
+
+    assert TenantRegistrationAPIView.throttle_classes == [
+        RegistrationBurstThrottle, RegistrationDailyThrottle, RegistrationPlatformThrottle,
+    ]

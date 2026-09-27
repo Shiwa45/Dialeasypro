@@ -342,8 +342,11 @@ REST_FRAMEWORK = {
         "token_refresh": "120/minute",
         # The mobile app's workspace check, before sign-in.
         "tenant_info": "60/minute",
-        # Creating a tenant builds a whole PostgreSQL schema.
-        "registration": "10/hour",
+        # Creating a tenant builds a whole PostgreSQL schema, with no email
+        # verification in front of it — see apps/tenants/throttles.py.
+        "registration": "3/hour",
+        "registration_daily": "10/day",
+        "registration_platform": "200/day",
         # Availability checks as someone types a subdomain: kept apart from
         # registration so typing cannot use up the signup allowance.
         "subdomain_check": "60/minute",

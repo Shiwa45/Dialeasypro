@@ -34,7 +34,7 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
 
         # Build login URL dynamically from the primary BASE_DOMAIN
         base_domain = getattr(settings, "BASE_DOMAIN", "dialeasypro.easyian.com")
-        login_url = f"https://{base_domain}/"
+        login_url = settings.FRONTEND_URL or f"https://{base_domain}/"
 
         pwd = temp_password or getattr(settings, "DEFAULT_TENANT_PASSWORD", "Admin@123456")
 

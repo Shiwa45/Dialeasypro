@@ -53,6 +53,19 @@ def active_structure(employee: Employee, on: date) -> SalaryStructure | None:
 
 def payable_days(employee: Employee, period_month: date) -> tuple[Decimal, Decimal]:
     """(payable_days, total_days_in_month) from attendance rows."""
+    payable, total, _ = attendance_summary(employee, period_month)
+    return payable, total
+
+
+def attendance_summary(employee: Employee, period_month: date) -> tuple[Decimal, Decimal, int]:
+    """
+    (payable_days, total_days_in_month, unrecorded_days).
+
+    Days with no attendance row are PAID, deliberately: a missing row means
+    the day was never synced, and docking pay for our own gap is worse than
+    paying for it. But they are counted and returned, so the payslip and the
+    payroll run can show HR exactly what was credited without a record.
+    """
     start, end = month_bounds(period_month)
     total = Decimal(monthrange(start.year, start.month)[1])
 
@@ -78,7 +91,7 @@ def payable_days(employee: Employee, period_month: date) -> tuple[Decimal, Decim
         )
         payable += missing
 
-    return min(payable, total), total
+    return min(payable, total), total, int(max(missing, 0))
 
 
 @transaction.atomic
@@ -103,7 +116,7 @@ def build_payslip(employee: Employee, period_month: date, *, recompute: bool = F
             f"{employee.employee_code} has no salary structure effective on {period_month}."
         )
 
-    days_payable, days_total = payable_days(employee, period_month)
+    days_payable, days_total, days_unrecorded = attendance_summary(employee, period_month)
     ratio = (days_payable / days_total) if days_total else Decimal("0")
 
     gross_full = structure.gross
@@ -160,6 +173,8 @@ def build_payslip(employee: Employee, period_month: date, *, recompute: bool = F
         "breakdown": {
             "structure_id": structure.pk,
             "lop_ratio": str(ratio.quantize(Decimal("0.0001"))),
+            # Paid without an attendance record — see attendance_summary().
+            "unrecorded_days": days_unrecorded,
             "earnings": {
                 "basic": str((structure.basic * ratio).quantize(TWO_PLACES)),
                 "hra": str((structure.hra * ratio).quantize(TWO_PLACES)),
@@ -201,14 +216,23 @@ def build_payslip(employee: Employee, period_month: date, *, recompute: bool = F
 def run_payroll(period_month: date) -> dict:
     """Build draft payslips for every active employee. Errors are collected, not raised."""
     period_month = month_start(period_month)
-    built, errors = 0, []
+    built, errors, unrecorded = 0, [], []
 
     for employee in Employee.objects.filter(is_active=True).select_related("agent"):
         try:
-            build_payslip(employee, period_month)
+            slip = build_payslip(employee, period_month)
             built += 1
+            days = (slip.breakdown or {}).get("unrecorded_days", 0)
+            if days:
+                unrecorded.append({"employee_code": employee.employee_code,
+                                   "name": employee.agent.name, "days": days})
         except Exception as exc:
             errors.append(f"{employee.employee_code}: {exc}")
             logger.error(f"[HRMS] payroll failed for {employee.employee_code}: {exc}")
 
-    return {"period": period_month.isoformat(), "payslips": built, "errors": errors}
+    return {
+        "period": period_month.isoformat(), "payslips": built, "errors": errors,
+        # Employees paid for days that have no attendance record, so HR can
+        # sync or correct attendance before finalizing.
+        "unrecorded": unrecorded,
+    }

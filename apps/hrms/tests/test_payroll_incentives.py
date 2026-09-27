@@ -215,3 +215,33 @@ def test_a_normal_month_is_unchanged(employee):
     assert slip.total_deductions == Decimal("1800.00")
     assert slip.net_pay == Decimal("38200.00")
     assert slip.breakdown["deductions_capped"] is False
+
+
+# ============================================================
+# Days without attendance are paid, but visibly (MED-15)
+# ============================================================
+
+@pytest.mark.django_db
+def test_unrecorded_days_are_paid_and_counted(employee):
+    from apps.hrms.constants import AttendanceStatus
+    from apps.hrms.models import Attendance
+
+    for day in range(1, 21):  # 20 of September's 30 days recorded, all present
+        Attendance.objects.create(employee=employee, date=PERIOD.replace(day=day),
+                                  status=AttendanceStatus.PRESENT)
+
+    slip = build_payslip(employee, PERIOD)
+
+    assert slip.payable_days == Decimal("30"), "missing days are credited, not docked"
+    assert slip.breakdown["unrecorded_days"] == 10
+
+
+@pytest.mark.django_db
+def test_the_payroll_run_lists_who_was_paid_without_records(employee):
+    from apps.hrms.services.payroll import run_payroll
+
+    result = run_payroll(PERIOD)
+
+    assert result["unrecorded"] == [
+        {"employee_code": "EMP-PAY-1", "name": "Payroll Agent", "days": 30},
+    ]

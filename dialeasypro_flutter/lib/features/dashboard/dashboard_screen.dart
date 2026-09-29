@@ -120,7 +120,10 @@ class DashboardScreen extends ConsumerWidget {
                 const SizedBox(height: 20),
 
                 // Quick actions
-                _QuickActionsBar(context: context).animate().fadeIn(delay: 280.ms),
+                _QuickActionsBar(
+                  context: context,
+                  canImport: const {'admin', 'manager'}.contains(ref.watch(currentAgentProvider)?.role),
+                ).animate().fadeIn(delay: 280.ms),
                 const SizedBox(height: 20),
 
                 // Today's call stats card
@@ -275,7 +278,8 @@ class _AutoDialerCTA extends StatelessWidget {
 // ─── Quick Actions Bar ──────────────────────────────────────
 class _QuickActionsBar extends StatelessWidget {
   final BuildContext context;
-  const _QuickActionsBar({required this.context});
+  final bool canImport;
+  const _QuickActionsBar({required this.context, this.canImport = false});
 
   @override
   Widget build(BuildContext _) {
@@ -292,10 +296,12 @@ class _QuickActionsBar extends StatelessWidget {
         icon: Icons.person_add, label: 'NEW LEAD', color: AppColors.purpleBg, iconColor: AppColors.purple,
         onTap: () => context.push('/leads/new'),
       )),
-      Expanded(child: ActionButton(
-        icon: Icons.upload_file, label: 'IMPORT', color: AppColors.infoBg, iconColor: AppColors.info,
-        onTap: () => context.push('/leads/import'),
-      )),
+      // Bulk import is for managers and admins, as on the web.
+      if (canImport)
+        Expanded(child: ActionButton(
+          icon: Icons.upload_file, label: 'IMPORT', color: AppColors.infoBg, iconColor: AppColors.info,
+          onTap: () => context.push('/leads/import'),
+        )),
     ]);
   }
 }

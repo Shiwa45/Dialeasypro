@@ -454,6 +454,13 @@ class _DialEasyproAppState extends ConsumerState<DialEasyproApp>
 
   @override
   Widget build(BuildContext context) {
+    // Signed out (logout or an expired session): reset the work session so
+    // the next sign-in goes live again. See WorkSessionNotifier.signedOut.
+    ref.listen<AuthState>(authProvider, (prev, next) {
+      if (prev?.isAuthenticated == true && !next.isAuthenticated) {
+        ref.read(workSessionProvider.notifier).signedOut();
+      }
+    });
     final router = ref.watch(_routerProvider);
     return MaterialApp.router(
       title: 'DialEasypro',

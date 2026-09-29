@@ -99,6 +99,16 @@ class WorkSessionNotifier extends StateNotifier<WorkSessionState> {
     state = WorkSessionState(live: true, onBreak: false, since: DateTime.now());
   }
 
+  /// The session is over (logout, or it expired): forget it locally so the
+  /// next sign-in starts a fresh one. start() returns early while `live` is
+  /// true, and nothing reset it — so after signing out and back in without
+  /// closing the app, no "available" was reported and no heartbeat ran, and
+  /// the agent showed offline all shift.
+  void signedOut() {
+    PresenceService.instance.stopQuietly();
+    state = WorkSessionState.offline();
+  }
+
   /// Signing out: offline on the board, heartbeat stopped.
   Future<void> end() async {
     PresenceService.instance.endSession();

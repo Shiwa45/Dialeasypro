@@ -55,6 +55,16 @@ class PresenceService {
     _startHeartbeat();
   }
 
+  /// Stop without telling the server — for when the session is already gone
+  /// (tokens cleared or expired). The heartbeat used to keep firing after a
+  /// session expired: a 401, a refused refresh and another "session
+  /// expired" every 25 seconds until the next login.
+  void stopQuietly() {
+    _stopHeartbeat();
+    _current = AgentStatus.offline;
+    _breakReason = '';
+  }
+
   /// End the session: go offline and stop the heartbeat.
   void endSession() {
     _stopHeartbeat();

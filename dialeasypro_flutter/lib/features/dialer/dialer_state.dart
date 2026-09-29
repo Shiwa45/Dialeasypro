@@ -491,7 +491,11 @@ class DialerNotifier extends StateNotifier<DialerState> {
       // phone-state listener can miss connect events on some OEMs, so don't
       // gate on wasConnected alone.
       final mic = call.micRecording;
-      if (mic != null || (call.wasConnected && call.durationSec > 0)) {
+      if (!call.wasConnected) {
+        // Nobody answered: the mic only heard ringing. It used to be
+        // uploaded as the call's "recording" anyway.
+        CallRecordingService.instance.discard(mic);
+      } else if (mic != null || call.durationSec > 0) {
         CallRecordingService.instance.captureForCall(
           callId: created.id,
           phoneNumber: call.phoneNumber,

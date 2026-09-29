@@ -183,7 +183,9 @@ class CallRecordingService {
         }
       }
 
-      final dir = await getTemporaryDirectory();
+      // App storage, not the temp folder: a recording whose upload fails is
+      // kept for a retry, and Android may clear temp files at any time.
+      final dir = await getApplicationSupportDirectory();
       _micPath = '${dir.path}/mic_call_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _micRecorder.start(
         const RecordConfig(
@@ -289,7 +291,17 @@ class CallRecordingService {
       final ok = await _uploadIfNew(callId, fallbackFile, 'mic_fallback');
       if (ok) {
         lastError = null;
-        _deleteQuietly(fallbackFile); // keep the file when upload failed
+        _deleteQuietly(fallbackFile);
+      } else {
+        // Offline, say. Queue it: the background sweep retries it. It used to
+        // be kept but never tried again.
+        await _enqueuePending(
+          callId: callId,
+          phoneNumber: phoneNumber,
+          startedAt: startedAt,
+          durationSec: durationSec,
+          fallbackPath: fallbackFile.path,
+        );
       }
       return;
     }
@@ -342,6 +354,7 @@ class CallRecordingService {
     required String phoneNumber,
     required DateTime startedAt,
     required int durationSec,
+    String? fallbackPath,
   }) async {
     final items = await _readPending();
     if (items.any((e) => e['callId'] == callId)) return;
@@ -351,6 +364,7 @@ class CallRecordingService {
       'startedAt': startedAt.toIso8601String(),
       'durationSec': durationSec,
       'queuedAt': DateTime.now().toIso8601String(),
+      if (fallbackPath != null) 'fallbackPath': fallbackPath,
     });
     // Bound the queue; oldest go first.
     if (items.length > 200) items.removeRange(0, items.length - 200);
@@ -372,10 +386,12 @@ class CallRecordingService {
     if (!await isEnabled()) return 0;
     final items = await _readPending();
     if (items.isEmpty) return 0;
-    if (!await hasStorageAccess()) {
+    // Without folder access the OEM scan is skipped, but queued microphone
+    // recordings are still retried — they need no storage permission.
+    final canScan = await hasStorageAccess();
+    if (!canScan) {
       _note('No "All files access" — ${items.length} call(s) still waiting for '
           'their recording.');
-      return 0;
     }
 
     final now = DateTime.now();
@@ -390,22 +406,37 @@ class CallRecordingService {
       final durationSec = (item['durationSec'] as num?)?.toInt() ?? 0;
 
       if (callId == null || startedAt == null) continue; // unusable entry
+      final fallbackPath = item['fallbackPath'] as String?;
       if (queuedAt != null && now.difference(queuedAt) > _pendingTtl) {
+        if (fallbackPath != null) _deleteQuietly(File(fallbackPath));
         continue; // expired — stop looking
       }
 
-      final match = await _findRecordingFile(
-        phoneNumber: phone,
-        startedAt: startedAt,
-        durationSec: durationSec,
-      );
+      final match = canScan
+          ? await _findRecordingFile(
+              phoneNumber: phone,
+              startedAt: startedAt,
+              durationSec: durationSec,
+            )
+          : null;
       if (match == null) {
+        // A mic recording whose upload failed earlier: try it again.
+        final fallback = fallbackPath == null ? null : File(fallbackPath);
+        if (fallback != null && fallback.existsSync()) {
+          if (await _uploadIfNew(callId, fallback, 'mic_fallback')) {
+            uploaded++;
+            _deleteQuietly(fallback);
+            continue;
+          }
+        }
         remaining.add(item);
         continue;
       }
 
       if (await _uploadIfNew(callId, match.file, match.matchedBy)) {
         uploaded++;
+        // The phone's own recording won; the queued mic copy is not needed.
+        if (fallbackPath != null) _deleteQuietly(File(fallbackPath));
       } else {
         remaining.add(item); // upload failed (offline?) — try again later
       }
@@ -440,6 +471,9 @@ class CallRecordingService {
     walk(dir, 0);
     return found;
   }
+
+  /// Throw away a recording that must not be uploaded (an unanswered call).
+  void discard(File? f) => _deleteQuietly(f);
 
   void _deleteQuietly(File? f) {
     if (f == null) return;

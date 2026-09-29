@@ -18,6 +18,7 @@ import 'features/communications/whatsapp_send_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/dialer/auto_dial_home.dart';
 import 'features/dialer/dialer_screen.dart';
+import 'features/dialer/dialer_state.dart';
 import 'features/dialer/queue_starter_screen.dart';
 import 'features/features_provider.dart';
 import 'features/hrms/my_work_screen.dart';
@@ -509,6 +510,7 @@ class _DialEasyproAppState extends ConsumerState<DialEasyproApp>
     ref.listen<AuthState>(authProvider, (prev, next) {
       if (prev?.isAuthenticated == true && !next.isAuthenticated) {
         ref.read(workSessionProvider.notifier).signedOut();
+        ref.read(dialerProvider.notifier).reset();
       }
     });
     final router = ref.watch(_routerProvider);

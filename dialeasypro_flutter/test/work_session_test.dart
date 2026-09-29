@@ -60,4 +60,21 @@ void main() {
 
     PresenceService.instance.stopQuietly();
   });
+
+  // APP-M8: the next agent on the phone must not inherit the last one's queue.
+  test('signing out clears the dialer', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final dialer = container.read(dialerProvider.notifier);
+    dialer.state = DialerState(
+      mode: DialerMode.queue,
+      phase: DialerPhase.paused,
+      queue: [Lead.fromJson({'id': 1, 'name': 'A', 'phone': '+919812300001'})],
+    );
+
+    dialer.reset();
+
+    expect(container.read(dialerProvider).mode, DialerMode.idle);
+    expect(container.read(dialerProvider).queue, isEmpty);
+  });
 }

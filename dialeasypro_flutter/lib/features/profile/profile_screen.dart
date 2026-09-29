@@ -9,6 +9,7 @@ import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
 import '../auth/auth_provider.dart';
+import '../dialer/dialer_state.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -309,6 +310,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 confirmLabel: 'Sign Out', danger: true,
               );
               if (ok == true && context.mounted) {
+                // While the token still works: close any queue so its locked
+                // lead is released on the server, not held until it times out.
+                ref.read(dialerProvider.notifier).stop();
                 await ref.read(authProvider.notifier).logout();
                 if (context.mounted) context.go('/login');
               }

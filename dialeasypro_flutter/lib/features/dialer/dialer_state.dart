@@ -616,6 +616,23 @@ class DialerNotifier extends StateNotifier<DialerState> {
     }
   }
 
+  /// Forget everything without touching the network — the session is over
+  /// (signed out, or it expired) and its token may already be dead. Nothing
+  /// cleared the dialer on sign-out, so the next agent on the same phone got
+  /// "Return to active queue" for the previous agent's queue.
+  void reset() {
+    _autoNextTimer?.cancel();
+    _serverQueueId = null;
+    _needsPull = false;
+    _manualList = false;
+    _sessionActive = false;
+    _foreignCall = false;
+    CallRecordingService.instance.stopMicCapture().then((f) {
+      try { f?.deleteSync(); } catch (_) {}
+    }).catchError((_) {});
+    state = const DialerState();
+  }
+
   /// Stop the queue entirely
   void stop() {
     _autoNextTimer?.cancel();

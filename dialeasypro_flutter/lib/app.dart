@@ -42,7 +42,7 @@ final _shellKey = GlobalKey<NavigatorState>();
 StreamSubscription<String>? _notificationTapSub;
 String? _pendingNotificationRoute;
 
-void _bindNotificationTaps(GoRouter router) {
+void _bindNotificationTaps(GoRouter router, Ref ref) {
   _notificationTapSub?.cancel();
   _notificationTapSub = NotificationService.instance.onOpenRoute.listen((route) {
     if (route.isEmpty) return;
@@ -51,14 +51,57 @@ void _bindNotificationTaps(GoRouter router) {
       _pendingNotificationRoute = route;
       return;
     }
-    router.push(route);
+    _openFromNotification(router, ref, route);
   });
 
   // Anything that arrived before the router was ready.
   final pending = _pendingNotificationRoute;
   if (pending != null) {
     _pendingNotificationRoute = null;
-    WidgetsBinding.instance.addPostFrameCallback((_) => router.push(pending));
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openFromNotification(router, ref, pending));
+  }
+}
+
+/// Open a tapped notification's screen — through the break rule.
+///
+/// Reminders open the lead, and leads open only on a break; the tap used to
+/// be redirected silently to Auto Dial, so it never showed the lead. While
+/// working, the agent is asked whether to take a break to open it.
+Future<void> _openFromNotification(GoRouter router, Ref ref, String route) async {
+  // A tap can launch the app: give the work session a moment to go live and
+  // restore a break the agent was already on.
+  for (var i = 0; i < 25 && !ref.read(workSessionProvider).live; i++) {
+    if (!ref.read(authProvider).isAuthenticated) break;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  }
+  final work = ref.read(workSessionProvider);
+  if (work.onBreak || allowedWhileWorking(route)) {
+    router.push(route);
+    return;
+  }
+
+  final ctx = _rootKey.currentContext;
+  if (ctx == null) return;
+  final open = await showDialog<bool>(
+    context: ctx,
+    builder: (dctx) => AlertDialog(
+      title: const Text('Open this lead?'),
+      content: const Text(
+        'Leads, manual calls and WhatsApp open on a break. Take a break to open it now?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(dctx).pop(false), child: const Text('Not now')),
+        TextButton(onPressed: () => Navigator.of(dctx).pop(true), child: const Text('Take break & open')),
+      ],
+    ),
+  );
+  if (open != true) return;
+  final took = await ref.read(workSessionProvider.notifier).takeBreak(reason: 'Follow-up');
+  if (took) {
+    router.push(route);
+  } else if (_rootKey.currentContext != null) {
+    ScaffoldMessenger.of(_rootKey.currentContext!).showSnackBar(const SnackBar(
+      content: Text('Finish the current call and save its outcome first.'),
+    ));
   }
 }
 
@@ -183,7 +226,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
     ),
   );
 
-  _bindNotificationTaps(router);
+  _bindNotificationTaps(router, ref);
   ref.onDispose(() => _notificationTapSub?.cancel());
   return router;
 });

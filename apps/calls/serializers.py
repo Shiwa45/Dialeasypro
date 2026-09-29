@@ -107,8 +107,10 @@ class CallLogCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CallLog
+        # ended_at was missing, so every call the app logged was saved with
+        # no end time (the app always sends one).
         fields = [
-            "id", "lead", "direction", "phone_number", "started_at",
+            "id", "lead", "direction", "phone_number", "started_at", "ended_at",
             "duration_seconds", "is_connected", "disposition", "notes",
         ]
         read_only_fields = ["id"]
@@ -119,6 +121,28 @@ class CallLogCreateSerializer(serializers.ModelSerializer):
         if not normalized:
             raise serializers.ValidationError("Invalid Indian phone number.")
         return normalized
+
+    def validate_lead(self, lead):
+        """
+        Only a lead this agent may see. Logging a call marks the lead worked,
+        moves it from new to attempted, clears its queue lock and writes to
+        its history — and any agent could do that to any lead in the tenant.
+        """
+        if lead is None:
+            return lead
+        request = self.context.get("request")
+        if request is not None:
+            from apps.leads.views import leads_visible_to
+
+            if not leads_visible_to(request.user).filter(pk=lead.pk).exists():
+                raise serializers.ValidationError("Lead not found.")
+        return lead
+
+    def validate(self, data):
+        started, ended = data.get("started_at"), data.get("ended_at")
+        if started and ended and ended < started:
+            raise serializers.ValidationError({"ended_at": "A call cannot end before it starts."})
+        return data
 
 
 class ClickToCallSerializer(serializers.Serializer):

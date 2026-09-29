@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resources looked up by name at runtime (never referenced from Java/Kotlin),
+     which a release build with resource shrinking would otherwise strip. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_notify" />

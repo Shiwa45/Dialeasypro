@@ -69,7 +69,11 @@ class NotificationService {
       // Fall back to UTC rather than failing to initialise at all.
     }
 
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    // The status-bar icon. This pointed at '@mipmap/ic_launcher', which has
+    // never existed in this app (the launcher icon is a drawable). The plugin
+    // refuses to start with a missing icon, so init() threw, every show() and
+    // schedule failed behind a swallowed error, and no reminder ever appeared.
+    const android = AndroidInitializationSettings('ic_stat_notify');
     const settings = InitializationSettings(android: android);
 
     await _plugin.initialize(

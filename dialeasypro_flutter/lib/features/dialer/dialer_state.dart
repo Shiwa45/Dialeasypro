@@ -131,12 +131,36 @@ class DialerNotifier extends StateNotifier<DialerState> {
   /// re-dial the lead that was just called and saved.
   bool _needsPull = false;
 
-  // True while an auto-dial session is active — gates presence reporting so
-  // one-off single calls don't show the agent as "online" to admins.
+  // True while a queue (server or preloaded) is running.
   bool _sessionActive = false;
 
-  void _presence(String status) {
-    if (_sessionActive) PresenceService.instance.report(status);
+  /// A list of leads picked by hand while on a break. Manual calling is what
+  /// a break is for, but auto-dialling is not: this list never dials on its
+  /// own — the agent taps Call Now for each lead.
+  bool _manualList = false;
+
+  /// Where the agent goes back to once a call is saved: available, or the
+  /// break they made the call from (with its reason).
+  String _restStatus = AgentStatus.available;
+  String _restReason = '';
+
+  /// Every call reports presence — manual ones too. They used to report
+  /// nothing, so a manual call made on a break was counted as break time in
+  /// the Login Report, and talk time never showed on Live Agents.
+  void _presence(String status) => PresenceService.instance.report(status);
+
+  void _captureRest() {
+    final p = PresenceService.instance;
+    if (p.current == AgentStatus.onCall || p.current == AgentStatus.wrapUp) return;
+    _restStatus = p.onBreak ? AgentStatus.breakStatus : AgentStatus.available;
+    _restReason = p.onBreak ? p.breakReason : '';
+  }
+
+  void _returnToRest() {
+    PresenceService.instance.report(
+      _restStatus,
+      breakReason: _restStatus == AgentStatus.breakStatus ? _restReason : null,
+    );
   }
 
   /// Start a queue of leads to auto-dial through
@@ -144,11 +168,21 @@ class DialerNotifier extends StateNotifier<DialerState> {
   /// break is ended — the break exists so time on it is not dialling time.
   bool get _onBreak => state.onBreak || PresenceService.instance.onBreak;
 
-  Future<void> startQueue(List<Lead> leads) async {
-    if (leads.isEmpty || _onBreak) return;
+  /// Call a hand-picked list of leads (Leads → select → call). Returns false
+  /// when nothing was started.
+  ///
+  /// On a break this is manual calling, which a break allows: the list waits
+  /// for the agent to tap Call Now for each lead and never advances by
+  /// itself. (It used to be refused on a break — while the Leads tab only
+  /// opens on one — and then opened an empty dialer that spun forever.)
+  Future<bool> startQueue(List<Lead> leads) async {
+    if (leads.isEmpty) return false;
     _serverQueueId = null;
     _sessionActive = true;
-    PresenceService.instance.startSession();
+    _manualList = _onBreak;
+    // Going "available" would end the break on the board; a manual list
+    // leaves presence to the calls themselves.
+    if (!_manualList) PresenceService.instance.startSession();
     state = DialerState(
       mode: DialerMode.queue,
       phase: DialerPhase.preCall,
@@ -156,11 +190,14 @@ class DialerNotifier extends StateNotifier<DialerState> {
       currentIndex: 0,
       completedCalls: const [],
     );
-    // Brief pause before first call so user can see preview
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (state.phase == DialerPhase.preCall) {
-      await dialCurrent();
-    }
+    if (_manualList) return true;
+    // Brief pause before first call so user can see preview. In the
+    // background, so the dialer screen opens straight away.
+    _autoNextTimer?.cancel();
+    _autoNextTimer = Timer(const Duration(milliseconds: 800), () {
+      if (state.phase == DialerPhase.preCall) dialCurrent();
+    });
+    return true;
   }
 
   /// Start a server-backed queue: pull leads one at a time from the backend.
@@ -168,6 +205,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
   /// dialing) and never repeated (worked-state + redial cooldown).
   Future<void> startServerQueue(int queueId) async {
     if (_onBreak) return;
+    _manualList = false;
     _serverQueueId = queueId;
     _sessionActive = true;
     PresenceService.instance.startSession();
@@ -225,6 +263,13 @@ class DialerNotifier extends StateNotifier<DialerState> {
 
   /// Single-call mode (one lead, then return to lead detail)
   Future<void> startSingleCall(Lead lead) async {
+    // A queue still open (e.g. paused for a break) is closed properly first:
+    // its locked lead released, its session flags cleared. Replacing the
+    // state without this kept the queue's flags, so the manual call ended
+    // the break on the board and closing the dialer released this lead from
+    // a queue it was never in — while the queue's own lead stayed locked.
+    if (state.mode == DialerMode.queue) stop();
+    _manualList = false;
     state = DialerState(
       mode: DialerMode.single,
       phase: DialerPhase.preCall,
@@ -236,6 +281,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
 
   /// Dial the lead at the current index
   Future<void> dialCurrent() async {
+    _captureRest();
     final lead = state.currentLead;
     if (lead == null) {
       state = state.copyWith(phase: DialerPhase.completed);
@@ -431,8 +477,9 @@ class DialerNotifier extends StateNotifier<DialerState> {
     final newCompleted = [...state.completedCalls, call];
     state = state.copyWith(clearError: true);
 
-    // Disposition saved → back to available (between calls) for the session.
-    _presence(AgentStatus.available);
+    // Disposition saved → back to where the agent was: available between
+    // calls, or the break a manual call was made from.
+    _returnToRest();
 
     if (state.mode == DialerMode.single) {
       // Single call — done
@@ -471,6 +518,8 @@ class DialerNotifier extends StateNotifier<DialerState> {
       clearCurrentCall: true,
     );
 
+    if (_manualList) return true; // the agent taps Call Now
+
     _autoNextTimer?.cancel();
     _autoNextTimer = Timer(const Duration(seconds: 2), () {
       if (state.phase == DialerPhase.preCall) {
@@ -505,7 +554,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
       currentIndex: nextIndex,
       clearCurrentCall: true,
     );
-    if (state.mode == DialerMode.queue) {
+    if (state.mode == DialerMode.queue && !_manualList) {
       _autoNextTimer?.cancel();
       _autoNextTimer = Timer(const Duration(seconds: 1), () {
         if (state.phase == DialerPhase.preCall) dialCurrent();
@@ -548,6 +597,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
     }
     _serverQueueId = null;
     _needsPull = false;
+    _manualList = false;
     // Stop any in-call mic recording still running (user exited mid-call).
     CallRecordingService.instance.stopMicCapture().then((f) {
       try { f?.deleteSync(); } catch (_) {}

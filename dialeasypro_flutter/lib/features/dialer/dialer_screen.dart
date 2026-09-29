@@ -124,6 +124,11 @@ class _TopBar extends ConsumerWidget {
         const Spacer(),
         if (state.phase == DialerPhase.inCall || state.phase == DialerPhase.dialing)
           _LivePulse(),
+        // Calling a hand-picked list from a break: the break is still on.
+        if (!state.onBreak && ref.watch(workSessionProvider).onBreak) ...[
+          const SizedBox(width: 8),
+          const TagChip(label: 'ON BREAK', backgroundColor: AppColors.warning, textColor: AppColors.white),
+        ] else
         // Break toggle — only between calls (not while dialing or in a call).
         if (state.mode == DialerMode.queue &&
             state.phase != DialerPhase.inCall &&

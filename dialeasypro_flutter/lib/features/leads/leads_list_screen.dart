@@ -81,14 +81,16 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
     });
   }
 
-  void _startQueueDialer() {
+  Future<void> _startQueueDialer() async {
     if (_selectedLeads.isEmpty) {
       AppToast.show(context, 'Select at least one lead', isError: true);
       return;
     }
     final leads = _selectedLeads.values.toList();
-    ref.read(dialerProvider.notifier).startQueue(leads);
-    context.push('/dialer');
+    // Only open the dialer when a list was actually started — pushing it
+    // regardless left an idle dialer spinning forever.
+    final started = await ref.read(dialerProvider.notifier).startQueue(leads);
+    if (started && mounted) context.push('/dialer');
   }
 
   @override

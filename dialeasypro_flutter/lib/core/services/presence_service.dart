@@ -31,6 +31,7 @@ class PresenceService {
 
   String get current => _current;
   bool get onBreak => _current == AgentStatus.breakStatus;
+  String get breakReason => _breakReason;
 
   /// Report a status transition. No-op if unchanged (except offline, which we
   /// always send so the server clears the session promptly).

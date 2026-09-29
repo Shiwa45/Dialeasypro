@@ -247,6 +247,27 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         }
 
 
+def _duplicate_phone_error(existing, request):
+    """
+    Why this phone number can't be used, told to someone who may not be
+    allowed to see the lead that already has it.
+
+    Duplicates have to be refused, so that the number is taken can't be
+    hidden. Anything more — whose lead it is, what it's called — only for a
+    lead the requester can already see. It used to be the same message for
+    everyone, confirming to an agent that a number was someone else's
+    customer without saying what to do about it.
+    """
+    from apps.leads.views import leads_visible_to
+
+    user = getattr(request, "user", None)
+    if user is not None and user.is_authenticated:
+        mine = leads_visible_to(user).filter(pk__in=existing.values("pk")).first()
+        if mine is not None:
+            return f"A lead with this number already exists: “{mine.name}”. Search for it in Leads."
+    return "A lead with this number already exists. Ask your manager if it should be yours."
+
+
 class LeadCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating a new lead (manual entry or API)."""
 
@@ -296,9 +317,10 @@ class LeadCreateSerializer(serializers.ModelSerializer):
         # Check for duplicate phone within this tenant
         phone = data.get("phone")
         if phone:
-            if Lead.objects.filter(phone=phone, is_deleted=False).exists():
+            existing = Lead.objects.filter(phone=phone, is_deleted=False)
+            if existing.exists():
                 raise serializers.ValidationError(
-                    {"phone": "A lead with this phone number already exists."}
+                    {"phone": _duplicate_phone_error(existing, self.context.get("request"))}
                 )
         return data
 
@@ -378,10 +400,13 @@ class LeadUpdateSerializer(serializers.ModelSerializer):
         if not normalized:
             raise serializers.ValidationError("Invalid Indian mobile number.")
         # Check duplicate but exclude this lead
-        if Lead.objects.filter(phone=normalized, is_deleted=False).exclude(
+        existing = Lead.objects.filter(phone=normalized, is_deleted=False).exclude(
             pk=self.instance.pk
-        ).exists():
-            raise serializers.ValidationError("Another lead with this phone already exists.")
+        )
+        if existing.exists():
+            raise serializers.ValidationError(
+                _duplicate_phone_error(existing, self.context.get("request"))
+            )
         return normalized
 
     def update(self, instance, validated_data):

@@ -12,6 +12,7 @@ import 'lead_custom_fields.dart';
 import '../../data/services/services.dart';
 import '../auth/auth_provider.dart';
 import '../dialer/dialer_state.dart';
+import '../../data/services/api_client.dart';
 
 final _leadDetailProvider = FutureProvider.autoDispose.family<Lead, int>((_, id) => LeadsService.instance.getLead(id));
 final _notesProvider = FutureProvider.autoDispose.family<List<LeadNote>, int>((_, id) => LeadsService.instance.listNotes(id).then((r) => r.results));
@@ -115,8 +116,8 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> with Single
       await LeadsService.instance.updateStatus(id, status);
       ref.invalidate(_leadDetailProvider(id));
       if (mounted) AppToast.show(context, 'Status updated', isSuccess: true);
-    } catch (_) {
-      if (mounted) AppToast.show(context, 'Update failed', isError: true);
+    } catch (e) {
+      if (mounted) AppToast.show(context, ApiClient.errorMessage(e), isError: true);
     }
   }
 
@@ -127,8 +128,8 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> with Single
       _noteCtrl.clear();
       ref.invalidate(_notesProvider(id));
       if (mounted) AppToast.show(context, 'Note added', isSuccess: true);
-    } catch (_) {
-      if (mounted) AppToast.show(context, 'Failed', isError: true);
+    } catch (e) {
+      if (mounted) AppToast.show(context, ApiClient.errorMessage(e), isError: true);
     }
   }
 
@@ -466,8 +467,8 @@ class _FollowupsTab extends ConsumerWidget {
             });
             ref.invalidate(_followupsProvider(leadId));
             if (ctx.mounted) { Navigator.pop(ctx); AppToast.show(context, 'Follow-up scheduled', isSuccess: true); }
-          } catch (_) {
-            if (ctx.mounted) AppToast.show(ctx, 'Failed', isError: true);
+          } catch (e) {
+            if (ctx.mounted) AppToast.show(ctx, ApiClient.errorMessage(e), isError: true);
           }
         }),
       ]),

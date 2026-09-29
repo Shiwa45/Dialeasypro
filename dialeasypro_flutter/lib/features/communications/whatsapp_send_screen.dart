@@ -107,18 +107,20 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
         }
       } else {
         // Cloud
-        final ok = await WhatsAppService.instance.sendCloud(
+        final refused = await WhatsAppService.instance.sendCloud(
           leadId: _lead!.id, message: msg,
           templateId: _useTemplate ? _selectedTemplate?.id : null,
           variables: _useTemplate ? _orderedVariables() : null,
         );
         if (mounted) {
           setState(() => _sending = false);
-          if (ok) {
+          if (refused == null) {
             AppToast.show(context, 'Message sent via Cloud API', isSuccess: true);
             context.pop();
           } else {
-            AppToast.show(context, 'Cloud send failed. Check API config.', isError: true);
+            // The server's reason — an unapproved template, WhatsApp not
+            // set up, a plan limit — not a generic failure.
+            AppToast.show(context, refused, isError: true);
           }
         }
       }

@@ -290,8 +290,8 @@ class _LeaveTab extends ConsumerWidget {
                                 ref.invalidate(_leaveProvider);
                                 ref.invalidate(_balancesProvider);
                                 if (context.mounted) AppToast.show(context, 'Request cancelled', isSuccess: true);
-                              } catch (_) {
-                                if (context.mounted) AppToast.show(context, 'Could not cancel', isError: true);
+                              } catch (e) {
+                                if (context.mounted) AppToast.show(context, ApiClient.errorMessage(e), isError: true);
                               }
                             },
                           ),
@@ -391,8 +391,8 @@ class _ApplyLeaveFormState extends State<_ApplyLeaveForm> {
         Navigator.pop(context);
         AppToast.show(context, 'Leave requested', isSuccess: true);
       }
-    } catch (_) {
-      if (mounted) AppToast.show(context, 'Could not submit the request', isError: true);
+    } catch (e) {
+      if (mounted) AppToast.show(context, ApiClient.errorMessage(e), isError: true);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -563,8 +563,8 @@ class _ClaimExpenseFormState extends State<_ClaimExpenseForm> {
         Navigator.pop(context);
         AppToast.show(context, 'Claim submitted', isSuccess: true);
       }
-    } catch (_) {
-      if (mounted) AppToast.show(context, 'Could not submit the claim', isError: true);
+    } catch (e) {
+      if (mounted) AppToast.show(context, ApiClient.errorMessage(e), isError: true);
     } finally {
       if (mounted) setState(() => _saving = false);
     }

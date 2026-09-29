@@ -37,8 +37,9 @@ class WhatsAppService {
   }
 
   /// Send via org's configured Cloud API (Interakt/AiSensy/etc.)
-  /// Goes through our backend, which handles the actual provider call
-  Future<bool> sendCloud({
+  /// Goes through our backend, which handles the actual provider call.
+  /// Returns null on success, or the server's reason it was refused.
+  Future<String?> sendCloud({
     required int leadId,
     String? message,
     int? templateId,
@@ -55,9 +56,9 @@ class WhatsAppService {
           if (templateId != null && variables != null) 'variables': variables,
         },
       );
-      return true;
+      return null;
     } catch (e) {
-      return false;
+      return ApiClient.errorMessage(e);
     }
   }
 

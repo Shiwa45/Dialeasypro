@@ -36,6 +36,17 @@ class WhatsAppService {
     return false;
   }
 
+  /// Record on the lead that WhatsApp was opened for it (native mode). Best
+  /// effort: a failure here must not get in the agent's way.
+  Future<void> logNativeOpen({required int leadId, String? message}) async {
+    try {
+      await ApiClient.instance.dio.post('/comms/whatsapp/log-native/', data: {
+        'lead_id': leadId,
+        if (message != null && message.isNotEmpty) 'message': message,
+      });
+    } catch (_) {}
+  }
+
   /// Send via org's configured Cloud API (Interakt/AiSensy/etc.)
   /// Goes through our backend, which handles the actual provider call.
   /// Returns null on success, or the server's reason it was refused.

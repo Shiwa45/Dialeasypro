@@ -2,7 +2,7 @@
 from django.urls import path
 from apps.communications.views import (
     WhatsAppTemplateListView, WhatsAppTemplateDetailView, WhatsAppMessageListView,
-    SendWhatsAppView, SendSMSView,
+    SendWhatsAppView, SendSMSView, LogNativeWhatsAppView,
     BulkCampaignListCreateView, BulkCampaignDetailView,
     BulkCampaignLaunchView, BulkCampaignPauseView,
     WhatsAppWebhookView, TemplateMediaUploadView,
@@ -21,6 +21,7 @@ urlpatterns = [
     path("template-media/", TemplateMediaUploadView.as_view(), name="api_template_media"),
     path("whatsapp/messages/", WhatsAppMessageListView.as_view(), name="api_wa_messages"),
     path("whatsapp/send/", SendWhatsAppView.as_view(), name="api_wa_send"),
+    path("whatsapp/log-native/", LogNativeWhatsAppView.as_view(), name="api_wa_log_native"),
     path("sms/send/", SendSMSView.as_view(), name="api_sms_send"),
     path("campaigns/", BulkCampaignListCreateView.as_view(), name="api_campaigns"),
     # Literal before "<uuid:pk>/" so it is not read as a campaign id.

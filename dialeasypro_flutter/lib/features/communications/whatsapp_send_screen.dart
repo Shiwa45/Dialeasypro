@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -96,6 +98,7 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
     try {
       if (_mode == 'native') {
         final ok = await WhatsAppService.instance.sendNative(phoneNumber: _lead!.phone, message: msg);
+        if (ok) unawaited(WhatsAppService.instance.logNativeOpen(leadId: _lead!.id, message: msg));
         if (mounted) {
           setState(() => _sending = false);
           if (ok) {

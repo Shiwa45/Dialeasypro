@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -101,6 +103,10 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> with Single
                 phoneNumber: lead.phone,
                 message: msgCtrl.text.isEmpty ? null : msgCtrl.text,
               );
+              // Leave a trace on the lead — see LogNativeWhatsAppView.
+              if (ok) {
+                unawaited(WhatsAppService.instance.logNativeOpen(leadId: lead.id, message: msgCtrl.text));
+              }
               if (mounted) {
                 if (!ok) AppToast.show(context, 'WhatsApp not installed', isError: true);
               }

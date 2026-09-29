@@ -224,6 +224,44 @@ class SendWhatsAppView(APIView):
         return Response({"message": "WhatsApp message queued.", "lead": lead.name})
 
 
+class LogNativeWhatsAppView(APIView):
+    """
+    POST /api/v1/comms/whatsapp/log-native/  {"lead_id", "message"}
+
+    The app opened the phone's own WhatsApp for this lead. That left no
+    trace in the CRM, so a manager could not see the contact happened. The
+    app cannot know whether the agent then pressed Send inside WhatsApp, so
+    this records exactly what is known: WhatsApp was opened, with this text.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def post(self, request):
+        from apps.leads.models import LeadActivity
+        from apps.leads.views import leads_visible_to
+
+        try:
+            lead_id = int(request.data.get("lead_id"))
+        except (TypeError, ValueError):
+            return Response({"error": "lead_id_required"}, status=400)
+        lead = leads_visible_to(request.user).filter(pk=lead_id).first()
+        if lead is None:
+            return Response({"error": "lead_not_found"}, status=404)
+
+        message = (request.data.get("message") or "").strip()
+        LeadActivity.objects.create(
+            lead=lead,
+            activity_type="whatsapp",
+            performed_by=request.user,
+            description=(
+                f"WhatsApp opened from the app: {message[:200]}" if message
+                else "WhatsApp opened from the app"
+            ),
+        )
+        lead.log_contact(contact_type="whatsapp")
+        return Response({"logged": True}, status=201)
+
+
 class SendSMSView(APIView):
     """POST /api/v1/comms/sms/send/ — Send a single SMS. Gated on ONE_CLICK_SMS."""
 

@@ -63,6 +63,11 @@ class DialerState {
   final List<DialerCallRecord> completedCalls;
   final bool onBreak;
 
+  /// Why the last action did not go through (a call that could not be
+  /// placed, a save that failed, a queue that could not be reached). Shown
+  /// once by the dialer screen; cleared by the next successful step.
+  final String? error;
+
   const DialerState({
     this.mode = DialerMode.idle,
     this.phase = DialerPhase.idle,
@@ -71,6 +76,7 @@ class DialerState {
     this.currentCall,
     this.completedCalls = const [],
     this.onBreak = false,
+    this.error,
   });
 
   Lead? get currentLead => currentIndex < queue.length ? queue[currentIndex] : null;
@@ -87,6 +93,8 @@ class DialerState {
     bool clearCurrentCall = false,
     List<DialerCallRecord>? completedCalls,
     bool? onBreak,
+    String? error,
+    bool clearError = false,
   }) => DialerState(
     mode: mode ?? this.mode,
     phase: phase ?? this.phase,
@@ -95,6 +103,7 @@ class DialerState {
     currentCall: clearCurrentCall ? null : (currentCall ?? this.currentCall),
     completedCalls: completedCalls ?? this.completedCalls,
     onBreak: onBreak ?? this.onBreak,
+    error: clearError ? null : (error ?? this.error),
   );
 }
 
@@ -110,6 +119,10 @@ class DialerNotifier extends StateNotifier<DialerState> {
   // one at a time (locked to this agent) instead of from a preloaded list.
   int? _serverQueueId;
 
+  /// Set when pulling the next lead failed: resuming must pull again, not
+  /// re-dial the lead that was just called and saved.
+  bool _needsPull = false;
+
   // True while an auto-dial session is active — gates presence reporting so
   // one-off single calls don't show the agent as "online" to admins.
   bool _sessionActive = false;
@@ -119,8 +132,12 @@ class DialerNotifier extends StateNotifier<DialerState> {
   }
 
   /// Start a queue of leads to auto-dial through
+  /// True when the agent is on a break. Auto-dialling is refused until the
+  /// break is ended — the break exists so time on it is not dialling time.
+  bool get _onBreak => state.onBreak || PresenceService.instance.onBreak;
+
   Future<void> startQueue(List<Lead> leads) async {
-    if (leads.isEmpty) return;
+    if (leads.isEmpty || _onBreak) return;
     _serverQueueId = null;
     _sessionActive = true;
     PresenceService.instance.startSession();
@@ -142,6 +159,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
   /// The backend guarantees each lead is locked to this agent (no double
   /// dialing) and never repeated (worked-state + redial cooldown).
   Future<void> startServerQueue(int queueId) async {
+    if (_onBreak) return;
     _serverQueueId = queueId;
     _sessionActive = true;
     PresenceService.instance.startSession();
@@ -160,7 +178,14 @@ class DialerNotifier extends StateNotifier<DialerState> {
     final qid = _serverQueueId;
     if (qid == null) return;
     try {
-      final res = await QueueService.instance.pullNext(qid);
+      // One retry: a single dropped request used to end the whole queue.
+      Map<String, dynamic> res;
+      try {
+        res = await QueueService.instance.pullNext(qid);
+      } catch (_) {
+        await Future.delayed(const Duration(seconds: 2));
+        res = await QueueService.instance.pullNext(qid);
+      }
       if (res['empty'] == true || res['lead'] == null) {
         state = state.copyWith(phase: DialerPhase.completed, clearCurrentCall: true);
         return;
@@ -179,8 +204,14 @@ class DialerNotifier extends StateNotifier<DialerState> {
         await dialCurrent();
       }
     } catch (_) {
-      // On error, stop gracefully at completed so the UI isn't stuck.
-      state = state.copyWith(phase: DialerPhase.completed, clearCurrentCall: true);
+      // Still failing: pause rather than end, so the agent can resume once
+      // the connection is back instead of losing the session.
+      _needsPull = true;
+      state = state.copyWith(
+        phase: DialerPhase.paused,
+        clearCurrentCall: true,
+        error: 'Could not reach the queue. Check your connection and resume.',
+      );
     }
   }
 
@@ -213,6 +244,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
     state = state.copyWith(
       phase: DialerPhase.dialing,
       currentCall: record,
+      clearError: true,
     );
 
     // Start the fallback recording BEFORE handing the screen to the dialer.
@@ -229,8 +261,16 @@ class DialerNotifier extends StateNotifier<DialerState> {
       await CallRecordingService.instance.stopMicCapture();
     }
     if (!success) {
-      // Permission denied or dial failed — mark and let user retry
-      state = state.copyWith(phase: DialerPhase.postCall);
+      // Permission denied or no SIM: nothing was dialled. This used to go to
+      // the post-call screen and demand an outcome for a call that never
+      // happened — logging a 0-second call against the lead. Back to the
+      // preview instead, saying why.
+      state = state.copyWith(
+        phase: DialerPhase.preCall,
+        clearCurrentCall: true,
+        error: 'The call could not be placed. Check phone permission and SIM, then try again.',
+      );
+      if (state.mode == DialerMode.queue) _autoNextTimer?.cancel();
     }
   }
 
@@ -282,8 +322,12 @@ class DialerNotifier extends StateNotifier<DialerState> {
     _stopMicIntoRecord(state.currentCall!);
   }
 
-  /// Save the disposition and move to next call (in queue mode) or finish
-  Future<void> dispose_({
+  /// Save the disposition and move to next call (in queue mode) or finish.
+  ///
+  /// Returns false when the call could not be saved; the dialer then stays on
+  /// this call so the agent can retry. It used to carry on regardless — the
+  /// call was missing from every report and the lead stayed locked.
+  Future<bool> dispose_({
     required int dispositionId,
     required String dispositionName,
     String notes = '',
@@ -291,16 +335,15 @@ class DialerNotifier extends StateNotifier<DialerState> {
     String? recordingUrl,
   }) async {
     final call = state.currentCall;
-    if (call == null) return;
+    if (call == null) return false;
 
     call.dispositionId = dispositionId;
     call.dispositionName = dispositionName;
     call.notes = notes;
     call.wasConnected = wasConnected;
 
-    // Save call to backend
-    try {
-      final created = await CallsService.instance.createCall({
+    // Save call to backend — retried once, then reported.
+    final payload = {
         'lead': call.leadId,
         'phone_number': call.phoneNumber,
         'direction': 'outbound',
@@ -311,7 +354,15 @@ class DialerNotifier extends StateNotifier<DialerState> {
         'disposition': dispositionId,
         'notes': notes,
         if (recordingUrl != null) 'recording_url': recordingUrl,
-      });
+    };
+    try {
+      CallLog created;
+      try {
+        created = await CallsService.instance.createCall(payload);
+      } catch (_) {
+        await Future.delayed(const Duration(seconds: 2));
+        created = await CallsService.instance.createCall(payload);
+      }
       call.savedToBackend = true;
 
       // Call recording: try the phone's OEM recorder file first (two-way
@@ -331,10 +382,14 @@ class DialerNotifier extends StateNotifier<DialerState> {
         ).catchError((_) {});
       }
     } catch (_) {
-      // Continue anyway — call is logged locally
+      state = state.copyWith(
+        error: 'This call could not be saved. Check your connection and save again.',
+      );
+      return false;
     }
 
     final newCompleted = [...state.completedCalls, call];
+    state = state.copyWith(clearError: true);
 
     // Disposition saved → back to available (between calls) for the session.
     _presence(AgentStatus.available);
@@ -346,15 +401,15 @@ class DialerNotifier extends StateNotifier<DialerState> {
         completedCalls: newCompleted,
         clearCurrentCall: true,
       );
-      return;
+      return true;
     }
 
     // Server-backed queue — the saved CallLog already marked the lead worked
     // and released its lock on the backend. Pull the next eligible lead.
     if (_serverQueueId != null) {
       state = state.copyWith(completedCalls: newCompleted, clearCurrentCall: true);
-      await _pullAndDialNext();
-      return;
+      unawaited(_pullAndDialNext());
+      return true;
     }
 
     // Preloaded queue mode — move to next
@@ -365,7 +420,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
         completedCalls: newCompleted,
         clearCurrentCall: true,
       );
-      return;
+      return true;
     }
 
     // Brief delay before auto-dialing next
@@ -382,6 +437,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
         dialCurrent();
       }
     });
+    return true;
   }
 
   /// Skip the current lead without calling (e.g. found out it's wrong number)
@@ -425,7 +481,14 @@ class DialerNotifier extends StateNotifier<DialerState> {
 
   /// Resume after pause
   void resume() {
-    if (state.phase != DialerPhase.paused) return;
+    if (state.phase != DialerPhase.paused || _onBreak) return;
+    state = state.copyWith(clearError: true);
+    if (_needsPull && _serverQueueId != null) {
+      _needsPull = false;
+      state = state.copyWith(phase: DialerPhase.preCall);
+      unawaited(_pullAndDialNext());
+      return;
+    }
     if (state.currentCall != null && state.currentCall!.endedAt != null) {
       // We were mid-disposition
       state = state.copyWith(phase: DialerPhase.postCall);
@@ -444,6 +507,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
       QueueService.instance.release(current.id, markDialed: false).catchError((_) {});
     }
     _serverQueueId = null;
+    _needsPull = false;
     // Stop any in-call mic recording still running (user exited mid-call).
     CallRecordingService.instance.stopMicCapture().then((f) {
       try { f?.deleteSync(); } catch (_) {}

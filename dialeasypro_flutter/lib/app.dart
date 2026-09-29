@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/call_recording_service.dart';
+import 'core/services/presence_service.dart';
 import 'core/services/setup_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/colors.dart';
@@ -222,7 +223,12 @@ class _MainShellState extends ConsumerState<_MainShell>
     // call and usually looks too early — OEM recorders finalise the file
     // later, and some not until their own app next runs — so this resume hook
     // is what actually collects most recordings.
-    if (state == AppLifecycleState.resumed) _sweepRecordings();
+    if (state == AppLifecycleState.resumed) {
+      _sweepRecordings();
+      // Back from the dialer or a locked screen: tell the server where we are
+      // at once, rather than on the next 25-second heartbeat.
+      PresenceService.instance.resync();
+    }
   }
 
   void _sweepRecordings() {

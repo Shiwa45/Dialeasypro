@@ -17,6 +17,7 @@ from django.core.cache import cache
 from django.db.models import Avg, Count, Q, Sum
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -26,6 +27,7 @@ from apps.authentication.permissions import (
     IsManagerOrAdmin,
 )
 from apps.calls.scoping import sees_everything
+from apps.core.renderers import CSVRenderer
 from apps.core.constants import AgentRole, FeatureKey, LeadStatus, LeadSource
 
 logger = logging.getLogger(__name__)
@@ -390,4 +392,66 @@ class DailyActivityView(APIView):
                     is_completed=True, completed_at__date=today
                 ).count(),
             },
+        })
+
+
+class AgentLoginReportView(APIView):
+    """
+    GET /api/v1/reports/agent-login/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
+    GET ...&format=csv  → the same rows as a spreadsheet.
+
+    Every agent's day: first online, last seen, logged-in time and how it
+    split between idle, calls, wrap-up and breaks. Defaults to today, which
+    is live. Up to 31 days at a time. See apps/reports/login_report.py.
+    """
+
+    permission_classes = [IsManagerOrAdmin, HasFeatureAccess]
+    required_feature = FeatureKey.AGENT_MONITORING
+    # So `?format=csv` (and Accept: text/csv) is not refused before get() runs.
+    renderer_classes = [JSONRenderer, CSVRenderer]
+
+    def get(self, request):
+        from datetime import date
+
+        from apps.reports.login_report import COLUMNS, MAX_DAYS, build_login_report, csv_cell
+
+        today = timezone.localdate()
+        try:
+            date_from = date.fromisoformat(request.query_params.get("date_from") or today.isoformat())
+            date_to = date.fromisoformat(request.query_params.get("date_to") or date_from.isoformat())
+        except ValueError:
+            return Response({"error": "invalid_date", "message": "Use YYYY-MM-DD."}, status=400)
+        if date_to < date_from:
+            date_from, date_to = date_to, date_from
+        if date_to > today:
+            date_to = today
+        if (date_to - date_from).days + 1 > MAX_DAYS:
+            return Response(
+                {"error": "range_too_long", "message": f"Pick at most {MAX_DAYS} days."}, status=400,
+            )
+
+        rows = build_login_report(date_from, date_to)
+
+        if request.query_params.get("format") == "csv" or                 "text/csv" in request.headers.get("Accept", ""):
+            from django.http import StreamingHttpResponse
+
+            from apps.core.csv_export import csv_stream
+
+            response = StreamingHttpResponse(
+                csv_stream(
+                    [label for _, label in COLUMNS],
+                    ([csv_cell(key, row[key]) for key, _ in COLUMNS] for row in rows),
+                ),
+                content_type="text/csv; charset=utf-8",
+            )
+            response["Content-Disposition"] = (
+                f'attachment; filename="agent_login_{date_from}_{date_to}.csv"'
+            )
+            return response
+
+        return Response({
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "generated_at": timezone.now().isoformat(),
+            "rows": rows,
         })

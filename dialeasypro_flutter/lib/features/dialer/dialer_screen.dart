@@ -314,6 +314,19 @@ class _PreCallView extends ConsumerWidget {
           ]),
         ).animate().scale(begin: const Offset(0.85, 0.85), curve: Curves.easeOutBack, duration: 400.ms),
 
+        if (state.error != null) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              border: Border.all(color: AppColors.error, width: 1),
+            ),
+            child: Text(state.error!,
+                style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.error)),
+          ),
+        ],
+
         const SizedBox(height: 28),
 
         LeadBasicsCard(lead: lead),
@@ -557,19 +570,28 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
     }
     setState(() => _saving = true);
 
-    // Save disposition + call to backend
-    await ref.read(dialerProvider.notifier).dispose_(
+    // Save disposition + call to backend. Stay here if it did not save.
+    final leadId = widget.state.currentCall!.leadId;
+    final saved = await ref.read(dialerProvider.notifier).dispose_(
       dispositionId: _selected!.id,
       dispositionName: _selected!.name,
       notes: _notesCtrl.text,
       wasConnected: _wasConnected,
     );
+    if (!saved) {
+      if (mounted) {
+        setState(() => _saving = false);
+        AppToast.show(context, 'Could not save this call. Check your connection and try again.',
+            isError: true);
+      }
+      return;
+    }
 
     // Schedule auto-followup if disposition requires it or user opted in
     if (_scheduleFollowup && _followupDate != null) {
       try {
         await LeadsService.instance.createFollowup(
-          widget.state.currentCall!.leadId,
+          leadId,
           {
             'followup_type': 'call',
             'scheduled_at': _followupDate!.toUtc().toIso8601String(),
@@ -581,7 +603,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
       try {
         final auto = DateTime.now().add(Duration(hours: _selected!.autoFollowupHours!));
         await LeadsService.instance.createFollowup(
-          widget.state.currentCall!.leadId,
+          leadId,
           {
             'followup_type': 'call',
             'scheduled_at': auto.toUtc().toIso8601String(),
@@ -864,15 +886,36 @@ class _PausedView extends ConsumerWidget {
             '${state.callsDone} of ${state.totalCalls} calls completed',
             style: AppTextStyles.body.copyWith(color: AppColors.grey),
           ),
+          if (state.error != null) ...[
+            const SizedBox(height: 12),
+            Text(state.error!, textAlign: TextAlign.center,
+                style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.error)),
+          ],
           const SizedBox(height: 28),
-          BrutalButton(
-            label: 'RESUME QUEUE',
-            iconData: Icons.play_arrow,
-            backgroundColor: AppColors.success,
-            textColor: AppColors.white,
-            isFullWidth: false,
-            onPressed: () => ref.read(dialerProvider.notifier).resume(),
-          ),
+          // No auto-dialling on a break: ending the break comes first.
+          if (ref.watch(workSessionProvider).onBreak) ...[
+            const Text('You are on a break', style: AppTextStyles.h5),
+            const SizedBox(height: 10),
+            BrutalButton(
+              label: 'END BREAK & RESUME',
+              iconData: Icons.play_arrow,
+              backgroundColor: AppColors.success,
+              textColor: AppColors.white,
+              isFullWidth: false,
+              onPressed: () async {
+                await ref.read(workSessionProvider.notifier).endBreak();
+                ref.read(dialerProvider.notifier).resume();
+              },
+            ),
+          ] else
+            BrutalButton(
+              label: 'RESUME QUEUE',
+              iconData: Icons.play_arrow,
+              backgroundColor: AppColors.success,
+              textColor: AppColors.white,
+              isFullWidth: false,
+              onPressed: () => ref.read(dialerProvider.notifier).resume(),
+            ),
         ]),
       ),
     );

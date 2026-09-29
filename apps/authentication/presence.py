@@ -23,7 +23,19 @@ from apps.core.constants import AgentWorkStatus
 logger = logging.getLogger(__name__)
 
 # Heartbeat older than this ⇒ the session is considered dead ⇒ flip to offline.
-STALE_SECONDS = 60
+#
+# Per status, because the app cannot always heartbeat. During a call the
+# phone's own dialer is on screen and Android freezes the app within seconds,
+# so a flat 60 seconds turned every call longer than a minute into "offline"
+# — as did a break with the phone locked. The daily login report is built
+# from these intervals, so they have to survive a normal working day.
+STALE_SECONDS = 60  # fallback for any status not listed below
+STALE_AFTER = {
+    AgentWorkStatus.AVAILABLE: 3 * 60,
+    AgentWorkStatus.WRAP_UP: 15 * 60,
+    AgentWorkStatus.ON_CALL: 2 * 60 * 60,
+    AgentWorkStatus.BREAK: 90 * 60,
+}
 
 
 def set_agent_status(
@@ -34,22 +46,27 @@ def set_agent_status(
     call_id=None,
     lead_id=None,
     broadcast=True,
+    at=None,
 ):
     """
     Apply a status transition for an agent. Idempotent for the same status
     (treated as a heartbeat). Returns the AgentStatus row.
+
+    `at` backdates the transition — the stale sweep closes a vanished agent's
+    interval when they were last seen, not when the sweep happened to run.
     """
     if status not in AgentWorkStatus.REPORTABLE:
         raise ValueError(f"Invalid status: {status}")
 
-    now = timezone.now()
+    now = at or timezone.now()
     st, _ = AgentStatus.objects.get_or_create(
         agent=agent,
         defaults={"status": AgentWorkStatus.OFFLINE, "since": now, "last_seen": now},
     )
 
     changed = st.status != status
-    st.last_seen = now
+    if at is None:
+        st.last_seen = now
 
     if changed:
         # Close any open interval(s) for this agent.
@@ -88,9 +105,46 @@ def set_agent_status(
     return st
 
 
-def touch_heartbeat(agent):
-    """Refresh last_seen so the session isn't swept to offline. No broadcast."""
+def touch_heartbeat(agent, status=None, break_reason=""):
+    """
+    Refresh last_seen so the session isn't swept to offline.
+
+    The app also says what it believes its status is. If the server disagrees —
+    most often because the agent was swept offline while the phone was frozen
+    during a call or a locked-screen break — the app's status is applied. The
+    app only reports changes, so without this an agent who came back stayed
+    "offline" on the board, working, until their status next changed.
+    """
+    if status and status in AgentWorkStatus.REPORTABLE:
+        current = (
+            AgentStatus.objects.filter(agent=agent).values_list("status", flat=True).first()
+        )
+        if current != status:
+            set_agent_status(agent, status, break_reason=break_reason)
+            return
     AgentStatus.objects.filter(agent=agent).update(last_seen=timezone.now())
+
+
+def status_totals(logs, start, end) -> dict:
+    """
+    Seconds in each online status within [start, end), from AgentStatusLog rows.
+    An open interval runs to `end`; intervals are clipped to the window, so one
+    that started before midnight still counts the part after it.
+    """
+    totals = {
+        AgentWorkStatus.AVAILABLE: 0,
+        AgentWorkStatus.ON_CALL: 0,
+        AgentWorkStatus.WRAP_UP: 0,
+        AgentWorkStatus.BREAK: 0,
+    }
+    for log in logs:
+        begin = max(log.started_at, start)
+        finish = min(log.ended_at or end, end)
+        dur = int((finish - begin).total_seconds())
+        if dur > 0:
+            totals[log.status] = totals.get(log.status, 0) + dur
+    totals["online"] = sum(totals.values())
+    return totals
 
 
 def compute_today_totals(agent, now=None) -> dict:
@@ -102,20 +156,14 @@ def compute_today_totals(agent, now=None) -> dict:
     # Localise first so the day boundary is the tenant's, as the docstring
     # has always claimed.
     start = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
-    totals = {
-        AgentWorkStatus.AVAILABLE: 0,
-        AgentWorkStatus.ON_CALL: 0,
-        AgentWorkStatus.WRAP_UP: 0,
-        AgentWorkStatus.BREAK: 0,
-    }
-    logs = AgentStatusLog.objects.filter(agent=agent, started_at__gte=start)
-    for log in logs:
-        end = log.ended_at or now
-        begin = max(log.started_at, start)
-        dur = max(0, int((end - begin).total_seconds()))
-        totals[log.status] = totals.get(log.status, 0) + dur
-    totals["online"] = sum(totals.values())
-    return totals
+    # Everything that overlaps today — including an interval still open from
+    # before midnight, which `started_at >= start` used to drop entirely.
+    from django.db.models import Q
+
+    logs = AgentStatusLog.objects.filter(agent=agent, started_at__lt=now).filter(
+        Q(ended_at__isnull=True) | Q(ended_at__gt=start)
+    )
+    return status_totals(logs, start, now)
 
 
 def agent_live_payload(st, now=None) -> dict:
@@ -156,14 +204,18 @@ def sweep_stale(threshold_seconds=STALE_SECONDS) -> int:
     Flip online agents whose heartbeat is stale to offline (crash/network drop).
     Broadcasts each change. Returns the number swept. Runs within a tenant schema.
     """
-    cutoff = timezone.now() - timedelta(seconds=threshold_seconds)
-    stale = (
-        AgentStatus.objects.filter(last_seen__lt=cutoff)
+    now = timezone.now()
+    candidates = (
+        AgentStatus.objects.filter(last_seen__lt=now - timedelta(seconds=threshold_seconds))
         .exclude(status=AgentWorkStatus.OFFLINE)
         .select_related("agent")
     )
     count = 0
-    for st in stale:
-        set_agent_status(st.agent, AgentWorkStatus.OFFLINE)
+    for st in candidates:
+        allowed = STALE_AFTER.get(st.status, threshold_seconds)
+        if (now - st.last_seen).total_seconds() < allowed:
+            continue
+        # Close at the last sign of life: the time after it was not worked.
+        set_agent_status(st.agent, AgentWorkStatus.OFFLINE, at=st.last_seen)
         count += 1
     return count

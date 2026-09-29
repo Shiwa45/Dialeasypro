@@ -31,6 +31,7 @@ class QueueStarterScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(_availableQueuesProvider);
+    final onBreak = ref.watch(workSessionProvider).onBreak;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -103,9 +104,11 @@ class QueueStarterScreen extends ConsumerWidget {
                           : '$count lead${count == 1 ? '' : 's'} ready to call',
                       count: count,
                       isAuto: isAuto,
+                      // Greyed out on a break; tapping still explains why.
                       onTap: count == 0
                           ? null
                           : () => _startQueue(context, ref, q['id'] as int),
+                      dimmed: onBreak,
                     ).animate().fadeIn(delay: (80 + i * 50).ms).slideX(begin: 0.05, end: 0),
                   );
                 }),
@@ -139,8 +142,12 @@ class QueueStarterScreen extends ConsumerWidget {
   }
 
   Future<void> _startQueue(BuildContext context, WidgetRef ref, int queueId) async {
-    // Starting to dial is going back to work.
-    await ref.read(workSessionProvider.notifier).endBreak();
+    // No auto-dialling on a break: time on a break is not dialling time, and
+    // the login report counts it separately. The agent ends the break first.
+    if (ref.read(workSessionProvider).onBreak) {
+      AppToast.show(context, 'You are on a break. End your break to start auto-dialing.', isError: true);
+      return;
+    }
     ref.read(dialerProvider.notifier).startServerQueue(queueId);
     if (context.mounted) context.push('/dialer');
   }
@@ -151,11 +158,12 @@ class _QueueCard extends StatelessWidget {
   final int count;
   final bool isAuto;
   final VoidCallback? onTap;
-  const _QueueCard({required this.title, required this.subtitle, required this.count, required this.isAuto, this.onTap});
+  final bool dimmed;
+  const _QueueCard({required this.title, required this.subtitle, required this.count, required this.isAuto, this.onTap, this.dimmed = false});
 
   @override
   Widget build(BuildContext context) {
-    final disabled = onTap == null;
+    final disabled = onTap == null || dimmed;
     return BrutalCard(
       onTap: onTap,
       padding: const EdgeInsets.all(14),

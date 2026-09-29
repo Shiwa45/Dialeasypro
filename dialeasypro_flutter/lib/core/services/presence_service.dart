@@ -26,15 +26,18 @@ class PresenceService {
   static final PresenceService instance = PresenceService._();
 
   String _current = AgentStatus.offline;
+  String _breakReason = '';
   Timer? _heartbeat;
 
   String get current => _current;
+  bool get onBreak => _current == AgentStatus.breakStatus;
 
   /// Report a status transition. No-op if unchanged (except offline, which we
   /// always send so the server clears the session promptly).
   Future<void> report(String status, {String? breakReason, int? leadId}) async {
     if (status == _current && status != AgentStatus.offline) return;
     _current = status;
+    _breakReason = status == AgentStatus.breakStatus ? (breakReason ?? '') : '';
     try {
       await ApiClient.instance.dio.post('/auth/status/', data: {
         'status': status,
@@ -60,11 +63,28 @@ class PresenceService {
 
   void _startHeartbeat() {
     _heartbeat?.cancel();
-    _heartbeat = Timer.periodic(const Duration(seconds: 25), (_) async {
-      try {
-        await ApiClient.instance.dio.post('/auth/status/heartbeat/');
-      } catch (_) {}
-    });
+    _heartbeat = Timer.periodic(const Duration(seconds: 25), (_) => _beat());
+  }
+
+  /// The heartbeat says what this phone believes its status is. Android
+  /// freezes the app during calls and on a locked screen, so the server may
+  /// have swept the agent offline meanwhile; the status lets it put them
+  /// back. (Only changes are reported, so nothing else would.) It also
+  /// repairs a status change whose request was lost to a bad connection.
+  Future<void> _beat() async {
+    if (_heartbeat == null) return;
+    try {
+      await ApiClient.instance.dio.post('/auth/status/heartbeat/', data: {
+        'status': _current,
+        if (_breakReason.isNotEmpty) 'break_reason': _breakReason,
+      });
+    } catch (_) {}
+  }
+
+  /// Re-sync immediately — call when the app comes back to the foreground,
+  /// which is exactly when a frozen session needs repairing.
+  void resync() {
+    if (_heartbeat != null) _beat();
   }
 
   void _stopHeartbeat() {

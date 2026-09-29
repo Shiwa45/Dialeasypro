@@ -852,7 +852,14 @@ class AgentHeartbeatAPIView(APIView):
 
     def post(self, request):
         from apps.authentication.presence import touch_heartbeat
-        touch_heartbeat(request.user)
+
+        # The app's own view of its status, when it sends one (see
+        # touch_heartbeat). Older app builds send nothing and are unaffected.
+        touch_heartbeat(
+            request.user,
+            status=request.data.get("status") or None,
+            break_reason=(request.data.get("break_reason") or "")[:100],
+        )
         return Response({"ok": True})
 
 

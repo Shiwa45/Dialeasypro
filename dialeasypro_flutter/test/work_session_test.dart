@@ -7,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:dialeasypro/core/services/presence_service.dart';
+import 'package:dialeasypro/data/models/models.dart';
+import 'package:dialeasypro/features/dialer/dialer_state.dart';
 import 'package:dialeasypro/features/work/work_session.dart';
 
 void main() {
@@ -30,6 +32,31 @@ void main() {
     expect(container.read(workSessionProvider).live, isTrue);
     expect(PresenceService.instance.current, AgentStatus.available,
         reason: 'the new session must report the agent available');
+
+    PresenceService.instance.stopQuietly();
+  });
+
+  // APP-H5: a break during the post-call step let the unsaved call be
+  // thrown away (a paused dialer can be closed).
+  test('no break while a call is waiting for its outcome', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final work = container.read(workSessionProvider.notifier);
+    await work.start();
+
+    final dialer = container.read(dialerProvider.notifier);
+    dialer.state = DialerState(
+      mode: DialerMode.single,
+      phase: DialerPhase.postCall,
+      queue: [Lead.fromJson({'id': 1, 'name': 'A', 'phone': '+919812300001'})],
+      currentCall: DialerCallRecord(
+        leadId: 1, leadName: 'A', phoneNumber: '+919812300001', startedAt: DateTime.now(),
+      ),
+    );
+
+    expect(await work.takeBreak(reason: 'Tea'), isFalse);
+    expect(container.read(workSessionProvider).onBreak, isFalse);
+    expect(container.read(dialerProvider).phase, DialerPhase.postCall);
 
     PresenceService.instance.stopQuietly();
   });

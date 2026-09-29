@@ -132,7 +132,8 @@ class _TopBar extends ConsumerWidget {
         // Break toggle — only between calls (not while dialing or in a call).
         if (state.mode == DialerMode.queue &&
             state.phase != DialerPhase.inCall &&
-            state.phase != DialerPhase.dialing) ...[
+            state.phase != DialerPhase.dialing &&
+            state.phase != DialerPhase.postCall) ...[
           const SizedBox(width: 8),
           GestureDetector(
             // One break for the whole app — see work/work_session.dart.

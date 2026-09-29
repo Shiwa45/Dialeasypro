@@ -70,7 +70,12 @@ class WorkSessionNotifier extends StateNotifier<WorkSessionState> {
   Future<bool> takeBreak({String reason = ''}) async {
     if (!state.live || state.onBreak) return state.onBreak;
     final dialer = _ref.read(dialerProvider);
-    if (dialer.phase == DialerPhase.inCall || dialer.phase == DialerPhase.dialing) {
+    // Not during a call, and not before its outcome is saved: a break
+    // pauses the dialer, and a paused dialer can be closed — which threw the
+    // unsaved call away, missing from every report.
+    if (dialer.phase == DialerPhase.inCall ||
+        dialer.phase == DialerPhase.dialing ||
+        dialer.phase == DialerPhase.postCall) {
       return false;
     }
 

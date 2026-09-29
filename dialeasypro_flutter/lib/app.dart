@@ -277,7 +277,14 @@ class _MainShellState extends ConsumerState<_MainShell>
           onPressed: () async {
             final ok = await ref.read(workSessionProvider.notifier)
                 .takeBreak(reason: 'Manual calls & WhatsApp');
-            if (ok && mounted) context.go(tab.path);
+            if (!mounted) return;
+            if (ok) {
+              context.go(tab.path);
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Finish the current call and save its outcome first.'),
+              ));
+            }
           },
         ),
       ));

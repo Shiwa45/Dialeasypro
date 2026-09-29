@@ -617,7 +617,10 @@ class DialerNotifier extends StateNotifier<DialerState> {
   /// Go on a manual break — only allowed between calls (not during a live call).
   /// Pauses the dialer and reports the agent as on break.
   Future<void> goOnBreak({String reason = ''}) async {
-    if (state.phase == DialerPhase.inCall || state.phase == DialerPhase.dialing) return;
+    // Never with a call waiting for its outcome — see WorkSessionNotifier.takeBreak.
+    if (state.phase == DialerPhase.inCall ||
+        state.phase == DialerPhase.dialing ||
+        state.phase == DialerPhase.postCall) return;
     if (!_sessionActive) return;
     _autoNextTimer?.cancel();
     state = state.copyWith(phase: DialerPhase.paused, onBreak: true);

@@ -102,7 +102,8 @@ class _WorkStatusStripState extends ConsumerState<WorkStatusStrip> {
     if (reason == null || !mounted) return;
     final ok = await ref.read(workSessionProvider.notifier).takeBreak(reason: reason);
     if (!ok && mounted) {
-      AppToast.show(context, 'Finish the current call before taking a break', isError: true);
+      AppToast.show(context, 'Finish the current call and save its outcome before taking a break',
+          isError: true);
     }
   }
 

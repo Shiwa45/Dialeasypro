@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'core/services/call_recording_service.dart';
 import 'core/services/phone_service.dart';
 import 'core/services/setup_service.dart';
 import 'core/services/tenant_config.dart';
@@ -62,6 +63,10 @@ void main() async {
   unawaited(NotificationService.instance.init().catchError((Object e) {
     debugPrint('[main] notification init failed: $e');
   }));
+
+  // Old voice-note Cloudinary settings: no longer used, and no longer
+  // editable, so they are cleared rather than left on the phone.
+  unawaited(CallRecordingService.purgeLegacyCloudinarySettings().catchError((Object _) {}));
 
   runApp(const ProviderScope(child: DialEasyproApp()));
 }

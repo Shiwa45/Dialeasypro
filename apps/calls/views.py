@@ -204,6 +204,17 @@ class CallRecordingUploadView(APIView):
 
         # ---- Mode A: app already uploaded to Cloudinary, just link the URL ----
         client_cloud_url = (request.data.get("cloud_url") or "").strip()
+        if client_cloud_url and not _is_own_cloudinary_url(client_cloud_url):
+            # Only links into the company's own Cloudinary account. Older app
+            # builds uploaded recordings to whatever account an agent had typed
+            # into the (since removed) voice-notes settings and linked them
+            # here — customer audio held outside the company — and any caller
+            # could attach an arbitrary URL as a call's recording.
+            return Response(
+                {"error": "recording_link_refused",
+                 "message": "Upload the recording file itself; external links are not accepted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if client_cloud_url:
             existing = CallRecording.objects.filter(call=call).first()
             if existing and existing.cloud_url:
@@ -721,3 +732,19 @@ class CallStatsView(APIView):
                 .order_by("-count")
             ),
         })
+
+
+def _is_own_cloudinary_url(url: str) -> bool:
+    """True for https://res.cloudinary.com/<our cloud name>/..."""
+    from urllib.parse import urlparse
+
+    from django.conf import settings
+
+    cloud = getattr(settings, "CLOUDINARY_CLOUD_NAME", "")
+    parsed = urlparse(url)
+    return bool(
+        cloud
+        and parsed.scheme == "https"
+        and parsed.hostname == "res.cloudinary.com"
+        and parsed.path.split("/")[1:2] == [cloud]
+    )

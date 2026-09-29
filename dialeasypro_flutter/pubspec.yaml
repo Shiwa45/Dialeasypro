@@ -52,7 +52,6 @@ dependencies:
   url_launcher: ^6.3.0
 
   # ---- CLOUDINARY UPLOAD ----
-  cloudinary_public: ^0.23.1
 
   # ---- DEVICE ----
   wakelock_plus: ^1.2.5         # Keep screen on during calls

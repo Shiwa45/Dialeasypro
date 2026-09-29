@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-import 'package:cloudinary_public/cloudinary_public.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -78,6 +77,15 @@ class CallRecordingService {
   static const _audioExts = {'.m4a', '.mp3', '.amr', '.wav', '.aac', '.3gp', '.ogg', '.mp4'};
 
   // ---- Settings -------------------------------------------------
+
+  /// Remove the Cloudinary account an agent may once have entered for voice
+  /// notes. Recordings no longer use it (see _uploadIfNew), and with the
+  /// setting gone from Profile it could otherwise never be cleared.
+  static Future<void> purgeLegacyCloudinarySettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('cloudinary_name');
+    await prefs.remove('cloudinary_preset');
+  }
 
   Future<bool> isEnabled() async {
     final prefs = await SharedPreferences.getInstance();
@@ -519,39 +527,17 @@ class CallRecordingService {
       final dio = ApiClient.instance.dio;
       final name = file.path.split('/').last;
 
-      // Preferred: upload directly to Cloudinary using the workspace's
-      // configured cloud name + unsigned preset (same setup as voice notes),
-      // then just LINK the resulting URL on the backend. This avoids streaming
-      // large audio through our own server and needs no server-side creds.
-      final cloudName = prefs.getString('cloudinary_name') ?? '';
-      final preset = prefs.getString('cloudinary_preset') ?? '';
-
-      if (cloudName.isNotEmpty && preset.isNotEmpty) {
-        final cloudinary = CloudinaryPublic(cloudName, preset, cache: false);
-        final res = await cloudinary.uploadFile(
-          CloudinaryFile.fromFile(
-            file.path,
-            resourceType: CloudinaryResourceType.Auto,
-            folder: 'dialeasypro/call_recordings',
-          ),
-        );
-        await dio.post('/calls/$callId/recording/', data: {
-          'cloud_url': res.secureUrl,
-          'cloud_public_id': res.publicId,
-          'source_filename': name,
-          'matched_by': matchedBy,
-          'format': _ext(name).replaceAll('.', ''),
-        });
-      } else {
-        // Fallback: stream the raw file to the backend, which uploads it to
-        // Cloudinary using server-side credentials.
-        final form = FormData.fromMap({
-          'matched_by': matchedBy,
-          'source_filename': name,
-          'file': await MultipartFile.fromFile(file.path, filename: name),
-        });
-        await dio.post('/calls/$callId/recording/', data: form);
-      }
+      // Always through our own backend, which stores it with the server's
+      // credentials. The app used to prefer a Cloudinary account typed into
+      // the (since removed) voice-notes settings on the phone — customer call
+      // audio went to whatever account an agent had entered, and after the
+      // settings were removed there was no way to see or change it.
+      final form = FormData.fromMap({
+        'matched_by': matchedBy,
+        'source_filename': name,
+        'file': await MultipartFile.fromFile(file.path, filename: name),
+      });
+      await dio.post('/calls/$callId/recording/', data: form);
 
       processed.add(key);
       // Keep the processed list bounded.

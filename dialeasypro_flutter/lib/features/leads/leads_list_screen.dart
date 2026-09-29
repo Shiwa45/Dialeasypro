@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -52,6 +54,9 @@ class LeadsListScreen extends ConsumerStatefulWidget {
 
 class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
   final _searchCtrl = TextEditingController();
+  // Search once typing pauses, not on every keystroke — a 10-digit number
+  // used to send ten requests.
+  Timer? _searchDebounce;
   bool _showSearch = false;
   bool _selectMode = false;
   final Set<int> _selectedIds = {};
@@ -66,6 +71,7 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
 
@@ -120,7 +126,13 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
                   hintText: 'Search name, phone…', border: InputBorder.none,
                   hintStyle: TextStyle(color: AppColors.grey),
                 ),
-                onChanged: (v) => ref.read(leadsFilterProvider.notifier).update((s) => s.copyWith(search: v, page: 1)),
+                onChanged: (v) {
+                  _searchDebounce?.cancel();
+                  _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+                    if (!mounted) return;
+                    ref.read(leadsFilterProvider.notifier).update((s) => s.copyWith(search: v, page: 1));
+                  });
+                },
               )
             : _selectMode
                 ? Text('${_selectedIds.length} selected', style: AppTextStyles.h3)
@@ -132,6 +144,7 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
               onPressed: () {
                 setState(() => _showSearch = !_showSearch);
                 if (!_showSearch) {
+                  _searchDebounce?.cancel();
                   _searchCtrl.clear();
                   ref.read(leadsFilterProvider.notifier).update((s) => s.copyWith(search: '', page: 1));
                 }

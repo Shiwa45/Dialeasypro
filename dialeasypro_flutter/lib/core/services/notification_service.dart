@@ -118,8 +118,10 @@ class NotificationService {
     // under Doze can be an hour late — on the one notification whose entire
     // value is arriving at the right minute.
     //
-    // Android 13+ grants it from the USE_EXACT_ALARM manifest entry. On 12 it
-    // is user-revocable, which is what this prompt is for.
+    // Android 13+ grants it from the USE_EXACT_ALARM manifest entry. On 12,
+    // and in the Play Store build (which drops USE_EXACT_ALARM), it is
+    // SCHEDULE_EXACT_ALARM, which the agent can refuse — what this prompt is
+    // for. Refused, reminders fall back to inexact alarms (scheduleModes).
     try {
       await impl?.requestExactAlarmsPermission();
     } catch (e) {

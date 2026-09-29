@@ -24,6 +24,11 @@ if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.withReader('UTF-8') { reader -> keystoreProperties.load(reader) }
 }
 
+// Google Play build: flutter build appbundle -P store=play
+// Strips the Play-restricted permissions (src/play/AndroidManifest.xml).
+// Plain `flutter build apk` for direct installs keeps them.
+def playBuild = project.findProperty('store') == 'play'
+
 def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
 if (flutterVersionCode == null) { flutterVersionCode = '1' }
 
@@ -47,6 +52,9 @@ android {
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
+        if (playBuild) {
+            release.manifest.srcFile 'src/play/AndroidManifest.xml'
+        }
     }
 
     defaultConfig {

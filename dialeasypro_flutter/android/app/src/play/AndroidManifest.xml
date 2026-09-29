@@ -1,0 +1,17 @@
+<!-- Play Store build only (flutter build appbundle -P store=play).
+
+     Merged over src/main/AndroidManifest.xml to strip the permissions Google
+     Play restricts to default dialers, file managers and alarm apps. Direct
+     APK installs keep them. Without them the app still works:
+       - READ_CALL_LOG: call duration and "answered" come from the timestamp
+         estimate, and the agent confirms them on the outcome screen.
+       - MANAGE_EXTERNAL_STORAGE: recordings are found through MediaStore
+         (READ_MEDIA_AUDIO) only, plus the in-app microphone recording.
+       - USE_EXACT_ALARM: reminders use SCHEDULE_EXACT_ALARM when the agent
+         allows it, inexact alarms otherwise (NotificationService). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.READ_CALL_LOG" tools:node="remove"/>
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" tools:node="remove"/>
+</manifest>

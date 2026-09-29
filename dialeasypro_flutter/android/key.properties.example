@@ -1,0 +1,13 @@
+# Release signing — copy to android/key.properties (git-ignored) and fill in.
+#
+# Create the keystore once (keep it and both passwords somewhere safe: an app
+# signed with it can only ever be updated by builds signed with it):
+#   keytool -genkeypair -v -keystore C:/Users/<you>/dialeasypro-release.jks ^
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias dialeasypro
+#
+# Phones that have a debug-signed build installed must uninstall it once
+# before a build signed with this key will install.
+storeFile=C:/Users/<you>/dialeasypro-release.jks
+storePassword=
+keyAlias=dialeasypro
+keyPassword=

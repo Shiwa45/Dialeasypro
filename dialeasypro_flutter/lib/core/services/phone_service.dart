@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:phone_state/phone_state.dart';
@@ -119,6 +121,10 @@ class PhoneService {
       _durationSec = 0;
     });
   }
+
+  /// Feed a phone event in by hand — tests only.
+  @visibleForTesting
+  void debugEmit(PhoneCallEvent event) => _eventController.add(event);
 
   /// Check if we have CALL_PHONE permission
   Future<bool> hasCallPermission() async {

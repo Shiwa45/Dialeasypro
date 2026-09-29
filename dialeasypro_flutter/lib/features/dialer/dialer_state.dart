@@ -282,6 +282,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
   /// Dial the lead at the current index
   Future<void> dialCurrent() async {
     _captureRest();
+    _foreignCall = false;
     final lead = state.currentLead;
     if (lead == null) {
       state = state.copyWith(phase: DialerPhase.completed);
@@ -328,8 +329,36 @@ class DialerNotifier extends StateNotifier<DialerState> {
     }
   }
 
+  /// A call ringing in (a customer calling back, a personal call) while the
+  /// dialer is between calls. Its events belong to that call, not ours:
+  /// every event used to be applied to the dialer's current call, so a call
+  /// back during the post-call step flipped the dialer to "in call" and its
+  /// length overwrote the saved call's.
+  bool _foreignCall = false;
+
+  static String _last10(String n) {
+    final d = n.replaceAll(RegExp(r'[^0-9]'), '');
+    return d.length > 10 ? d.substring(d.length - 10) : d;
+  }
+
   void _onPhoneEvent(PhoneCallEvent event) {
-    if (state.currentCall == null) return;
+    final call = state.currentCall;
+    if (call == null) return;
+
+    final ourCallLive = state.phase == DialerPhase.dialing || state.phase == DialerPhase.inCall;
+    if (event.status == CallStatus.ringing && !ourCallLive) {
+      _foreignCall = true; // CALL_INCOMING — someone calling this phone
+      return;
+    }
+    if (_foreignCall) {
+      if (event.status == CallStatus.ended || event.status == CallStatus.failed) _foreignCall = false;
+      return;
+    }
+    // Our call is already over; later events are not about it.
+    if (call.endedAt != null) return;
+    // A different number (when Android tells us the number at all).
+    final number = event.number;
+    if (number != null && number.isNotEmpty && _last10(number) != _last10(call.phoneNumber)) return;
 
     switch (event.status) {
       case CallStatus.active:

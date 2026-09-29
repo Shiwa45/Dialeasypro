@@ -60,16 +60,15 @@ class CallRecordingService {
     'Call Recordings',
     'PhoneRecord',                       // Huawei/Honor
     'Sounds/CallRecord',                 // Some Vivo
-    'Sounds',
     'MIUI/sound_recorder/call_rec',      // Xiaomi MIUI
     'MIUI/sound_recorder/call_recorder',
     'Recorder/call',                     // Xiaomi newer
-    'Android/data/com.android.soundrecorder/files',
     'Music/Recordings/Call Recordings',  // Samsung (older)
-    'Recordings/Voice Recorder',
     'Record/Call',                       // Oppo/Realme/OnePlus (ColorOS)
-    'Music/Recordings',
     'DCIM/Call',
+    // Deliberately NOT scanned: Sounds, Music/Recordings, Recordings/Voice
+    // Recorder and the sound recorder's own folder. They hold voice memos and
+    // personal audio, which a time-only match could attach to a customer call.
     'voice_call',                        // Vivo Funtouch
     'record/call',
   ];
@@ -455,8 +454,6 @@ class CallRecordingService {
     required int durationSec,
   }) async {
     final roots = await _externalRoots();
-    final last10 = _digits(phoneNumber);
-    final last10Short = last10.length > 10 ? last10.substring(last10.length - 10) : last10;
 
     // The recording should have been created during/just after the call.
     final windowStart = startedAt.subtract(const Duration(minutes: 2));
@@ -488,21 +485,15 @@ class CallRecordingService {
           if (mtime.isBefore(windowStart) || mtime.isAfter(windowEnd)) continue;
           if (stat.size < 1024) continue; // ignore empty/placeholder files
 
-          // Score the candidate.
-          int score = 0;
-          String matchedBy = 'timestamp';
-
-          // Strong signal: phone number embedded in filename.
-          final nameDigits = _digits(name);
-          if (last10Short.isNotEmpty && nameDigits.contains(last10Short)) {
-            score += 100;
-            matchedBy = 'filename_number';
-          }
-
-          // Time proximity to call end (closer = better).
-          final callEnd = startedAt.add(Duration(seconds: durationSec));
-          final deltaSec = (mtime.difference(callEnd).inSeconds).abs();
-          if (deltaSec <= 90) score += (90 - deltaSec); // up to +90
+          final scored = scoreRecordingCandidate(
+            fileName: name,
+            modified: mtime,
+            phoneNumber: phoneNumber,
+            callEnd: startedAt.add(Duration(seconds: durationSec)),
+          );
+          if (scored == null) continue;
+          final score = scored.score;
+          final matchedBy = scored.matchedBy;
 
           if (score > bestScore) {
             bestScore = score;
@@ -512,9 +503,7 @@ class CallRecordingService {
       }
     }
 
-    // Require at least a reasonable match (number match, or tight time window).
-    if (best != null && bestScore >= 20) return best;
-    return null;
+    return best;
   }
 
   Future<bool> _uploadIfNew(String callId, File file, String matchedBy) async {
@@ -581,8 +570,6 @@ class CallRecordingService {
     return roots;
   }
 
-  String _digits(String s) => s.replaceAll(RegExp(r'[^0-9]'), '');
-
   String _ext(String name) {
     final i = name.lastIndexOf('.');
     return i < 0 ? '' : name.substring(i).toLowerCase();
@@ -593,4 +580,40 @@ class _Match {
   final File file;
   final String matchedBy;
   _Match(this.file, this.matchedBy);
+}
+
+/// How well an audio file matches a call, or null when it must not be used.
+///
+/// A file named with the call's number is a strong match. A file named with a
+/// DIFFERENT number is never used. A file with no number in its name is used
+/// only when it was written within 20 seconds of the call's end — it used to
+/// be accepted anywhere in a 70-second window, which attached other calls'
+/// recordings (and voice memos) to customer calls.
+({int score, String matchedBy})? scoreRecordingCandidate({
+  required String fileName,
+  required DateTime modified,
+  required String phoneNumber,
+  required DateTime callEnd,
+}) {
+  String last10(String s) {
+    final d = s.replaceAll(RegExp(r'[^0-9]'), '');
+    return d.length > 10 ? d.substring(d.length - 10) : d;
+  }
+
+  final wanted = last10(phoneNumber);
+  // Digit runs of 10-12 look like phone numbers (10 digits, or with 91 / 0
+  // in front). Longer runs are timestamps (20260929143205) and are ignored.
+  final runs = RegExp(r'\d+').allMatches(fileName).map((m) => m.group(0)!);
+  final numbersInName = runs.where((r) => r.length >= 10 && r.length <= 12).map(last10).toList();
+  final delta = modified.difference(callEnd).inSeconds.abs();
+
+  // The call's number anywhere in the name, even spaced out
+  // ("Call +91 98123 00001 ...").
+  final allDigits = fileName.replaceAll(RegExp(r'[^0-9]'), '');
+  if (wanted.length == 10 && (numbersInName.contains(wanted) || allDigits.contains(wanted))) {
+    return (score: 100 + (delta <= 90 ? 90 - delta : 0), matchedBy: 'filename_number');
+  }
+  if (numbersInName.isNotEmpty) return null; // named with someone else's number
+  if (delta > 20) return null;
+  return (score: 20 + (20 - delta), matchedBy: 'timestamp');
 }

@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/services/api_client.dart';
 
@@ -43,6 +42,7 @@ class WhatsAppService {
     required int leadId,
     String? message,
     int? templateId,
+    List<String>? variables,
   }) async {
     try {
       await ApiClient.instance.dio.post(
@@ -51,6 +51,8 @@ class WhatsAppService {
           'lead_id': leadId,
           if (message != null) 'message': message,
           if (templateId != null) 'template_id': templateId,
+          // {{1}}, {{2}}, ... in order — what the customer will actually see.
+          if (templateId != null && variables != null) 'variables': variables,
         },
       );
       return true;

@@ -189,6 +189,12 @@ class SendWhatsAppSerializer(serializers.Serializer):
     lead_id = serializers.IntegerField()
     message = serializers.CharField(max_length=4096, required=False, allow_blank=True)
     template_id = serializers.IntegerField(required=False)
+    # Values for {{1}}, {{2}}, ... in order, as the agent filled them in. When
+    # absent, the template's own field mapping fills them from the lead.
+    variables = serializers.ListField(
+        child=serializers.CharField(max_length=1000, allow_blank=True),
+        required=False, max_length=20,
+    )
 
     def validate(self, data):
         if not data.get("message") and not data.get("template_id"):

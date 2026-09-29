@@ -194,13 +194,29 @@ class SendWhatsAppView(APIView):
         if lead is None:
             return Response({"error": "lead_not_found"}, status=404)
 
+        # Only a template the provider will accept. The app offered pending,
+        # rejected and switched-off ones too; the send then failed at the
+        # provider with nothing but "Send failed" on the phone.
+        template_id = serializer.validated_data.get("template_id")
+        if template_id is not None:
+            from apps.communications.models import WhatsAppTemplate
+
+            template = WhatsAppTemplate.objects.filter(pk=template_id).first()
+            if template is None or not template.is_active or template.status != "approved":
+                return Response(
+                    {"error": "template_not_usable",
+                     "message": "That template is not an active, approved template."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         send_single_whatsapp.apply_async(
             kwargs={
                 "schema_name": connection.schema_name,
                 "lead_id": lead_id,
                 "message": serializer.validated_data.get("message", ""),
-                "template_id": serializer.validated_data.get("template_id"),
+                "template_id": template_id,
                 "sent_by_id": request.user.pk,
+                "variables": serializer.validated_data.get("variables"),
             },
             queue="notifications",
         )

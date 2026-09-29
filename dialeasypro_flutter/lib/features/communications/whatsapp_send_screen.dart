@@ -10,7 +10,9 @@ import '../../data/models/models.dart';
 import '../../data/services/services.dart';
 import '../auth/auth_provider.dart';
 
-final _templatesProvider = FutureProvider.autoDispose<List<WhatsAppTemplate>>((_) => CommsService.instance.listTemplates(approvedOnly: false));
+// Approved, active templates only: the provider rejects anything else, and
+// the send used to fail with nothing but "Send failed".
+final _templatesProvider = FutureProvider.autoDispose<List<WhatsAppTemplate>>((_) => CommsService.instance.listTemplates(approvedOnly: true));
 
 class WhatsAppSendScreen extends ConsumerStatefulWidget {
   final int leadId;
@@ -66,6 +68,13 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
     });
   }
 
+  /// {{1}}, {{2}}, ... values in order, for the template send.
+  List<String> _orderedVariables() {
+    if (_vars.isEmpty) return const [];
+    final highest = _vars.keys.reduce((a, b) => a > b ? a : b);
+    return [for (var i = 1; i <= highest; i++) _vars[i]?.text ?? ''];
+  }
+
   String _buildMessage() {
     if (_useTemplate && _selectedTemplate != null) {
       var msg = _selectedTemplate!.bodyText;
@@ -101,6 +110,7 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
         final ok = await WhatsAppService.instance.sendCloud(
           leadId: _lead!.id, message: msg,
           templateId: _useTemplate ? _selectedTemplate?.id : null,
+          variables: _useTemplate ? _orderedVariables() : null,
         );
         if (mounted) {
           setState(() => _sending = false);

@@ -469,7 +469,8 @@ def send_sms_chunk(self, schema_name: str, campaign_id: str, recipient_ids: list
 
 @shared_task(base=TenantAwareTask, bind=True, max_retries=3)
 def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
-                          template_id: int = None, sent_by_id: int = None):
+                          template_id: int = None, sent_by_id: int = None,
+                          variables: list = None):
     """Send a single WhatsApp message to one lead (click-to-send from lead detail)."""
     from apps.communications.models import WhatsAppMessage, WhatsAppTemplate
     from apps.leads.models import Lead, LeadActivity
@@ -485,11 +486,18 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
         provider_service, provider_slug = _get_whatsapp_provider()
 
         if template:
+            # The values the agent filled in when the app sends them; the
+            # template's mapping otherwise. They used to be discarded in
+            # favour of the mapping — empty when a template had none — while
+            # the agent's text was stored as if it had been sent.
+            values = variables if variables is not None else _extract_variables(template, lead)
             msg_id = provider_service.send_template(
                 phone=lead.phone,
                 template_id=template.provider_template_id,
-                variables=_extract_variables(template, lead),
+                variables=values,
             )
+            # Record what the customer actually received.
+            message = template.render_with(values)
         else:
             msg_id = provider_service.send_text(phone=lead.phone, message=message)
 

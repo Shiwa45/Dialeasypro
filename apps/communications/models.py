@@ -201,6 +201,13 @@ class WhatsAppTemplate(TimeStampedModel):
     def __str__(self):
         return f"{self.name} [{self.get_status_display()}]"
 
+    def render_with(self, values) -> str:
+        """Body with {{1}}, {{2}}, ... replaced by `values`, in order."""
+        text = self.body_text
+        for i, value in enumerate(values, start=1):
+            text = text.replace(f"{{{{{i}}}}}", str(value))
+        return text
+
     def render(self, lead) -> str:
         """Render template body substituting {{N}} with lead field values."""
         text = self.body_text

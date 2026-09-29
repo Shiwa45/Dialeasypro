@@ -9,6 +9,7 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val AUDIO_CHANNEL = "dialeasypro/call_audio"
         const val SETUP_CHANNEL = "dialeasypro/setup"
+        const val CALL_LOG_CHANNEL = "dialeasypro/call_log"
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -27,6 +28,19 @@ class MainActivity : FlutterActivity() {
                     "stop" -> {
                         CallAudioService.stop(applicationContext)
                         result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // The real duration of a call that just ended — see CallLogReader.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CALL_LOG_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "findOutgoing" -> {
+                        val number = call.argument<String>("number") ?: ""
+                        val since = call.argument<Number>("sinceMillis")?.toLong() ?: 0L
+                        result.success(CallLogReader.findOutgoing(applicationContext, number, since))
                     }
                     else -> result.notImplemented()
                 }

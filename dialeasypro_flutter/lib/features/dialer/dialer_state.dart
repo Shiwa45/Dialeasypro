@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/services/call_log_service.dart';
 import '../../core/services/phone_service.dart';
 import '../../core/services/call_recording_service.dart';
 import '../../core/services/presence_service.dart';
@@ -38,6 +39,13 @@ class DialerCallRecord {
   DateTime? endedAt;
   int durationSec = 0;
   bool wasConnected = false;
+  /// When Android reported the line open. That is when dialling started, NOT
+  /// when the customer answered — only the call log knows that.
+  DateTime? offHookAt;
+  /// 'call_log' when the figures came from the phone's call log, 'estimate'
+  /// otherwise (the agent then confirms "connected" themselves).
+  String outcomeSource = 'estimate';
+  bool _finishing = false;
   int? dispositionId;
   String? dispositionName;
   String notes = '';
@@ -280,7 +288,9 @@ class DialerNotifier extends StateNotifier<DialerState> {
     switch (event.status) {
       case CallStatus.active:
         state = state.copyWith(phase: DialerPhase.inCall);
-        state.currentCall!.wasConnected = true;
+        // Not "connected": Android reports the line open as soon as an
+        // outgoing call starts dialling. Settled from the call log at the end.
+        state.currentCall!.offHookAt ??= DateTime.now();
         _presence(AgentStatus.onCall);
         // Recording already started at dial time — see dialCurrent(). It
         // cannot be started here: by now the dialer owns the screen and this
@@ -293,11 +303,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
         break;
       case CallStatus.ended:
       case CallStatus.failed:
-        state.currentCall!.endedAt = DateTime.now();
-        state.currentCall!.durationSec = event.durationSec ?? 0;
-        state = state.copyWith(phase: DialerPhase.postCall);
-        _presence(AgentStatus.wrapUp);
-        _stopMicIntoRecord(state.currentCall!);
+        _finishCall(state.currentCall!, fallbackDurationSec: event.durationSec);
         break;
       case CallStatus.idle:
         break;
@@ -314,12 +320,46 @@ class DialerNotifier extends StateNotifier<DialerState> {
   /// Manually mark current call as ended (when system doesn't notify reliably)
   void markCallEnded({int? durationSec, bool? wasConnected}) {
     if (state.currentCall == null) return;
-    state.currentCall!.endedAt = DateTime.now();
-    if (durationSec != null) state.currentCall!.durationSec = durationSec;
-    if (wasConnected != null) state.currentCall!.wasConnected = wasConnected;
-    state = state.copyWith(phase: DialerPhase.postCall);
+    _finishCall(state.currentCall!, fallbackDurationSec: durationSec);
+  }
+
+  /// Settle a finished call's figures, then move to the post-call screen.
+  ///
+  /// The phone's call log has the real talk time (0 = not answered), so it is
+  /// read first; without it the duration is estimated from timestamps and the
+  /// agent confirms "connected". The post-call screen opens once this is done
+  /// — a few seconds at most — so it shows the right figures from the start.
+  Future<void> _finishCall(DialerCallRecord record, {int? fallbackDurationSec}) async {
+    if (record._finishing || record.endedAt != null) return;
+    record._finishing = true;
+    final endedAt = DateTime.now();
+    record.endedAt = endedAt;
     _presence(AgentStatus.wrapUp);
-    _stopMicIntoRecord(state.currentCall!);
+    _stopMicIntoRecord(record);
+
+    Map<String, dynamic>? log;
+    try {
+      log = await CallLogService.instance
+          .findOutgoing(record.phoneNumber, record.startedAt)
+          .timeout(const Duration(seconds: 5), onTimeout: () => null);
+    } catch (_) {
+      log = null;
+    }
+    final outcome = decideCallOutcome(
+      log: log,
+      dialedAt: record.startedAt,
+      endedAt: endedAt,
+      offHookAt: record.offHookAt,
+    );
+    record.durationSec = outcome.source == 'estimate' && fallbackDurationSec != null
+        ? fallbackDurationSec
+        : outcome.durationSec;
+    record.wasConnected = outcome.connected ?? false;
+    record.endedAt = outcome.endedAt;
+    record.outcomeSource = outcome.source;
+
+    if (!mounted || state.currentCall != record) return;
+    state = state.copyWith(phase: DialerPhase.postCall);
   }
 
   /// Save the disposition and move to next call (in queue mode) or finish.

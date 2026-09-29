@@ -89,7 +89,10 @@ class PhoneService {
     _durationSec = 0;
     _durationTimer?.cancel();
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _durationSec++;
+      // From the start time, not a running count: Android freezes the app
+      // while the dialer is on screen, and a counter just stops there.
+      final started = _callStartedAt;
+      _durationSec = started == null ? _durationSec + 1 : DateTime.now().difference(started).inSeconds;
       _eventController.add(PhoneCallEvent(
         status: _currentStatus, number: _currentNumber, durationSec: _durationSec,
       ));
@@ -100,6 +103,8 @@ class PhoneService {
     final endedStatus = CallStatus.ended;
     _currentStatus = endedStatus;
     _durationTimer?.cancel();
+    final started = _callStartedAt;
+    if (started != null) _durationSec = DateTime.now().difference(started).inSeconds;
     WakelockPlus.disable();
     _eventController.add(PhoneCallEvent(
       status: endedStatus,

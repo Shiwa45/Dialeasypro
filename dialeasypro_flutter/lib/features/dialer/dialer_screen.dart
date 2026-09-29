@@ -686,7 +686,14 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
         BrutalCard(
           padding: const EdgeInsets.all(10),
           child: Row(children: [
-            const Expanded(child: Text('Was the call connected?', style: AppTextStyles.bodyMedium)),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Was the call connected?', style: AppTextStyles.bodyMedium),
+              // Without the phone's call log the app cannot tell an answered
+              // call from an unanswered one — say so, rather than guess.
+              if (widget.state.currentCall?.outcomeSource == 'estimate')
+                const Text('Could not read this from the phone — please confirm.',
+                    style: AppTextStyles.caption),
+            ])),
             Switch(
               value: _wasConnected,
               onChanged: (v) => setState(() => _wasConnected = v),

@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'token_store.dart';
+
 // ============================================================
 // DialEasypro — Tenant Configuration
 //
@@ -102,10 +104,8 @@ class TenantConfig {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kTenantSlug);
     await prefs.remove(_kCustomUrl);
-    // Tokens are tenant-specific, clear them too. They live in SharedPreferences
-    // (see ApiClient) — clear them there.
-    await prefs.remove('access_token');
-    await prefs.remove('refresh_token');
+    // Tokens are tenant-specific, clear them too.
+    await TokenStore.instance.clear();
   }
 
   /// Resolve the actual API base URL based on current config.

@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/tenant_config.dart';
+import '../../core/services/token_store.dart';
 
 /// How a token refresh ended. Only [rejected] ends the session.
 enum _Refresh { ok, rejected, unreachable }
@@ -9,12 +9,8 @@ class ApiClient {
   ApiClient._();
   static final ApiClient instance = ApiClient._();
 
-  // JWT tokens are stored in SharedPreferences (same reliable backend as
-  // TenantConfig). FlutterSecureStorage's encrypted store was returning null
-  // on some Android devices after rebuilds — so the Authorization header was
-  // silently dropped and every request 401'd despite a valid login.
-  static const _kAccess = 'access_token';
-  static const _kRefresh = 'refresh_token';
+  // JWT tokens: encrypted at rest, see TokenStore.
+  TokenStore get _tokens => TokenStore.instance;
 
   late final Dio _dio;
   bool _initialized = false;
@@ -52,9 +48,8 @@ class ApiClient {
         _applyTenantHeaders(options.headers);
 
         // JWT
-        final prefs = await SharedPreferences.getInstance();
-        final token = prefs.getString(_kAccess);
-        if (token != null && token.isNotEmpty) {
+        final token = await _tokens.access;
+        if (token != null) {
           options.headers['Authorization'] = 'Bearer $token';
         }
 
@@ -68,8 +63,7 @@ class ApiClient {
         if (error.response?.statusCode == 401 && !isAuthCall) {
           final outcome = await _tryRefresh();
           if (outcome == _Refresh.ok) {
-            final prefs = await SharedPreferences.getInstance();
-            final token = prefs.getString(_kAccess);
+            final token = await _tokens.access;
             error.requestOptions.headers['Authorization'] = 'Bearer $token';
             try {
               final retry = await _dio.fetch(error.requestOptions);
@@ -106,9 +100,8 @@ class ApiClient {
   }
 
   Future<_Refresh> _doRefresh() async {
-    final prefs = await SharedPreferences.getInstance();
-    final refresh = prefs.getString(_kRefresh);
-    if (refresh == null || refresh.isEmpty) return _Refresh.rejected;
+    final refresh = await _tokens.refresh;
+    if (refresh == null) return _Refresh.rejected;
     try {
       final tenantBase = TenantConfig.instance.apiBaseUrl;
       final headers = <String, dynamic>{'Content-Type': 'application/json'};
@@ -135,23 +128,12 @@ class ApiClient {
     }
   }
 
-  Future<void> saveTokens({required String access, required String refresh}) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kAccess, access);
-    await prefs.setString(_kRefresh, refresh);
-  }
+  Future<void> saveTokens({required String access, required String refresh}) =>
+      _tokens.save(access: access, refresh: refresh);
 
-  Future<void> clearTokens() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kAccess);
-    await prefs.remove(_kRefresh);
-  }
+  Future<void> clearTokens() => _tokens.clear();
 
-  Future<String?> get accessToken async {
-    final prefs = await SharedPreferences.getInstance();
-    final t = prefs.getString(_kAccess);
-    return (t != null && t.isNotEmpty) ? t : null;
-  }
+  Future<String?> get accessToken => _tokens.access;
 
   /// Probe the current tenant URL. Returns null on success, error message on failure.
   Future<String?> testTenantConnection() async {

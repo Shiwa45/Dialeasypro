@@ -2,6 +2,7 @@
 // must go live again. start() returns early while `live` is true, and nothing
 // reset it on logout or session expiry.
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,6 +16,17 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  // The recorder plugin calls into native code the moment
+  // CallRecordingService is first touched (dialer.reset()). There is no
+  // native side in a unit test; unanswered, the call fails after the test
+  // has finished and fails it at random.
+  setUpAll(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('com.llfbandit.record/messages'),
+      (_) async => null,
+    );
+  });
 
   test('signing out and back in starts a fresh live session', () async {
     final container = ProviderContainer();

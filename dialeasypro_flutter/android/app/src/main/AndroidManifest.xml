@@ -74,7 +74,14 @@
         android:name="${applicationName}"
         android:icon="@drawable/ic_launcher"
         android:requestLegacyExternalStorage="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false">
+        <!-- No backups of app data: the signed-in session is stored in
+             SharedPreferences (encrypted storage proved unreliable on some
+             phones — see ApiClient), and a backup would carry it to another
+             device. -->
         <!-- Release builds speak HTTPS only: a mistyped or downgraded
              workspace URL must not send login tokens in the clear. Debug
              builds re-enable plain HTTP for a LAN dev server, in

@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/call_log_service.dart';
 import '../../core/services/phone_service.dart';
@@ -326,6 +326,10 @@ class DialerNotifier extends StateNotifier<DialerState> {
         error: 'The call could not be placed. Check phone permission and SIM, then try again.',
       );
       if (state.mode == DialerMode.queue) _autoNextTimer?.cancel();
+      // The queue now waits for the agent. Make that noticeable — a silent
+      // error on a phone nobody is looking at just stops the queue.
+      HapticFeedback.heavyImpact();
+      SystemSound.play(SystemSoundType.alert);
     }
   }
 

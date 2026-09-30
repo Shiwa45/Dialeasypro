@@ -100,6 +100,12 @@ class SetupService {
     }
   }
 
+  /// Whether this build can ask for "All files access". The Play Store
+  /// build cannot; there, recordings are read through Android's audio
+  /// library only. True when unknown (older native side, tests).
+  Future<bool> hasAllFilesAccessOption() async =>
+      (await deviceInfo())['allFilesAccess'] as bool? ?? true;
+
   Future<BrandGuide> guide() async {
     final info = await deviceInfo();
     final key = '${info['manufacturer'] ?? ''} ${info['brand'] ?? ''}'.toLowerCase();

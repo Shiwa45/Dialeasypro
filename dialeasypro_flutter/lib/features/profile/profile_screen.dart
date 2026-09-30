@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../core/services/call_recording_service.dart';
+import '../../core/services/setup_service.dart';
 import '../../core/services/tenant_config.dart';
 import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
@@ -21,6 +22,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   String _waMode = 'native';
   bool _callRecEnabled = false;
+  bool _allFiles = true;
   int _pendingRecordings = 0;
   bool _scanning = false;
 
@@ -62,7 +64,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final m = await UserPrefs.getWhatsAppMode();
     final recEnabled = await CallRecordingService.instance.isEnabled();
     final pending = await CallRecordingService.instance.pendingCount();
+    final allFiles = await SetupService.instance.hasAllFilesAccessOption();
     if (mounted) setState(() {
+      _allFiles = allFiles;
       _waMode = m;
       _callRecEnabled = recEnabled;
       _pendingRecordings = pending;
@@ -173,11 +177,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           BrutalCard(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const SectionHeader(title: 'Call Recording', icon: Icons.mic_external_on),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Auto-upload call recordings to the lead. Uses your phone\'s built-in '
-              'call recorder when available ("All files access" needed to read its '
-              'folder). On phones without one, the app records via the microphone '
-              'during the call — use speakerphone to capture both sides.',
+              'call recorder when available (${_allFiles ? '"All files access"' : 'audio access'} '
+              'needed to read its recordings). On phones without one, the app '
+              'records via the microphone during the call — use speakerphone to '
+              'capture both sides.',
               style: AppTextStyles.caption,
             ),
             const SizedBox(height: 12),
@@ -220,11 +225,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               Container(
                 padding: const EdgeInsets.all(10),
                 color: AppColors.infoBg,
-                child: const Text(
+                child: Text(
                   // Double-quoted: the copy contains an apostrophe, and a
                   // single-quoted Dart string would end at it.
                   "Best quality comes from your phone's own call recorder — turn it "
-                  'on in the Dialer app settings and grant "All files access" here. '
+                  'on in the Dialer app settings and grant '
+                  '${_allFiles ? '"All files access"' : 'audio access'} here. '
                   'Without one, the app records through the microphone; put the call '
                   'on speaker so both sides are captured.',
                   style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 11.5, height: 1.4),

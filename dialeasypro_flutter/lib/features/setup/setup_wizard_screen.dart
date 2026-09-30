@@ -40,6 +40,7 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
   bool _micOk = false;
   bool _notifyOk = false;
   bool _storageOk = false;
+  bool _allFiles = true;
   bool _batteryOk = true;
   bool _recordingOn = false;
 
@@ -68,8 +69,12 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
 
   Future<void> _load() async {
     final guide = await SetupService.instance.guide();
+    final allFiles = await SetupService.instance.hasAllFilesAccessOption();
     if (!mounted) return;
-    setState(() => _guide = guide);
+    setState(() {
+      _guide = guide;
+      _allFiles = allFiles;
+    });
     await _refresh();
     if (mounted) setState(() => _loading = false);
   }
@@ -216,14 +221,22 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
             index: 2,
             title: 'Access to recording files',
             done: _storageOk,
-            body: const Text(
-              'Your phone saves call recordings to its own folder. This lets '
-              'the app read that folder and upload the recording to the lead.\n\n'
-              'Skipping this means only microphone recordings are captured — '
-              'your side of the call, or both sides on speakerphone.',
+            body: Text(
+              _allFiles
+                  ? 'Your phone saves call recordings to its own folder. This lets '
+                      'the app read that folder and upload the recording to the lead.\n\n'
+                      'Skipping this means only microphone recordings are captured — '
+                      'your side of the call, or both sides on speakerphone.'
+                  // Play Store build: there is no "All files access" to ask for.
+                  : 'This lets the app find the recordings your phone saves as audio '
+                      'files and upload them to the lead. Some phones keep call '
+                      'recordings where apps cannot see them; there, the app records '
+                      'through the microphone instead (both sides on speakerphone).',
               style: AppTextStyles.caption,
             ),
-            action: _storageOk ? null : ('Allow all files access', _grantStorage),
+            action: _storageOk
+                ? null
+                : (_allFiles ? 'Allow all files access' : 'Allow audio access', _grantStorage),
           ),
 
           // ---- 3. The phone's own recorder ----

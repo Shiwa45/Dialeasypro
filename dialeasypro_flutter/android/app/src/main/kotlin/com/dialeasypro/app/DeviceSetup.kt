@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -31,7 +32,22 @@ object DeviceSetup {
         "model" to (Build.MODEL ?: ""),
         "sdkInt" to Build.VERSION.SDK_INT,
         "dialerPackage" to (defaultDialer(context) ?: ""),
+        "allFilesAccess" to declares(context, "android.permission.MANAGE_EXTERNAL_STORAGE"),
     )
+
+    /**
+     * Whether this build asks for [permission] at all. The Play Store build
+     * leaves out "All files access" (src/play/AndroidManifest.xml); the app
+     * must not send the agent looking for a switch that is not there.
+     */
+    private fun declares(context: Context, permission: String): Boolean = try {
+        @Suppress("DEPRECATION")
+        context.packageManager
+            .getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+            .requestedPermissions?.contains(permission) == true
+    } catch (e: Exception) {
+        true
+    }
 
     /** The package actually handling calls — not a guess from the brand name. */
     private fun defaultDialer(context: Context): String? = try {

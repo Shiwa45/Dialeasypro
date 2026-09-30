@@ -16,9 +16,18 @@ import 'dialer_state.dart';
 // worked-state, and redial cooldown).
 // ============================================================
 
-final _availableQueuesProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((_) {
+final availableQueuesProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((_) {
   return QueueService.instance.available();
 });
+
+/// How each queue orders its leads, as the admin chose it on the web.
+const _orderLabels = {
+  'priority': 'Highest priority first',
+  'oldest': 'Oldest leads first',
+  'newest': 'Newest leads first',
+  'score': 'Highest score first',
+  'followup_due': 'Follow-ups due first',
+};
 
 class QueueStarterScreen extends ConsumerWidget {
   /// Shown as the Auto Dial home tab: no back button, and [header] (the live
@@ -30,7 +39,7 @@ class QueueStarterScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(_availableQueuesProvider);
+    final async = ref.watch(availableQueuesProvider);
     final onBreak = ref.watch(workSessionProvider).onBreak;
 
     return Scaffold(
@@ -44,98 +53,66 @@ class QueueStarterScreen extends ConsumerWidget {
         actions: actions,
       ),
       body: RefreshIndicator(
-        onRefresh: () async => ref.invalidate(_availableQueuesProvider),
+        onRefresh: () async => ref.invalidate(availableQueuesProvider),
         child: async.when(
-          loading: () => ListView(padding: const EdgeInsets.all(16), children: List.generate(3, (_) =>
-            const Padding(padding: EdgeInsets.only(bottom: 12), child: ShimmerCard(height: 90)))),
-          error: (e, _) => EmptyStateView(
-            icon: Icons.error_outline, title: 'Could not load queues', message: e.toString()),
-          data: (queues) => ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              if (header != null) ...[header!, const SizedBox(height: 16)],
-              BrutalCard(
-                padding: const EdgeInsets.all(18),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-                  Row(children: [
-                    Icon(Icons.flash_on, color: AppColors.brand, size: 22),
-                    SizedBox(width: 8),
-                    Text('Power Dialer', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.brand)),
-                  ]),
-                  SizedBox(height: 6),
-                  Text(
-                    'Pick a queue assigned to you. Leads are dialed one after another — each call needs a disposition before the next. No lead repeats.',
-                    style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.text2, height: 1.5),
-                  ),
-                ]),
-              ).animate().fadeIn(),
+          loading: () => ListView(padding: const EdgeInsets.all(16), children: [
+            if (header != null) ...[header!, const SizedBox(height: 20)],
+            ...List.generate(
+                3, (_) => const Padding(padding: EdgeInsets.only(bottom: 12), child: ShimmerCard(height: 96))),
+          ]),
+          error: (e, _) =>
+              EmptyStateView(icon: Icons.error_outline, title: 'Could not load queues', message: e.toString()),
+          data: (queues) {
+            final ready = queues.fold<int>(0, (sum, q) => sum + ((q['pending_count'] as num?)?.toInt() ?? 0));
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
+              children: [
+                if (header != null) ...[header!, const SizedBox(height: 24)],
 
-              const SizedBox(height: 20),
-              const Text('YOUR QUEUES', style: AppTextStyles.label),
-              const SizedBox(height: 10),
-
-              if (queues.isEmpty)
-                BrutalCard(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(children: const [
-                    Icon(Icons.inbox, size: 36, color: AppColors.grey),
-                    SizedBox(height: 10),
-                    Text('No queues assigned', style: AppTextStyles.h5),
-                    SizedBox(height: 6),
+                // ---- Section heading ----
+                Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  const Expanded(child: Text('Your queues', style: AppTextStyles.h3)),
+                  if (queues.isNotEmpty)
                     Text(
-                      'Ask your admin to create a calling queue and add you to it.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.grey),
+                      '${queues.length} queue${queues.length == 1 ? '' : 's'} · $ready ready',
+                      style: AppTextStyles.mono.copyWith(fontSize: 12),
                     ),
-                  ]),
-                ).animate().fadeIn()
-              else
-                ...queues.asMap().entries.map((entry) {
-                  final i = entry.key;
-                  final q = entry.value;
-                  final count = (q['pending_count'] as num?)?.toInt() ?? 0;
-                  final isAuto = q['mode'] == 'auto';
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _QueueCard(
-                      title: q['name'] as String? ?? 'Queue',
-                      subtitle: (q['description'] as String?)?.isNotEmpty == true
-                          ? q['description'] as String
-                          : '$count lead${count == 1 ? '' : 's'} ready to call',
-                      count: count,
-                      isAuto: isAuto,
-                      // Greyed out on a break; tapping still explains why.
-                      onTap: count == 0
-                          ? null
-                          : () => _startQueue(context, ref, q['id'] as int),
-                      dimmed: onBreak,
-                    ).animate().fadeIn(delay: (80 + i * 50).ms).slideX(begin: 0.05, end: 0),
-                  );
-                }),
-
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.yellow.withOpacity(0.4),
-                  border: Border.all(color: AppColors.warning, width: 1),
-                ),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-                  Row(children: [
-                    Icon(Icons.lightbulb_outline, size: 16, color: AppColors.warning),
-                    SizedBox(width: 6),
-                    Text('HOW IT WORKS', style: AppTextStyles.label),
-                  ]),
-                  SizedBox(height: 8),
-                  _Tip('Each lead is locked to you while you call it'),
-                  _Tip('A dialed lead never comes back as a new lead'),
-                  _Tip('Skipped leads return to the pool after a short hold'),
-                  _Tip('Pull counts refresh when you pull down'),
                 ]),
-              ).animate().fadeIn(delay: 300.ms),
-              const SizedBox(height: 40),
-            ],
-          ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Leads are dialled one after another. Save each call\'s outcome to move on.',
+                  style: AppTextStyles.caption,
+                ),
+                const SizedBox(height: 14),
+
+                if (queues.isEmpty)
+                  const _NoQueues().animate().fadeIn()
+                else
+                  ...queues.asMap().entries.map((entry) {
+                    final i = entry.key;
+                    final q = entry.value;
+                    final count = (q['pending_count'] as num?)?.toInt() ?? 0;
+                    final description = (q['description'] as String?)?.trim() ?? '';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _QueueCard(
+                        title: q['name'] as String? ?? 'Queue',
+                        description: description,
+                        order: _orderLabels[q['order_by']],
+                        count: count,
+                        isAuto: q['mode'] == 'auto',
+                        onBreak: onBreak,
+                        // Greyed out on a break; tapping still explains why.
+                        onTap: count == 0 ? null : () => _startQueue(context, ref, q['id'] as int),
+                      ).animate().fadeIn(delay: (60 + i * 50).ms).slideY(begin: 0.06, end: 0),
+                    );
+                  }),
+
+                const SizedBox(height: 12),
+                const _HowItWorks().animate().fadeIn(delay: 250.ms),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -154,64 +131,240 @@ class QueueStarterScreen extends ConsumerWidget {
 }
 
 class _QueueCard extends StatelessWidget {
-  final String title, subtitle;
+  final String title, description;
+  final String? order;
   final int count;
   final bool isAuto;
+  final bool onBreak;
   final VoidCallback? onTap;
-  final bool dimmed;
-  const _QueueCard({required this.title, required this.subtitle, required this.count, required this.isAuto, this.onTap, this.dimmed = false});
+  const _QueueCard({
+    required this.title,
+    required this.description,
+    required this.order,
+    required this.count,
+    required this.isAuto,
+    required this.onBreak,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final disabled = onTap == null || dimmed;
-    return BrutalCard(
-      onTap: onTap,
-      padding: const EdgeInsets.all(14),
-      child: Opacity(
-        opacity: disabled ? 0.55 : 1,
-        child: Row(children: [
-          Container(
-            width: 48, height: 48,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: count > 0 ? AppColors.yellow : AppColors.greyLight,
-              border: Border.all(color: AppColors.line, width: 1),
-            ),
-            child: Text('$count', style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w900, fontSize: 16)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Flexible(child: Text(title, style: AppTextStyles.h5, overflow: TextOverflow.ellipsis)),
-              if (isAuto) ...[
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                  decoration: BoxDecoration(color: AppColors.warning.withOpacity(0.2), border: Border.all(color: AppColors.warning, width: 1)),
-                  child: const Text('AUTO', style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 9, color: AppColors.warning)),
+    final empty = count == 0;
+    final ready = !empty && !onBreak;
+
+    // The shadow sits on an outer box and the white card is the Material on
+    // top of it, so the ripple and the fill both stay above the shadow.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: AppColors.ink.withValues(alpha: 0.06), blurRadius: 16, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Material(
+        color: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors.line),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(children: [
+              // ---- Leads ready ----
+              Container(
+                width: 64,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: empty ? AppColors.sunken : AppColors.brand50,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              ],
+                child: Column(children: [
+                  Text(
+                    '$count',
+                    style: AppTextStyles.monoLg.copyWith(
+                      fontSize: count > 999 ? 16 : 22,
+                      color: empty ? AppColors.text3 : AppColors.brandInk,
+                    ),
+                  ),
+                  Text(
+                    'READY',
+                    style:
+                        AppTextStyles.label.copyWith(fontSize: 9, color: empty ? AppColors.text3 : AppColors.brandInk),
+                  ),
+                ]),
+              ),
+              const SizedBox(width: 14),
+
+              // ---- Name, mode, order ----
+              Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: AppTextStyles.h4, maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (description.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(description, style: AppTextStyles.caption, maxLines: 2, overflow: TextOverflow.ellipsis),
+                ],
+                const SizedBox(height: 8),
+                Wrap(spacing: 6, runSpacing: 6, children: [
+                  _Chip(
+                    icon: isAuto ? Icons.bolt : Icons.touch_app_outlined,
+                    label: isAuto ? 'Power dial' : 'Manual pull',
+                    color: isAuto ? AppColors.brass : AppColors.text2,
+                    background: isAuto ? AppColors.brass50 : AppColors.sunken,
+                  ),
+                  if (order != null)
+                    _Chip(
+                      icon: Icons.sort,
+                      label: order!,
+                      color: AppColors.text2,
+                      background: AppColors.sunken,
+                    ),
+                ]),
+              ])),
+              const SizedBox(width: 12),
+
+              // ---- Start ----
+              Column(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: ready ? AppColors.brand : AppColors.sunken,
+                    boxShadow: ready
+                        ? [
+                            BoxShadow(
+                                color: AppColors.brand.withValues(alpha: 0.35),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4))
+                          ]
+                        : null,
+                  ),
+                  child: Icon(
+                    empty
+                        ? Icons.inbox_outlined
+                        : onBreak
+                            ? Icons.lock_outline
+                            : Icons.play_arrow_rounded,
+                    color: ready ? AppColors.white : AppColors.text3,
+                    size: ready ? 28 : 20,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  empty
+                      ? 'Empty'
+                      : onBreak
+                          ? 'On break'
+                          : 'Start',
+                  style:
+                      AppTextStyles.label.copyWith(fontSize: 9.5, color: ready ? AppColors.brandInk : AppColors.text3),
+                ),
+              ]),
             ]),
-            const SizedBox(height: 2),
-            Text(subtitle, style: AppTextStyles.caption),
-          ])),
-          Icon(Icons.play_circle_fill, color: count > 0 ? AppColors.dark : AppColors.grey, size: 26),
-        ]),
+          ),
+        ),
       ),
     );
   }
 }
 
+class _Chip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color, background;
+  const _Chip({required this.icon, required this.label, required this.color, required this.background});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(999)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(label, style: AppTextStyles.caption.copyWith(fontSize: 11, fontWeight: FontWeight.w600, color: color)),
+        ]),
+      );
+}
+
+class _NoQueues extends StatelessWidget {
+  const _NoQueues();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.line),
+        ),
+        child: Column(children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: const BoxDecoration(color: AppColors.brand50, shape: BoxShape.circle),
+            child: const Icon(Icons.playlist_add_check, color: AppColors.brand, size: 28),
+          ),
+          const SizedBox(height: 14),
+          const Text('No queues assigned yet', style: AppTextStyles.h4),
+          const SizedBox(height: 6),
+          const Text(
+            'Ask your admin to create a calling queue and add you to it. Pull down to refresh.',
+            textAlign: TextAlign.center,
+            style: AppTextStyles.caption,
+          ),
+        ]),
+      );
+}
+
+class _HowItWorks extends StatelessWidget {
+  const _HowItWorks();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface2,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.line),
+        ),
+        child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.info_outline, size: 16, color: AppColors.text2),
+            SizedBox(width: 6),
+            Text('HOW IT WORKS', style: AppTextStyles.label),
+          ]),
+          SizedBox(height: 12),
+          _Tip(Icons.lock_outline, 'Each lead is locked to you while you call it'),
+          _Tip(Icons.block, 'A dialled lead never comes back as a new lead'),
+          _Tip(Icons.schedule, 'Skipped leads return to the pool after a short hold'),
+          _Tip(Icons.refresh, 'Pull down to refresh the counts'),
+        ]),
+      );
+}
+
 class _Tip extends StatelessWidget {
+  final IconData icon;
   final String text;
-  const _Tip(this.text);
+  const _Tip(this.icon, this.text);
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('▸ ', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.warning)),
-      Expanded(child: Text(text, style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, height: 1.4))),
-    ]),
-  );
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.line)),
+            child: Icon(icon, size: 14, color: AppColors.brand),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: AppTextStyles.caption.copyWith(color: AppColors.text))),
+        ]),
+      );
 }

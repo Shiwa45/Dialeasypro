@@ -112,44 +112,83 @@ class _WorkStatusStripState extends ConsumerState<WorkStatusStrip> {
     final work = ref.watch(workSessionProvider);
     final elapsed = Fmt.timer(DateTime.now().difference(work.since).inSeconds);
     final onBreak = work.onBreak;
+    final VoidCallback? onPressed = !work.live
+        ? null
+        : onBreak
+            ? () => ref.read(workSessionProvider.notifier).endBreak()
+            : _takeBreak;
 
-    return BrutalCard(
-      padding: const EdgeInsets.all(14),
-      color: onBreak ? AppColors.warningBg : AppColors.successBg,
-      borderColor: onBreak ? AppColors.warning : AppColors.success,
-      child: Row(children: [
-        Container(
-          width: 10, height: 10,
-          decoration: BoxDecoration(
-            color: onBreak ? AppColors.warning : AppColors.success,
-            shape: BoxShape.circle,
-          ),
+    final statusLabel = !work.live ? 'CONNECTING' : onBreak ? 'ON BREAK' : 'LIVE · AVAILABLE';
+    final statusColor = !work.live ? AppColors.line3 : onBreak ? AppColors.amber : AppColors.mint2;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: onBreak
+              ? const [Color(0xFF3B2A05), Color(0xFF5C420A)]
+              : const [AppColors.ink, AppColors.ink2],
         ),
-        const SizedBox(width: 10),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(
-            !work.live ? 'Connecting…' : onBreak ? 'On break' : 'Live · Available',
-            style: AppTextStyles.h5,
+        boxShadow: [
+          BoxShadow(color: AppColors.ink.withValues(alpha: 0.18), blurRadius: 20, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          // ---- Status pill ----
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: statusColor.withValues(alpha: 0.45)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 7, height: 7,
+                decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Text(statusLabel, style: AppTextStyles.label.copyWith(fontSize: 10, color: statusColor)),
+            ]),
           ),
-          const SizedBox(height: 2),
-          Text(
-            onBreak
-                ? '${work.breakReason.isEmpty ? 'Break' : work.breakReason} · $elapsed'
-                : 'Idle $elapsed · take a break to open leads, manual calls or WhatsApp',
-            style: AppTextStyles.caption,
+          const Spacer(),
+          // ---- Break / End break ----
+          TextButton.icon(
+            onPressed: onPressed,
+            icon: Icon(onBreak ? Icons.play_arrow_rounded : Icons.free_breakfast_outlined, size: 18),
+            label: Text(onBreak ? 'End break' : 'Take break'),
+            style: TextButton.styleFrom(
+              foregroundColor: onBreak ? AppColors.mintInk : AppColors.white,
+              backgroundColor: onBreak ? AppColors.mint : AppColors.white.withValues(alpha: 0.12),
+              disabledForegroundColor: AppColors.white.withValues(alpha: 0.4),
+              textStyle: AppTextStyles.button.copyWith(fontSize: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              minimumSize: const Size(0, 36),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+            ),
           ),
-        ])),
-        const SizedBox(width: 8),
-        BrutalButton(
-          label: onBreak ? 'END BREAK' : 'BREAK',
-          iconData: onBreak ? Icons.play_arrow : Icons.free_breakfast,
-          backgroundColor: onBreak ? AppColors.success : AppColors.purple,
-          textColor: AppColors.white,
-          onPressed: !work.live
-              ? null
-              : onBreak
-                  ? () => ref.read(workSessionProvider.notifier).endBreak()
-                  : _takeBreak,
+        ]),
+        const SizedBox(height: 16),
+        // ---- Timer ----
+        Text(
+          onBreak ? (work.breakReason.isEmpty ? 'Break time' : work.breakReason) : 'Idle time',
+          style: AppTextStyles.caption.copyWith(color: AppColors.white.withValues(alpha: 0.7)),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          elapsed,
+          style: AppTextStyles.monoLg.copyWith(fontSize: 40, letterSpacing: -1, color: AppColors.white, height: 1.1),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          onBreak
+              ? 'Leads, manual calls and WhatsApp are open. End your break to auto-dial.'
+              : 'Pick a queue below to start dialling. Take a break to open leads, manual calls or WhatsApp.',
+          style: AppTextStyles.caption.copyWith(color: AppColors.white.withValues(alpha: 0.65), fontSize: 11.5),
         ),
       ]),
     );

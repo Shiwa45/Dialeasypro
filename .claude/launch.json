@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dialeasy-react",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "Dialeasyproreact", "run", "dev", "--", "--port", "3107", "--strictPort"],
+      "port": 3107
+    }
+  ]
+}

@@ -77,14 +77,21 @@ def approve_leave(leave: LeaveRequest, decided_by, note: str = "") -> LeaveReque
 
     # Attendance for each calendar day in the range. Only paid types are marked
     # ON_LEAVE (payable); unpaid leave stays ABSENT so payroll docks it.
+    #
+    # Holidays and week-offs inside the range stay days off. Marking them
+    # too turned the Sunday inside a week of unpaid leave into an unpaid
+    # absence, docking a day the employee was never due to work.
+    from apps.hrms.services.attendance import day_off_status
+
     status = AttendanceStatus.ON_LEAVE if leave.leave_type.is_paid else AttendanceStatus.ABSENT
     day = leave.start_date
     while day <= leave.end_date:
+        day_status = day_off_status(day, leave.employee) or status
         Attendance.objects.update_or_create(
             employee=leave.employee,
             date=day,
             defaults={
-                "status": status,
+                "status": day_status,
                 "source": AttendanceSource.ADMIN,
                 "worked_seconds": 0,
                 "note": f"{leave.leave_type.name} (leave #{leave.pk})",

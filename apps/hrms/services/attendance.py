@@ -65,8 +65,13 @@ def compute_worked_seconds(agent, day) -> tuple[int, int]:
     return worked, break_secs
 
 
-def _status_for(worked_seconds: int, day, employee) -> str:
-    if Holiday.objects.filter(date=day).exists():
+def day_off_status(day, employee, holidays=None) -> str | None:
+    """HOLIDAY or WEEK_OFF when the employee was not due to work that day, else None.
+
+    `holidays` is an optional set of dates, to save a query per day in loops.
+    """
+    is_holiday = (day in holidays) if holidays is not None else Holiday.objects.filter(date=day).exists()
+    if is_holiday:
         return AttendanceStatus.HOLIDAY
 
     working_days = employee.agent.working_days or []
@@ -74,6 +79,13 @@ def _status_for(worked_seconds: int, day, employee) -> str:
     # treat every day as a working day rather than marking everything a week off.
     if working_days and day.weekday() not in working_days:
         return AttendanceStatus.WEEK_OFF
+    return None
+
+
+def _status_for(worked_seconds: int, day, employee) -> str:
+    off = day_off_status(day, employee)
+    if off:
+        return off
 
     if worked_seconds >= FULL_DAY_SECONDS:
         return AttendanceStatus.PRESENT

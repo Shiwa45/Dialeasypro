@@ -8,6 +8,7 @@ import '../../core/services/notification_service.dart';
 import '../../core/services/setup_service.dart';
 import '../../core/theme/colors.dart';
 import '../../core/widgets/widgets.dart';
+import 'recording_disclosure.dart';
 
 // ============================================================
 // First-run setup.
@@ -105,7 +106,10 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
   // ---- Step actions ----------------------------------------------
 
   Future<void> _grantCore() async {
-    await [Permission.phone, Permission.microphone, Permission.notification].request();
+    // The microphone is NOT asked for here. It only records calls, and Google
+    // Play requires the recording disclosure before that permission is
+    // requested — so it is asked for when recording is switched on.
+    await [Permission.phone, Permission.notification].request();
 
     // Exact alarms live outside permission_handler. Asking here rather than
     // at startup: this call can open a system settings screen, and doing
@@ -113,7 +117,7 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
     await NotificationService.instance.requestPermissions();
     await _refresh();
     if (!mounted) return;
-    if (!_phoneOk || !_micOk) {
+    if (!_phoneOk) {
       // A permanently-denied permission never prompts again; the app settings
       // screen is the only way back.
       AppToast.show(context,
@@ -156,6 +160,16 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
   }
 
   Future<void> _toggleRecording(bool value) async {
+    if (value) {
+      // Disclosure and agreement first, then the microphone permission.
+      if (!await confirmRecordingDisclosure(context)) return;
+      final mic = await Permission.microphone.request();
+      if (!mic.isGranted && mounted) {
+        AppToast.show(context,
+            'Microphone not allowed — only recordings your phone saves itself will be uploaded.',
+            isError: true);
+      }
+    }
     await CallRecordingService.instance.setEnabled(value);
     await _refresh();
   }
@@ -172,7 +186,10 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
     }
 
     final guide = _guide!;
-    final coreOk = _phoneOk && _micOk;
+    final coreOk = _phoneOk;
+    // Steps are numbered as shown: the recording-only ones appear once
+    // recording is on.
+    var step = 0;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -196,90 +213,115 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
           ),
           const SizedBox(height: 16),
 
-          // ---- 1. Core permissions ----
+          // ---- Calls & reminders ----
           _Step(
-            index: 1,
-            title: 'Calls, microphone & alerts',
+            index: ++step,
+            title: 'Calls & reminders',
             done: coreOk,
             body: const Text(
-              'Needed to dial from the app, record your side of a call, and '
-              'show follow-up reminders. Without these the dialer cannot place '
-              'calls at all.',
+              'Needed to dial from the app and to show follow-up reminders. '
+              'Without phone access the dialer cannot place calls at all.',
               style: AppTextStyles.caption,
             ),
-            action: coreOk ? null : ('Allow', _grantCore),
+            action: coreOk && _notifyOk ? null : ('Allow', _grantCore),
             secondary: coreOk ? null : ('App settings', () => openAppSettings()),
             checks: [
               _Check('Phone', _phoneOk),
-              _Check('Microphone', _micOk),
               _Check('Notifications', _notifyOk),
             ],
           ),
 
-          // ---- 2. Storage ----
+          // ---- Call recording: disclosure, then the microphone ----
           _Step(
-            index: 2,
-            title: 'Access to recording files',
-            done: _storageOk,
-            body: Text(
-              _allFiles
-                  ? 'Your phone saves call recordings to its own folder. This lets '
-                      'the app read that folder and upload the recording to the lead.\n\n'
-                      'Skipping this means only microphone recordings are captured — '
-                      'your side of the call, or both sides on speakerphone.'
-                  // Play Store build: there is no "All files access" to ask for.
-                  : 'This lets the app find the recordings your phone saves as audio '
-                      'files and upload them to the lead. Some phones keep call '
-                      'recordings where apps cannot see them; there, the app records '
-                      'through the microphone instead (both sides on speakerphone).',
-              style: AppTextStyles.caption,
-            ),
-            action: _storageOk
-                ? null
-                : (_allFiles ? 'Allow all files access' : 'Allow audio access', _grantStorage),
-          ),
-
-          // ---- 3. The phone's own recorder ----
-          _Step(
-            index: 3,
-            title: 'Turn on call recording',
-            done: _dialerConfirmed,
+            index: ++step,
+            title: 'Call recording',
+            done: _recordingOn,
             body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text(
-                'This one is set in your phone, not in this app — Android does '
-                'not let any app switch it on for you.',
+                'Optional. Records your calls with leads and attaches each recording '
+                'to the lead in the CRM. You will be shown exactly what is recorded '
+                'before anything is, and you can turn it off later in Profile.',
                 style: AppTextStyles.caption,
               ),
-              const SizedBox(height: 10),
-              ...guide.recordingSteps.asMap().entries.map((e) => Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('${e.key + 1}. ',
-                          style: const TextStyle(
-                              fontFamily: 'PlusJakartaSans',
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12.5)),
-                      Expanded(child: Text(e.value, style: AppTextStyles.caption)),
-                    ]),
-                  )),
-              const SizedBox(height: 8),
-              CheckboxListTile(
-                value: _dialerConfirmed,
-                onChanged: (v) => setState(() => _dialerConfirmed = v ?? false),
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                activeColor: AppColors.success,
-                title: const Text("I've turned on call recording",
-                    style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 13)),
-              ),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(child: Text(_recordingOn ? 'On' : 'Off', style: AppTextStyles.h5)),
+                Switch(
+                  value: _recordingOn,
+                  activeColor: AppColors.success,
+                  onChanged: _toggleRecording,
+                ),
+              ]),
             ]),
-            action: ('Open Phone app settings', _openRecordingSettings),
+            checks: _recordingOn ? [_Check('Microphone', _micOk)] : const [],
           ),
 
-          // ---- 4. Background execution ----
+          if (_recordingOn) ...[
+            // ---- Recording files (only with recording on) ----
+            _Step(
+              index: ++step,
+              title: 'Access to recording files',
+              done: _storageOk,
+              body: Text(
+                _allFiles
+                    ? 'Your phone saves call recordings to its own folder. This lets '
+                        'the app read that folder and upload the recording to the lead.\n\n'
+                        'Skipping this means only microphone recordings are captured — '
+                        'your side of the call, or both sides on speakerphone.'
+                    // Play Store build: there is no "All files access" to ask for.
+                    : 'This lets the app find the recordings your phone saves as audio '
+                        'files and upload them to the lead. Some phones keep call '
+                        'recordings where apps cannot see them; there, the app records '
+                        'through the microphone instead (both sides on speakerphone).',
+                style: AppTextStyles.caption,
+              ),
+              action: _storageOk
+                  ? null
+                  : (_allFiles ? 'Allow all files access' : 'Allow audio access', _grantStorage),
+            ),
+
+            // ---- The phone's own recorder ----
+            _Step(
+              index: ++step,
+              title: 'Turn on call recording',
+              done: _dialerConfirmed,
+              body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text(
+                  'This one is set in your phone, not in this app — Android does '
+                  'not let any app switch it on for you.',
+                  style: AppTextStyles.caption,
+                ),
+                const SizedBox(height: 10),
+                ...guide.recordingSteps.asMap().entries.map((e) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${e.key + 1}. ',
+                            style: const TextStyle(
+                                fontFamily: 'PlusJakartaSans',
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12.5)),
+                        Expanded(child: Text(e.value, style: AppTextStyles.caption)),
+                      ]),
+                    )),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  value: _dialerConfirmed,
+                  onChanged: (v) => setState(() => _dialerConfirmed = v ?? false),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  activeColor: AppColors.success,
+                  title: const Text("I've turned on call recording",
+                      style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 13)),
+                ),
+              ]),
+              action: ('Open Phone app settings', _openRecordingSettings),
+            ),
+          ],
+
+          // ---- Background execution ----
           if (!_batteryOk || guide.needsAutoStart)
             _Step(
-              index: 4,
+              index: ++step,
               title: 'Keep the app running',
               done: _batteryOk && !guide.needsAutoStart,
               body: Text(
@@ -295,30 +337,6 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
               secondary:
                   guide.needsAutoStart ? ('Autostart settings', _openAutoStart) : null,
             ),
-
-          // ---- 5. Switch it on in the CRM ----
-          _Step(
-            index: guide.needsAutoStart || !_batteryOk ? 5 : 4,
-            title: 'Upload recordings to the CRM',
-            done: _recordingOn,
-            body: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text(
-                'With this on, every call recording is attached to the lead '
-                'automatically. You can change it later in Profile.',
-                style: AppTextStyles.caption,
-              ),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(child: Text(_recordingOn ? 'Enabled' : 'Disabled',
-                    style: AppTextStyles.h5)),
-                Switch(
-                  value: _recordingOn,
-                  activeColor: AppColors.success,
-                  onChanged: _toggleRecording,
-                ),
-              ]),
-            ]),
-          ),
 
           const SizedBox(height: 20),
           BrutalButton.primary(label: 'Finish setup →', onPressed: _finish),

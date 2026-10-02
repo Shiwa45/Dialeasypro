@@ -8,10 +8,14 @@
        - MANAGE_EXTERNAL_STORAGE: recordings are found through MediaStore
          (READ_MEDIA_AUDIO) only, plus the in-app microphone recording.
        - USE_EXACT_ALARM: reminders use SCHEDULE_EXACT_ALARM when the agent
-         allows it, inexact alarms otherwise (NotificationService). -->
+         allows it, inexact alarms otherwise (NotificationService).
+       - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: setup opens the battery
+         optimisation list for the agent to exempt the app by hand
+         (DeviceSetup.requestIgnoreBatteryOptimizations). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.READ_CALL_LOG" tools:node="remove"/>
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:node="remove"/>
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" tools:node="remove"/>
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" tools:node="remove"/>
 </manifest>

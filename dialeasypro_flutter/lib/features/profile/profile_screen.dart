@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../core/legal.dart';
 import '../../core/services/call_recording_service.dart';
 import '../../core/services/setup_service.dart';
 import '../../core/services/tenant_config.dart';
@@ -11,6 +12,7 @@ import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
 import '../auth/auth_provider.dart';
 import '../dialer/dialer_state.dart';
+import '../setup/recording_disclosure.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -196,6 +198,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 activeColor: AppColors.success,
                 onChanged: (val) async {
                   if (val) {
+                    // What is recorded, and the agent's agreement, before any
+                    // permission is asked for or anything recorded (Play's
+                    // prominent-disclosure rule).
+                    if (!await confirmRecordingDisclosure(context)) return;
                     // Best-effort: storage access improves quality (reads the
                     // OEM recorder's file), but the mic fallback works without
                     // it — so never block enabling on this permission.
@@ -324,7 +330,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               }
             },
           ),
-          const SizedBox(height: 40),
+          const SizedBox(height: 8),
+          Center(
+            child: TextButton(
+              onPressed: () async {
+                if (!await openPrivacyPolicy() && context.mounted) {
+                  AppToast.show(context, 'Could not open $kPrivacyPolicyUrl', isError: true);
+                }
+              },
+              child: const Text('Privacy policy'),
+            ),
+          ),
+          const SizedBox(height: 32),
         ]),
       ),
     );

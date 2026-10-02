@@ -139,18 +139,6 @@ class PhoneService {
     return s.isGranted;
   }
 
-  /// Request all call-related permissions
-  Future<bool> requestAllCallPermissions() async {
-    final results = await [
-      Permission.phone,
-      Permission.contacts,
-      Permission.microphone, // in-call mic recording fallback
-    ].request();
-    final granted = results[Permission.phone]?.isGranted == true;
-    if (granted) await init(); // re-attach listener now that we can read state
-    return granted;
-  }
-
   /// Direct dial — bypasses the system dialer confirmation screen
   /// Returns true if the call was initiated successfully
   Future<bool> directDial(String phoneNumber) async {

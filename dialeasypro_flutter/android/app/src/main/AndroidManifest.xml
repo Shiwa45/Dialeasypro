@@ -45,9 +45,6 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
-    <!-- ═══ CONTACTS (optional, for import) ═══ -->
-    <uses-permission android:name="android.permission.READ_CONTACTS"/>
-
     <!-- ═══ STORAGE (for cached files) ═══ -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
@@ -78,10 +75,10 @@
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false">
-        <!-- No backups of app data: the signed-in session is stored in
-             SharedPreferences (encrypted storage proved unreliable on some
-             phones — see ApiClient), and a backup would carry it to another
-             device. -->
+        <!-- No backups of app data: a backup would carry the signed-in
+             session to another device, and restoring the encrypted token
+             store without its Keystore key is what used to lose it (see
+             TokenStore). -->
         <!-- Release builds speak HTTPS only: a mistyped or downgraded
              workspace URL must not send login tokens in the clear. Debug
              builds re-enable plain HTTP for a LAN dev server, in

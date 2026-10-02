@@ -86,14 +86,35 @@ class CallRecordingService {
     await prefs.remove('cloudinary_preset');
   }
 
+  /// The agent agreed to the recording disclosure (RecordingDisclosure).
+  /// Versioned: changing what is collected means asking again.
+  static const _consentKey = 'call_recording_consent_v1';
+
+  /// Recording is on only with the agent's switch AND their consent. Google
+  /// Play requires the disclosure before any call audio is collected, so an
+  /// install that had the switch on from before the disclosure existed stays
+  /// off until the agent has agreed.
   Future<bool> isEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_enabledKey) ?? false;
+    return (prefs.getBool(_enabledKey) ?? false) && (prefs.getBool(_consentKey) ?? false);
   }
 
+  /// Switches recording on or off. Turning it on without consent is ignored —
+  /// show the disclosure first (confirmRecordingDisclosure).
   Future<void> setEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
+    if (value && !(prefs.getBool(_consentKey) ?? false)) return;
     await prefs.setBool(_enabledKey, value);
+  }
+
+  Future<bool> hasConsent() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_consentKey) ?? false;
+  }
+
+  Future<void> recordConsent() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_consentKey, true);
   }
 
   // ---- Permissions ----------------------------------------------

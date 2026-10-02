@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/legal.dart';
 import '../../core/services/tenant_config.dart';
 import '../../core/theme/colors.dart';
 import '../../core/widgets/brand.dart';
@@ -283,6 +284,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: AppColors.muted)),
                     ]),
                   ).animate().fadeIn(delay: 500.ms),
+
+                  // Play requires the privacy policy to be reachable from
+                  // inside the app — including before signing in.
+                  TextButton(
+                    onPressed: openPrivacyPolicy,
+                    child: const Text('Privacy policy',
+                        style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.muted)),
+                  ),
                 ],
               ),
             ),

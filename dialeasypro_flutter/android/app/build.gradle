@@ -60,7 +60,9 @@ android {
     defaultConfig {
         applicationId = "com.dialeasypro.app"
         minSdkVersion = flutter.minSdkVersion
-        targetSdk = 34
+        // Android 16. Play requires a recent target for new apps and updates;
+        // 36 also turns on edge-to-edge and predictive back (see DialerScreen).
+        targetSdk = 36
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
         multiDexEnabled = true

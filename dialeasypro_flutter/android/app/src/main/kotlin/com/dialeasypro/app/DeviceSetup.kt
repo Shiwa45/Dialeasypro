@@ -125,10 +125,14 @@ object DeviceSetup {
      * Ask to be exempted from battery optimisation, so aggressive OEM power
      * management does not kill the app between calls and stall the recording
      * sweep. Falls back to the general list, which needs no permission.
+     *
+     * The Play Store build does not ask for REQUEST_IGNORE_BATTERY_OPTIMIZATIONS.
+     * Without it the direct request opens nothing and throws nothing, so it
+     * would "succeed" invisibly — go straight to the list instead.
      */
     fun requestIgnoreBatteryOptimizations(activity: Activity): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false
-        try {
+        if (declares(activity, "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS")) try {
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
                 .setData(Uri.parse("package:${activity.packageName}"))
             activity.startActivity(intent)

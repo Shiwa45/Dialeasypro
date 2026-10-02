@@ -36,28 +36,38 @@ class _DialerScreenState extends ConsumerState<DialerScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(dialerProvider);
 
-    return WillPopScope(
-      onWillPop: () async {
+    // Back is held while a call waits for its outcome, and while a queue is
+    // running (it asks first). PopScope rather than WillPopScope: from
+    // Android 16 (targetSdk 36) back is "predictive" — the system has to know
+    // BEFORE the gesture whether this screen may close, and WillPopScope's
+    // after-the-fact veto no longer runs.
+    final holdBack = state.phase == DialerPhase.postCall ||
+        (state.mode == DialerMode.queue && state.phase != DialerPhase.completed);
+
+    return PopScope(
+      canPop: !holdBack,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) {
+          // Closed — by back, or by DONE/exit, which stopped it already.
+          // stop() is safe to repeat.
+          ref.read(dialerProvider.notifier).stop();
+          return;
+        }
         if (state.phase == DialerPhase.postCall) {
           AppToast.show(context, 'Please dispose this call first', isError: true);
-          return false;
+          return;
         }
-        if (state.mode == DialerMode.queue && state.phase != DialerPhase.completed) {
-          final confirmed = await showBrutalConfirm(
-            context: context,
-            title: 'Stop Auto-Dialer?',
-            message: 'You will exit the queue. Progress will be lost.',
-            confirmLabel: 'Stop & Exit',
-            danger: true,
-          );
-          if (confirmed == true) {
-            ref.read(dialerProvider.notifier).stop();
-            return true;
-          }
-          return false;
+        final confirmed = await showBrutalConfirm(
+          context: context,
+          title: 'Stop Auto-Dialer?',
+          message: 'You will exit the queue. Progress will be lost.',
+          confirmLabel: 'Stop & Exit',
+          danger: true,
+        );
+        if (confirmed == true && context.mounted) {
+          ref.read(dialerProvider.notifier).stop();
+          context.pop();
         }
-        ref.read(dialerProvider.notifier).stop();
-        return true;
       },
       child: Scaffold(
         backgroundColor: AppColors.background,

@@ -776,12 +776,18 @@ class TenantFeaturesAPIView(APIView):
         # hidden button and a 403 always have the same cause.
         from apps.core.capabilities import capabilities_for
 
+        # Every feature is shown in the app whatever the plan; a locked one
+        # opens an upgrade screen, which needs to say what it is, which plans
+        # include it and who to ask.
+        from apps.plans.upgrade import support_contacts, upgrade_catalog
+
         return Response({
             "features": full_map,
             "modules": modules,
             "plan": plan_data,
             "role": getattr(request.user, "role", None),
             "capabilities": capabilities_for(request.user),
+            "upgrade": {**upgrade_catalog(full_map), "support": support_contacts()},
         })
 
 

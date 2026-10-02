@@ -15,7 +15,6 @@ names the tenant explicitly rather than relying on the search path.
 """
 import logging
 
-from django.conf import settings
 from django.db import connection
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -175,19 +174,6 @@ class TenantBillingAPIView(APIView):
         hardcoded in the client, which is how the tab came to show
         "+91-1800-XXX-XXXX" to real customers.
         """
-        from apps.superadmin.models import GlobalSettings
+        from apps.plans.upgrade import support_contacts
 
-        def setting(key, default=""):
-            try:
-                return GlobalSettings.get(key, default) or default
-            except Exception:  # noqa: BLE001 — a missing table must not 500 billing
-                return default
-
-        return {
-            "platform_name": setting("platform_name", "TeleCRM"),
-            "email": setting("support_email", settings.SUPPORT_EMAIL),
-            # Only what has actually been configured. A blank is rendered as
-            # nothing; a placeholder is rendered as a number people dial.
-            "phone": setting("support_phone", ""),
-            "whatsapp": setting("support_whatsapp", ""),
-        }
+        return support_contacts()

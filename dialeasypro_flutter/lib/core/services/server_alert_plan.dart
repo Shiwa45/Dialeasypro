@@ -1,5 +1,5 @@
 // ============================================================
-// DialEasypro — Which server notifications reach the shade
+// DialSathi — Which server notifications reach the shade
 //
 // The server writes a Notification row when someone schedules a follow-up on
 // your lead, when one falls due, and hourly while one stays overdue. The app
@@ -92,7 +92,7 @@ ServerAlertPlan planServerAlerts(
       id: serverSlot(n.id),
       // A notification with no title would render as a blank row in the
       // shade, which reads as a bug rather than a message.
-      title: n.title.trim().isEmpty ? 'DialEasypro' : n.title,
+      title: n.title.trim().isEmpty ? 'DialSathi' : n.title,
       body: n.body,
       route: n.url,
     ));

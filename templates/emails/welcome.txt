@@ -1,6 +1,6 @@
-Welcome to DialEasypro, {{ tenant.primary_contact_name }}!
+Welcome to DialSathi, {{ tenant.primary_contact_name }}!
 
-Your DialEasypro CRM workspace has been successfully created and is ready to use.
+Your DialSathi CRM workspace has been successfully created and is ready to use.
 
 --- LOGIN CREDENTIALS ---
 Workspace Name: {{ tenant.schema_name }}
@@ -14,4 +14,4 @@ Login to Your Workspace here:
 
 Need help getting started? Email {{ support_email }}
 
-(c) DialEasypro. All rights reserved.
+(c) DialSathi. All rights reserved.

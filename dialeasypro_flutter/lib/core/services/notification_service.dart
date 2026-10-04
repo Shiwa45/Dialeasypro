@@ -1,5 +1,5 @@
 // ============================================================
-// DialEasypro — Notifications on the phone
+// DialSathi — Notifications on the phone
 //
 // pubspec has carried flutter_local_notifications and timezone since the
 // project started and nothing ever imported them. An agent whose lead had a

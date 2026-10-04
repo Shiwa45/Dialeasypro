@@ -34,7 +34,7 @@ class ApiRootView(View):
 
         if settings.FRONTEND_URL:
             return redirect(settings.FRONTEND_URL)
-        return JsonResponse({"service": "DialEasy Pro API", "health": "/health/"})
+        return JsonResponse({"service": "DialSathi API", "health": "/health/"})
 
 
 class HealthCheckView(View):

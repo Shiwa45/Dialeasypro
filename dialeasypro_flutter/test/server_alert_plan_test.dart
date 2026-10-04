@@ -96,7 +96,7 @@ void main() {
     test('a blank title falls back to the app name', () {
       final plan = _plan([_n(7, title: '   ')]);
 
-      expect(plan.show.single.title, 'DialEasypro',
+      expect(plan.show.single.title, 'DialSathi',
           reason: 'an empty row in the shade reads as a bug');
     });
   });

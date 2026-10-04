@@ -1,5 +1,5 @@
 // ============================================================
-// DialEasypro — A lead's custom fields
+// DialSathi — A lead's custom fields
 //
 // One widget for both places that need them — lead detail and the dialer —
 // so the two cannot drift into showing different things.

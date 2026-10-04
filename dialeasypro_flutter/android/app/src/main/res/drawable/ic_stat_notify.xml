@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status-bar / notification icon: the DialEasy handset-and-signal mark as a
+<!-- Status-bar / notification icon: the DialSathi handset-and-signal mark as a
      flat white silhouette. Android draws notification icons from their alpha
      channel only, so the coloured launcher icon cannot be used here. Loaded by
      NAME from Dart (NotificationService), hence res/raw/keep.xml. -->

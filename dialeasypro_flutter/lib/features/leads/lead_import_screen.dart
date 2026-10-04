@@ -13,7 +13,7 @@ import '../../data/services/api_client.dart';
 import '../auth/auth_provider.dart';
 
 // ============================================================
-// DialEasypro — Quick lead import (managers and admins)
+// DialSathi — Quick lead import (managers and admins)
 //
 // Paste comma-separated rows; they are sent as a CSV file to the same import
 // the web uses, so every import gets a batch, the duplicate rule, row-level

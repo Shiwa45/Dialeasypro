@@ -30,7 +30,7 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
 
         tenant = Tenant.objects.get(pk=tenant_id)
 
-        subject = f"Welcome to DialEasypro — Your account is ready, {tenant.primary_contact_name}!"
+        subject = f"Welcome to DialSathi — Your account is ready, {tenant.primary_contact_name}!"
 
         # Build login URL dynamically from the primary BASE_DOMAIN
         base_domain = getattr(settings, "BASE_DOMAIN", "dialeasypro.easyian.com")
@@ -52,7 +52,7 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
         except Exception:
             # Fallback if templates not built yet
             plain_message = (
-                f"Welcome to DialEasypro, {tenant.primary_contact_name}!\n\n"
+                f"Welcome to DialSathi, {tenant.primary_contact_name}!\n\n"
                 f"Your CRM is ready at: {login_url}\n\n"
                 f"--- LOGIN CREDENTIALS ---\n"
                 f"Workspace Name: {tenant.schema_name}\n"

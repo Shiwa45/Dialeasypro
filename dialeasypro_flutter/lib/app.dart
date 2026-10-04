@@ -409,14 +409,14 @@ class _Tab {
 }
 
 // ─── ROOT APP ───────────────────────────────────────────────
-class DialEasyproApp extends ConsumerStatefulWidget {
-  const DialEasyproApp({super.key});
+class DialSathiApp extends ConsumerStatefulWidget {
+  const DialSathiApp({super.key});
 
   @override
-  ConsumerState<DialEasyproApp> createState() => _DialEasyproAppState();
+  ConsumerState<DialSathiApp> createState() => _DialSathiAppState();
 }
 
-class _DialEasyproAppState extends ConsumerState<DialEasyproApp>
+class _DialSathiAppState extends ConsumerState<DialSathiApp>
     with WidgetsBindingObserver {
   /// Don't re-sync on every glance at the phone. Coming back from a ten
   /// second detour does not change what is scheduled.
@@ -515,7 +515,7 @@ class _DialEasyproAppState extends ConsumerState<DialEasyproApp>
     });
     final router = ref.watch(_routerProvider);
     return MaterialApp.router(
-      title: 'DialEasypro',
+      title: 'DialSathi',
       theme: AppTheme.theme,
       routerConfig: router,
       debugShowCheckedModeBanner: false,

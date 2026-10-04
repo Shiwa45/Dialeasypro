@@ -16,7 +16,7 @@ import 'dialer_state.dart';
 import 'lead_basics_card.dart';
 
 // ============================================================
-// DialEasypro — Active Dialer Screen
+// DialSathi — Active Dialer Screen
 // Full-screen experience for the auto-dialer flow:
 //  - Pre-call: lead preview + countdown
 //  - In-call: live timer + notes + quick actions

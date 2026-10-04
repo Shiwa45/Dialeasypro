@@ -13,7 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/services/api_client.dart';
 
 // ============================================================
-// DialEasypro — Call Recording Service (SIM-based)
+// DialSathi — Call Recording Service (SIM-based)
 //
 // Android 10+ blocks apps from recording cellular call audio directly, so we
 // use the phone's OWN built-in/OEM call recorder (Samsung/Xiaomi/Vivo/Oppo/etc.)

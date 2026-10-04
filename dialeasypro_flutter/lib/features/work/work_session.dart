@@ -7,7 +7,7 @@ import '../../core/services/presence_service.dart';
 import '../dialer/dialer_state.dart';
 
 // ============================================================
-// DialEasypro — Work session
+// DialSathi — Work session
 //
 // An agent signed in to the app is AT WORK: live on the admin's Live Agents
 // board, available, with idle time running from the moment they land on the

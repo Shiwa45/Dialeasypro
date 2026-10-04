@@ -1,5 +1,5 @@
 // ============================================================
-// DialEasypro — Notification bell
+// DialSathi — Notification bell
 //
 // The dashboard had a bell with `onPressed: () {}` behind it, so the
 // notifications screen was unreachable and the unread count was never shown

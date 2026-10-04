@@ -5,7 +5,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 
 // ============================================================
-// DialEasypro — Lead basics on the dialing screens
+// DialSathi — Lead basics on the dialing screens
 //
 // The dialer showed a lead's name, number, status and city, and nothing else
 // — the source, budget, email, how often we have called and when we last

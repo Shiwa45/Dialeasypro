@@ -113,7 +113,7 @@ class CallAudioService : Service() {
 
         return builder
             .setContentTitle("Call recording active")
-            .setContentText("DialEasypro is recording this call for your CRM.")
+            .setContentText("DialSathi is recording this call for your CRM.")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .also { b -> pending?.let { b.setContentIntent(it) } }

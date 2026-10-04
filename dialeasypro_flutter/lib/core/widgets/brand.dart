@@ -4,7 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../theme/colors.dart';
 
 // ============================================================
-// Brand pieces shared with the web app: the DialEasy mark, the wordmark and
+// Brand pieces shared with the web app: the DialSathi mark, the wordmark and
 // the dashboard illustration. All three are PLACEHOLDER artwork drawn to
 // match the design — swap the SVG strings for the real files when they exist.
 // ============================================================
@@ -31,7 +31,7 @@ class BrandMark extends StatelessWidget {
   }
 }
 
-/// "DialEasy" with "Easy" in green, "TeleCRM" underneath.
+/// "DialSathi" with "Sathi" in green, "TeleCRM" underneath.
 class BrandWordmark extends StatelessWidget {
   final bool onDark;
   final double size;
@@ -47,7 +47,7 @@ class BrandWordmark extends StatelessWidget {
       children: [
         Text.rich(TextSpan(children: [
           TextSpan(text: 'Dial', style: TextStyle(color: base)),
-          TextSpan(text: 'Easy', style: TextStyle(color: accent)),
+          TextSpan(text: 'Sathi', style: TextStyle(color: accent)),
         ]), style: TextStyle(fontFamily: kFontFamily, fontWeight: FontWeight.w800,
             fontSize: size, letterSpacing: -0.6, height: 1)),
         const SizedBox(height: 3),

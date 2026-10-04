@@ -12,7 +12,7 @@ import 'dialer_state.dart';
 import 'queue_starter_screen.dart';
 
 // ============================================================
-// DialEasypro — Auto Dial home
+// DialSathi — Auto Dial home
 //
 // Where the app opens after sign-in. The agent is live from the moment they
 // land here; the strip at the top says so and counts idle time. The rest of

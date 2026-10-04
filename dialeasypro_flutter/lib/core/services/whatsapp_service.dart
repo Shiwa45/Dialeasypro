@@ -2,7 +2,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/services/api_client.dart';
 
 // ============================================================
-// DialEasypro — WhatsApp Service
+// DialSathi — WhatsApp Service
 // Native (open device WhatsApp) + Cloud (org's WhatsApp Cloud API)
 // ============================================================
 

@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'token_store.dart';
 
 // ============================================================
-// DialEasypro — Tenant Configuration
+// DialSathi — Tenant Configuration
 //
 // Multi-tenant Django backend uses django-tenants with schema-based
 // isolation. Each tenant has its own subdomain (e.g.,

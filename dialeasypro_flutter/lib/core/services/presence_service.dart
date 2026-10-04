@@ -2,7 +2,7 @@ import 'dart:async';
 import '../../data/services/api_client.dart';
 
 // ============================================================
-// DialEasypro — Presence Service
+// DialSathi — Presence Service
 //
 // Reports the agent's live work status to the backend for admin monitoring.
 // Presence is tied to the auto-dial session: starting the dialer marks the

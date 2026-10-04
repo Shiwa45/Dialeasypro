@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
-// DialEasypro — First-run setup
+// DialSathi — First-run setup
 //
 // An agent who installs the app and starts dialling without granting anything
 // gets a CRM that logs calls and records none of them, silently. This drives

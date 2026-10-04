@@ -1,7 +1,7 @@
 import 'package:url_launcher/url_launcher.dart';
 
 // ============================================================
-// DialEasypro — Legal links
+// DialSathi — Legal links
 //
 // Google Play requires a privacy policy reachable from inside the app. The
 // address can be changed per build:

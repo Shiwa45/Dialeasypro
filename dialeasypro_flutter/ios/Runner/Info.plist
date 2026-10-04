@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>DialEasypro</string>
+    <string>DialSathi</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>dialeasypro</string>
+    <string>DialSathi</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -40,11 +40,11 @@
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>DialEasypro records voice notes during calls so you can save audio memos and follow-up reminders.</string>
+    <string>DialSathi records voice notes during calls so you can save audio memos and follow-up reminders.</string>
     <key>NSContactsUsageDescription</key>
-    <string>DialEasypro can import contacts from your address book to create leads.</string>
+    <string>DialSathi can import contacts from your address book to create leads.</string>
     <key>NSUserNotificationUsageDescription</key>
-    <string>DialEasypro notifies you of upcoming follow-ups and overdue tasks.</string>
+    <string>DialSathi notifies you of upcoming follow-ups and overdue tasks.</string>
     <key>LSApplicationQueriesSchemes</key>
     <array>
         <string>tel</string>

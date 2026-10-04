@@ -3,7 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
-// DialEasypro — Where the sign-in tokens live
+// DialSathi — Where the sign-in tokens live
 //
 // Encrypted at rest: the Android Keystore holds the key, so a copy of the
 // app's files is no use without the phone itself.

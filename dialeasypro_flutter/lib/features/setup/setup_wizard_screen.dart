@@ -142,7 +142,7 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
     if (!opened) {
       AppToast.show(context,
           'Could not open that screen. Find Autostart in your phone Settings '
-          'and allow DialEasypro.',
+          'and allow DialSathi.',
           isError: true);
     }
   }

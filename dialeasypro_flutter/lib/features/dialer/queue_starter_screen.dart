@@ -9,7 +9,7 @@ import '../work/work_session.dart';
 import 'dialer_state.dart';
 
 // ============================================================
-// DialEasypro — Queue Starter Screen
+// DialSathi — Queue Starter Screen
 // Shows the admin-defined calling queues this agent is assigned to.
 // Each queue pulls leads one at a time from the server — no lead is ever
 // served to two agents or repeated (enforced server-side via locking,

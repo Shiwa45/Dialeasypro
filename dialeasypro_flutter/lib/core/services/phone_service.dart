@@ -8,7 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 // ============================================================
-// DialEasypro — Phone Service
+// DialSathi — Phone Service
 // Direct auto-dial + call state monitoring
 // ============================================================
 

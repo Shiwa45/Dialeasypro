@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 // ============================================================
-// DialEasypro — Call outcome from the phone's own call log
+// DialSathi — Call outcome from the phone's own call log
 //
 // The app cannot measure a call itself. While it is running the phone's
 // dialer owns the screen and Android freezes this app, so a ticking timer

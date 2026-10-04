@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'colors.dart';
 
 // ============================================================
-// DialEasypro — Material theme (TeleCRM)
+// DialSathi — Material theme (TeleCRM)
 //
 // Matches the web app: cool-grey page, white cards with 14px corners, green
 // primary actions, blue second accent, bold Plus Jakarta Sans headings.

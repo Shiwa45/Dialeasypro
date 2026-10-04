@@ -3,7 +3,7 @@ import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
 
 // ============================================================
-// DialEasypro — Colour & design system (TeleCRM)
+// DialSathi — Colour & design system (TeleCRM)
 //
 // Forest-green deep surfaces, cool-grey page, white cards, green actions and
 // a blue second accent. Matches the web app's index.css token-for-token so

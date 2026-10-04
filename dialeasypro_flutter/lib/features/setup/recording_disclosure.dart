@@ -5,7 +5,7 @@ import '../../core/services/call_recording_service.dart';
 import '../../core/theme/colors.dart';
 
 // ============================================================
-// DialEasypro — Call recording disclosure
+// DialSathi — Call recording disclosure
 //
 // Google Play's User Data policy requires a prominent in-app disclosure, and
 // the user's agreement, before an app collects personal or sensitive data —
@@ -49,7 +49,7 @@ class RecordingDisclosureDialog extends StatelessWidget {
       content: SingleChildScrollView(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           const Text(
-            'With call recording on, DialEasypro records the calls you make to leads '
+            'With call recording on, DialSathi records the calls you make to leads '
             'from this app and uploads each recording to your company’s CRM.',
             style: AppTextStyles.body,
           ),

@@ -1,5 +1,5 @@
 // ============================================================
-// DialEasypro — Which reminders to raise, and when
+// DialSathi — Which reminders to raise, and when
 //
 // Pure: no plugin, no clock of its own, no storage. It takes the follow-ups,
 // the time, and what has already been announced, and returns a plan. That is

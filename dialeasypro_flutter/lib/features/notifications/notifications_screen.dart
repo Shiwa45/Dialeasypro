@@ -1,5 +1,5 @@
 // ============================================================
-// DialEasypro — Notifications
+// DialSathi — Notifications
 //
 // What the agent has been told, and what is still unread. Pull to refresh
 // also re-arms the local reminders, so the one gesture that means "catch me

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- DialEasy launcher icon (Android 5-7). The same handset-and-signal mark as
+<!-- DialSathi launcher icon (Android 5-7). The same handset-and-signal mark as
      BrandMark in lib/core/widgets/brand.dart, in its on-dark colours, on the
      brand's deep green. Android 8+ uses drawable-v26/ic_launcher.xml. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"

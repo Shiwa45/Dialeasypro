@@ -10,7 +10,7 @@ import '../../data/services/services.dart';
 import '../../data/models/models.dart';
 
 // ============================================================
-// DialEasypro — Dialer Queue State Manager
+// DialSathi — Dialer Queue State Manager
 // Implements the auto-dialer flow:
 //   1. Load queue of leads
 //   2. Direct-dial the first lead

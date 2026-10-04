@@ -68,5 +68,5 @@ void main() async {
   // editable, so they are cleared rather than left on the phone.
   unawaited(CallRecordingService.purgeLegacyCloudinarySettings().catchError((Object _) {}));
 
-  runApp(const ProviderScope(child: DialEasyproApp()));
+  runApp(const ProviderScope(child: DialSathiApp()));
 }

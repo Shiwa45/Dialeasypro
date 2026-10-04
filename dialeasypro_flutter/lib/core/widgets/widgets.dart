@@ -6,7 +6,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/colors.dart';
 
 // ============================================================
-// DialEasypro — Polished UI Widget Library
+// DialSathi — Polished UI Widget Library
 // ============================================================
 
 // ─── BRUTAL CARD ────────────────────────────────────────────

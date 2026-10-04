@@ -89,6 +89,8 @@ class LeadSourceConfigSerializer(serializers.ModelSerializer):
             "has_app_secret": bool(creds.get("app_secret")),
             "has_access_token": bool(creds.get("access_token")),
             "has_api_key": bool(creds.get("api_key")),
+            # The key Google Ads lead forms send in the body (GoogleAdsWebhookView).
+            "has_google_key": bool(creds.get("google_key")),
         }
 
     def update(self, instance, validated_data):

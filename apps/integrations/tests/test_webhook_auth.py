@@ -124,3 +124,23 @@ def test_the_generic_url_rejects_an_unknown_token():
                      {"name": "Buyer", "phone": "9812300053"}, token="nope")
 
     assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_the_google_key_saved_from_the_crm_is_the_one_checked():
+    """
+    The Configure screen asked every non-Meta source for an "API key" that no
+    webhook reads, so the Google key a tenant typed was stored as `api_key`
+    and Google's key check could never pass. It is saved as google_key now.
+    """
+    from apps.integrations.serializers import LeadSourceConfigSerializer
+
+    config = LeadSourceConfig.objects.create(source=LeadSource.GOOGLE_ADS, is_active=True)
+    serializer = LeadSourceConfigSerializer(config, data={"credentials": {"google_key": "gk-typed"}}, partial=True)
+    assert serializer.is_valid(), serializer.errors
+    serializer.save()
+
+    config.refresh_from_db()
+    assert LeadSourceConfigSerializer(config).data["credentials_status"]["has_google_key"] is True
+    right = _post(GoogleAdsWebhookView, "/api/v1/integrations/google/", {**GOOGLE_BODY, "google_key": "gk-typed"})
+    assert right.status_code == 200

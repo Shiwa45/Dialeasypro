@@ -749,40 +749,51 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
                 ),
               );
             }
-            return Wrap(spacing: 8, runSpacing: 8, children: dispositions.map((d) {
-              final selected = _selected?.id == d.id;
-              return GestureDetector(
-                onTap: () { HapticFeedback.selectionClick(); setState(() => _selected = d); },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 100),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? (d.isPositive ? AppColors.success : AppColors.error)
-                        : AppColors.white,
-                    border: Border.all(color: AppColors.line, width: 1),
-                    boxShadow: selected
-                        ? const [BoxShadow(color: Color(0x14111A16), offset: Offset(0, 2), blurRadius: 8, spreadRadius: -4)]
-                        : const [BoxShadow(color: Color(0x1F111A16), offset: Offset(0, 6), blurRadius: 18, spreadRadius: -8)],
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(
-                      d.isPositive ? Icons.thumb_up : Icons.thumb_down,
-                      size: 12,
-                      color: selected ? AppColors.white : (d.isPositive ? AppColors.success : AppColors.error),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      d.name,
-                      style: TextStyle(
-                        fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 12,
-                        color: selected ? AppColors.white : AppColors.black,
-                      ),
-                    ),
-                  ]),
-                ),
-              );
-            }).toList());
+            // One dropdown instead of a chip per outcome: a tenant with a
+            // dozen dispositions used to fill the screen with them, pushing
+            // the notes and the save button below the fold.
+            return DropdownButtonFormField<int>(
+              // Re-created when the list itself changes (e.g. after RETRY).
+              key: ValueKey(dispositions.map((d) => d.id).join(',')),
+              initialValue: dispositions.any((d) => d.id == _selected?.id) ? _selected!.id : null,
+              isExpanded: true,
+              menuMaxHeight: 360,
+              borderRadius: BorderRadius.circular(12),
+              hint: const Text('Choose the call outcome'),
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
+              decoration: InputDecoration(
+                prefixIcon: _selected == null
+                    ? const Icon(Icons.flag_outlined, color: AppColors.text3)
+                    : Icon(_selected!.isPositive ? Icons.thumb_up : Icons.thumb_down,
+                        size: 18, color: _selected!.isPositive ? AppColors.success : AppColors.error),
+                helperText: _selected?.autoFollowupHours != null && _selected!.autoFollowupHours! > 0
+                    ? 'A follow-up is scheduled automatically in ${_selected!.autoFollowupHours} h'
+                    : null,
+              ),
+              items: dispositions.map((d) => DropdownMenuItem<int>(
+                value: d.id,
+                child: Row(children: [
+                  Icon(d.isPositive ? Icons.thumb_up : Icons.thumb_down, size: 14,
+                      color: d.isPositive ? AppColors.success : AppColors.error),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(d.name, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w600,
+                          fontSize: 14, color: AppColors.text))),
+                ]),
+              )).toList(),
+              // The selected value shows its name only; the field's own icon
+              // already says positive or negative.
+              selectedItemBuilder: (_) => dispositions.map((d) => Align(
+                alignment: Alignment.centerLeft,
+                child: Text(d.name, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700,
+                        fontSize: 14, color: AppColors.text)),
+              )).toList(),
+              onChanged: (id) {
+                HapticFeedback.selectionClick();
+                setState(() => _selected = dispositions.firstWhere((d) => d.id == id));
+              },
+            );
           },
         ),
 

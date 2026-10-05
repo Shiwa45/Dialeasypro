@@ -58,7 +58,11 @@ class Cap:
     ATS_VIEW = "ats.view"
     ATS_MANAGE = "ats.manage"          # openings, candidates, pipeline config
     ATS_INTERVIEW = "ats.interview"    # schedule interviews, submit feedback
-    ATS_OFFER = "ats.offer"            # create/send offers, convert a hire to an employee
+    ATS_OFFER = "ats.offer"            # create/send offers
+    # Converting an accepted offer into an HRMS employee creates payroll
+    # records (an Employee and a SalaryStructure), so it is split from
+    # ATS_OFFER: a recruiter runs offers end to end, HR does the onboarding.
+    ATS_ONBOARD = "ats.onboard"
 
 
 # ------------------------------------------------------------
@@ -95,10 +99,11 @@ CAPABILITIES: dict[str, list[str]] = {
     # Recruitment. Interviewers are deliberately wider than managers — a senior
     # agent is often the person who takes the technical round, and they need to
     # file a scorecard without being able to see salary bands or offers.
-    Cap.ATS_VIEW: [R.ADMIN, R.HR, R.MANAGER],
-    Cap.ATS_MANAGE: [R.ADMIN, R.HR],
-    Cap.ATS_INTERVIEW: [R.ADMIN, R.HR, R.MANAGER, R.SENIOR_AGENT],
-    Cap.ATS_OFFER: [R.ADMIN, R.HR],
+    Cap.ATS_VIEW: [R.ADMIN, R.HR, R.MANAGER, R.RECRUITER],
+    Cap.ATS_MANAGE: [R.ADMIN, R.HR, R.RECRUITER],
+    Cap.ATS_INTERVIEW: [R.ADMIN, R.HR, R.MANAGER, R.SENIOR_AGENT, R.RECRUITER],
+    Cap.ATS_OFFER: [R.ADMIN, R.HR, R.RECRUITER],
+    Cap.ATS_ONBOARD: [R.ADMIN, R.HR],
 }
 
 ALL_CAPABILITIES = list(CAPABILITIES.keys())
@@ -121,3 +126,33 @@ def capabilities_for(agent) -> dict[str, bool]:
     """The full capability map for one agent, for the /auth/capabilities/ payload."""
     role = getattr(agent, "role", None)
     return {cap: (role in roles) for cap, roles in CAPABILITIES.items()}
+
+
+
+# ------------------------------------------------------------
+# Workspaces — which web experience a role gets
+# ------------------------------------------------------------
+
+class Workspace:
+    """
+    The web app's shape for a role. Computed here, on the server, and sent with
+    /auth/features/ so the sidebar, the route guard and the landing page all
+    read ONE answer — and it is the same answer the API enforces.
+
+    A workspace is presentation, not security. Hiding a screen stops nobody
+    who types its URL or calls its endpoint; the capability table above and
+    the per-row scoping (leads_visible_to, calls_visible_to) are the boundary.
+    """
+
+    FULL = "full"            # the admin console, as before
+    AGENT = "agent"          # own dashboard, own leads, own calls
+    RECRUITER = "recruiter"  # recruitment only
+
+
+def workspace_for(agent) -> str:
+    role = getattr(agent, "role", None)
+    if role in R.AGENT_WORKSPACE_ROLES:
+        return Workspace.AGENT
+    if role == R.RECRUITER:
+        return Workspace.RECRUITER
+    return Workspace.FULL

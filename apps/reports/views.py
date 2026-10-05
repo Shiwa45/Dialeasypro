@@ -14,7 +14,8 @@ import logging
 from datetime import timedelta
 
 from django.core.cache import cache
-from django.db.models import Avg, Count, Q, Sum
+from django.db.models import Avg, Count, Max, Min, Q, Sum
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.renderers import JSONRenderer
@@ -454,4 +455,175 @@ class AgentLoginReportView(APIView):
             "date_to": date_to.isoformat(),
             "generated_at": timezone.now().isoformat(),
             "rows": rows,
+        })
+
+
+# ============================================================
+# My performance — the agent's own dashboard
+# ============================================================
+
+class MyPerformanceView(APIView):
+    """
+    GET /api/v1/reports/my-performance/?days=1|7|30
+
+    The signed-in person's OWN numbers, and nobody else's.
+
+    This deliberately takes no agent_id parameter, ever. Every other report
+    here is "the team, filtered"; this one is "me", and the cleanest way to
+    guarantee an agent can never read a colleague's numbers through it is for
+    the endpoint to have no way of being asked for them.
+
+    Not plan-gated: an agent's view of their own day is basic to the product,
+    not an analytics upsell. The tenant-wide agent-performance report stays
+    behind AGENT_PERFORMANCE_REPORTS.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+    ALLOWED_DAYS = (1, 7, 30)
+
+    def get(self, request):
+        from datetime import datetime, time as dtime
+
+        from apps.calls.models import CallLog
+        from apps.core.constants import CallDirection
+        from apps.leads.models import FollowUp, Lead, LeadActivity
+
+        me = request.user
+        try:
+            days = int(request.query_params.get("days", 7))
+        except (TypeError, ValueError):
+            days = 7
+        if days not in self.ALLOWED_DAYS:
+            days = 7
+
+        now = timezone.now()
+        today = timezone.localdate()
+        date_from = today - timedelta(days=days - 1)
+        tz = timezone.get_current_timezone()
+        # Local-midnight boundaries, so "today" means the agent's working day
+        # in IST, not a UTC day that starts at 5:30 in the morning.
+        start = timezone.make_aware(datetime.combine(date_from, dtime.min), tz)
+        end_of_today = timezone.make_aware(datetime.combine(today, dtime.max), tz)
+
+        # ---- Calls --------------------------------------------
+        calls = CallLog.objects.filter(agent=me, started_at__gte=start, started_at__lte=end_of_today)
+        agg = calls.aggregate(
+            total=Count("id"),
+            connected=Count("id", filter=Q(is_connected=True)),
+            talk=Sum("duration_seconds", filter=Q(is_connected=True)),
+            outbound=Count("id", filter=Q(direction=CallDirection.OUTBOUND)),
+            inbound=Count("id", filter=Q(direction=CallDirection.INBOUND)),
+            missed=Count("id", filter=Q(direction=CallDirection.MISSED)),
+        )
+        total_calls = agg["total"] or 0
+        connected = agg["connected"] or 0
+        talk = agg["talk"] or 0
+
+        # One row per day, zero-filled — a chart with gaps on the days nothing
+        # happened reads as missing data rather than as a quiet day.
+        per_day = {
+            row["day"]: row
+            for row in calls.annotate(day=TruncDate("started_at"))
+            .values("day")
+            .annotate(
+                total=Count("id"),
+                connected=Count("id", filter=Q(is_connected=True)),
+                talk=Sum("duration_seconds", filter=Q(is_connected=True)),
+            )
+        }
+        by_day = []
+        for i in range(days):
+            d = date_from + timedelta(days=i)
+            row = per_day.get(d, {})
+            by_day.append({
+                "date": d.isoformat(),
+                "calls": row.get("total") or 0,
+                "connected": row.get("connected") or 0,
+                "talk_seconds": row.get("talk") or 0,
+            })
+
+        today_calls = CallLog.objects.filter(agent=me, started_at__date=today)
+        first_last = today_calls.aggregate(first=Min("started_at"), last=Max("started_at"))
+
+        # ---- Leads --------------------------------------------
+        my_leads = Lead.objects.filter(assigned_to=me, is_deleted=False)
+        by_status = dict(
+            my_leads.values_list("status").annotate(n=Count("id")).values_list("status", "n")
+        )
+        assigned_total = sum(by_status.values())
+        converted_total = by_status.get(LeadStatus.CONVERTED, 0)
+
+        # Conversions *this agent* made in the period, read from the activity
+        # trail — Lead carries no converted_at, and counting leads currently
+        # in "converted" would credit this period with last month's wins.
+        converted_in_period = (
+            LeadActivity.objects.filter(
+                performed_by=me,
+                activity_type="status_change",
+                meta__new_status=LeadStatus.CONVERTED,
+                timestamp__gte=start,
+            )
+            .values("lead_id").distinct().count()
+        )
+        new_in_period = my_leads.filter(assigned_at__gte=start).count()
+
+        # ---- Follow-ups ---------------------------------------
+        open_fu = FollowUp.objects.filter(assigned_to=me, is_completed=False)
+        next_followups = [
+            {
+                "id": f.pk,
+                "lead_id": f.lead_id,
+                "lead_name": f.lead.name,
+                "scheduled_at": f.scheduled_at.isoformat(),
+                "type": f.followup_type,
+                "overdue": f.scheduled_at < now,
+            }
+            for f in open_fu.filter(lead__is_deleted=False)
+            .select_related("lead").order_by("scheduled_at")[:8]
+        ]
+
+        return Response({
+            "period": {
+                "days": days,
+                "date_from": date_from.isoformat(),
+                "date_to": today.isoformat(),
+            },
+            "calls": {
+                "total": total_calls,
+                "connected": connected,
+                "connection_rate": round(connected / total_calls * 100, 1) if total_calls else 0,
+                "talk_seconds": talk,
+                "avg_talk_seconds": round(talk / connected) if connected else 0,
+                "outbound": agg["outbound"] or 0,
+                "inbound": agg["inbound"] or 0,
+                "missed": agg["missed"] or 0,
+            },
+            "calls_by_day": by_day,
+            "today": {
+                "calls": today_calls.count(),
+                "first_call_at": first_last["first"].isoformat() if first_last["first"] else None,
+                "last_call_at": first_last["last"].isoformat() if first_last["last"] else None,
+            },
+            "leads": {
+                "assigned_total": assigned_total,
+                "by_status": by_status,
+                "new_in_period": new_in_period,
+                "converted_in_period": converted_in_period,
+                "converted_total": converted_total,
+                "conversion_rate": (
+                    round(converted_total / assigned_total * 100, 1) if assigned_total else 0
+                ),
+            },
+            "followups": {
+                "overdue": open_fu.filter(scheduled_at__lt=now).count(),
+                "due_today": open_fu.filter(scheduled_at__gte=now, scheduled_at__lte=end_of_today).count(),
+                "upcoming_7d": open_fu.filter(
+                    scheduled_at__gt=end_of_today,
+                    scheduled_at__lte=end_of_today + timedelta(days=7),
+                ).count(),
+                "completed_in_period": FollowUp.objects.filter(
+                    assigned_to=me, is_completed=True, completed_at__gte=start,
+                ).count(),
+                "next": next_followups,
+            },
         })

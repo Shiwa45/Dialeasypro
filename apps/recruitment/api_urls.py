@@ -28,6 +28,8 @@ from apps.recruitment.views import (
     PipelineStageListCreateView,
     PipelineStageReorderView,
     RecruitmentDashboardView,
+    RecruitmentPeopleView,
+    ReportingOptionsView,
     SuggestEmployeeCodeView,
 )
 
@@ -70,4 +72,8 @@ urlpatterns = [
     path("offers/<int:pk>/status/", OfferStatusView.as_view(), name="api_ats_offer_status"),
     path("offers/<int:pk>/convert-to-employee/", OfferConvertView.as_view(), name="api_ats_offer_convert"),
     path("suggest-employee-code/", SuggestEmployeeCodeView.as_view(), name="api_ats_suggest_code"),
+
+    # Pickers
+    path("people/", RecruitmentPeopleView.as_view(), name="api_ats_people"),
+    path("reporting-options/", ReportingOptionsView.as_view(), name="api_ats_reporting_options"),
 ]

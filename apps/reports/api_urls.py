@@ -3,7 +3,7 @@ from django.urls import path
 from apps.reports.views import (
     AgentPerformanceReportView, LeadSourceReportView,
     CallAnalyticsReportView, ConversionFunnelView, DailyActivityView,
-    AgentLoginReportView,
+    AgentLoginReportView, MyPerformanceView,
 )
 
 urlpatterns = [
@@ -13,4 +13,5 @@ urlpatterns = [
     path("conversion-funnel/", ConversionFunnelView.as_view(), name="api_report_funnel"),
     path("daily-activity/", DailyActivityView.as_view(), name="api_report_daily"),
     path("agent-login/", AgentLoginReportView.as_view(), name="api_report_agent_login"),
+    path("my-performance/", MyPerformanceView.as_view(), name="api_report_my_performance"),
 ]

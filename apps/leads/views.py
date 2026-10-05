@@ -62,6 +62,7 @@ from apps.leads.serializers import (
     LeadUpdateSerializer,
 )
 from apps.authentication.permissions import (
+    IsNotReadOnly,
     HasFeatureAccess,
     IsActiveAgent,
     IsAuthenticatedAgent,
@@ -149,7 +150,7 @@ class LeadListCreateView(generics.ListCreateAPIView):
              search (name/phone/email), overdue, date_range
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
     pagination_class = StandardResultsSetPagination
 
     def create(self, request, *args, **kwargs):
@@ -269,7 +270,8 @@ class LeadDetailView(generics.RetrieveUpdateDestroyAPIView):
         # used to be able to soft-delete the leads assigned to them.
         if self.request.method == "DELETE":
             return [IsManagerOrAdmin()]
-        return [IsAuthenticatedAgent()]
+        # Read-only users may open a lead but never change it.
+        return [IsAuthenticatedAgent(), IsNotReadOnly()]
 
     def get_serializer_class(self):
         if self.request.method in ("PUT", "PATCH"):
@@ -318,7 +320,7 @@ class LeadStatusUpdateView(APIView):
     Dedicated endpoint for quick status updates from the kanban board.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
 
     def patch(self, request, pk):
         # Only allow status changes on leads visible to this agent.
@@ -555,7 +557,7 @@ class FollowUpListCreateView(generics.ListCreateAPIView):
     POST /api/v1/leads/{lead_id}/followups/   → Schedule new follow-up
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
 
     def get_serializer_class(self):
         return FollowUpCreateSerializer if self.request.method == "POST" else FollowUpSerializer
@@ -639,7 +641,7 @@ class MyFollowUpsView(generics.ListAPIView):
 class FollowUpCompleteView(APIView):
     """POST /api/v1/followups/{id}/complete/ — Mark follow-up as done."""
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
 
     def post(self, request, pk):
         # Only allow completing follow-ups on leads visible to this agent.
@@ -665,7 +667,7 @@ class LeadNoteListCreateView(generics.ListCreateAPIView):
     POST /api/v1/leads/{lead_id}/notes/  → Add note
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
     serializer_class = LeadNoteSerializer
     parser_classes = [MultiPartParser]
 
@@ -1282,7 +1284,7 @@ class QueuePullNextView(APIView):
     the requesting agent. Guarantees no two agents ever receive the same lead.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
 
     def post(self, request, pk):
         agent = request.user
@@ -1340,7 +1342,7 @@ class QueueReleaseView(APIView):
     Body: { "lead_id": <id>, "mark_dialed": false }
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
 
     def post(self, request):
         agent = request.user

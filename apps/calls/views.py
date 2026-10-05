@@ -22,6 +22,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.authentication.permissions import (
+    IsNotReadOnly,
     HasFeatureAccess,
     IsActiveAgent,
     IsAuthenticatedAgent,
@@ -49,7 +50,7 @@ class CallLogListCreateView(generics.ListCreateAPIView):
     POST /api/v1/calls/     → Log a manual call
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
     pagination_class = StandardResultsSetPagination
 
     def get_serializer_class(self):
@@ -182,7 +183,7 @@ class CallRecordingUploadView(APIView):
       matched_by       (optional) filename_number | timestamp | manual
     """
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, IsNotReadOnly]
     required_feature = FeatureKey.CALL_RECORDING_ACCESS
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
@@ -361,7 +362,7 @@ class ClickToCallView(APIView):
     The provider's webhook updates it with actual duration/status.
     """
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, IsNotReadOnly]
     required_feature = FeatureKey.CLOUD_TELEPHONY
 
     def post(self, request):

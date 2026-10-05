@@ -409,6 +409,10 @@ CORS_ALLOW_HEADERS = [
     "x-requested-with",
     "x-tenant-schema",  # Custom header for tenant identification
     "x-workspace-id",
+    # The web app names itself so login can apply the tenant's agent
+    # web-access policy (apps/authentication/web_access.py). Without it here,
+    # the browser's CORS preflight would refuse EVERY request the web app makes.
+    "x-client",
 ]
 
 # ============================================================

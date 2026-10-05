@@ -347,6 +347,7 @@ class AgentRole:
     MANAGER = "manager"      # Manage team, view team reports
     HR = "hr"                # HRMS + Recruitment owner; NOT a CRM admin
     ACCOUNTS = "accounts"    # Sales & Billing owner; NOT a CRM admin
+    RECRUITER = "recruiter"  # Recruitment (ATS) only; no CRM, no HRMS
     SENIOR_AGENT = "senior_agent"  # Own leads + junior agents' leads
     AGENT = "agent"          # Own leads only
     READONLY = "readonly"    # View only access
@@ -356,6 +357,7 @@ class AgentRole:
         (MANAGER, "Manager"),
         (HR, "HR"),
         (ACCOUNTS, "Accounts"),
+        (RECRUITER, "Recruiter"),
         (SENIOR_AGENT, "Senior Agent"),
         (AGENT, "Agent"),
         (READONLY, "Read Only"),
@@ -372,7 +374,12 @@ class AgentRole:
     # without also being handed every lead and every agent password. Module
     # access for these is decided by apps/core/capabilities.py, not by
     # HIERARCHY — see the module docstring there.
-    BACK_OFFICE_ROLES = [HR, ACCOUNTS]
+    BACK_OFFICE_ROLES = [HR, ACCOUNTS, RECRUITER]
+
+    # Roles that get the agent web workspace: their own dashboard, their own
+    # leads, their own calls — nothing else. See apps/core/capabilities.py ::
+    # workspace_for. Read-only sees the same screens with writes removed.
+    AGENT_WORKSPACE_ROLES = [AGENT, READONLY]
 
     # Role hierarchy for permission checks (higher number = more access).
     # HR/Accounts rank alongside a senior agent for *CRM* purposes only.
@@ -382,6 +389,7 @@ class AgentRole:
         SENIOR_AGENT: 3,
         HR: 3,
         ACCOUNTS: 3,
+        RECRUITER: 3,
         MANAGER: 4,
         ADMIN: 5,
     }

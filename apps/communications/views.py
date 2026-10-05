@@ -25,6 +25,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.authentication.permissions import (
+    IsNotReadOnly,
     HasFeatureAccess, IsActiveAgent, IsAuthenticatedAgent, IsManagerOrAdmin,
     IsTenantAdmin, feature_required, require_channel_feature,
 )
@@ -176,7 +177,7 @@ class SendWhatsAppView(APIView):
     Plan-gated on ONE_CLICK_WHATSAPP.
     """
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, IsNotReadOnly]
     required_feature = FeatureKey.ONE_CLICK_WHATSAPP
 
     def post(self, request):
@@ -234,7 +235,7 @@ class LogNativeWhatsAppView(APIView):
     this records exactly what is known: WhatsApp was opened, with this text.
     """
 
-    permission_classes = [IsAuthenticatedAgent]
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
 
     def post(self, request):
         from apps.leads.models import LeadActivity
@@ -265,7 +266,7 @@ class LogNativeWhatsAppView(APIView):
 class SendSMSView(APIView):
     """POST /api/v1/comms/sms/send/ — Send a single SMS. Gated on ONE_CLICK_SMS."""
 
-    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, IsNotReadOnly]
     required_feature = FeatureKey.ONE_CLICK_SMS
 
     def post(self, request):
@@ -755,11 +756,21 @@ class WhatsAppConversationListView(generics.ListAPIView):
     def get_queryset(self):
         queryset = WhatsAppConversation.objects.select_related("lead")
 
-        # An agent sees the conversations of leads assigned to them; managers
-        # and admins see everything — the same rule the lead list applies.
+        # Secure by default, the same rule as the lead list: admins and
+        # managers see every thread; everybody else sees only threads on leads
+        # they can see.
+        #
+        # This used to be "if role == agent: restrict" — the inverted default
+        # calls/scoping.py warns about — so HR, Accounts, Read-only, Senior
+        # agents and any role added later could list EVERY WhatsApp
+        # conversation in the tenant. Admin/manager skip the `lead__in`
+        # subquery only because leads_visible_to would return every lead for
+        # them anyway — the result is identical, the query is cheaper.
+        from apps.leads.views import leads_visible_to
+
         agent = self.request.user
-        if getattr(agent, "role", "") == AgentRole.AGENT:
-            queryset = queryset.filter(lead__assigned_to=agent)
+        if getattr(agent, "role", None) not in (AgentRole.ADMIN, AgentRole.MANAGER):
+            queryset = queryset.filter(lead__in=leads_visible_to(agent))
 
         if lead_id := self.request.query_params.get("lead"):
             queryset = queryset.filter(lead_id=lead_id)

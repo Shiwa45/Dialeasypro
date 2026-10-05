@@ -212,6 +212,25 @@ class AgentLoginAPIView(APIView):
             )
             raise InvalidCredentialsException()
 
+        # Web sign-in policy for agent-workspace roles. Checked only AFTER the
+        # password: refusing first would tell anyone with an email address
+        # which accounts are agents. See apps/authentication/web_access.py.
+        from apps.authentication.web_access import (
+            REFUSAL, is_web_client, web_access_allowed,
+        )
+
+        if is_web_client(request) and not web_access_allowed(agent):
+            AuditLog.log(
+                action=AuditAction.LOGIN_FAILED,
+                actor_type="agent",
+                actor_id=agent.pk,
+                actor_email=agent.email,
+                entity_repr=agent.name,
+                description="Web sign-in refused — agent web access is off for this company",
+                request=request,
+            )
+            return Response(REFUSAL, status=status.HTTP_403_FORBIDDEN)
+
         # Generate tokens
         tokens = generate_tokens_for_agent(agent)
 
@@ -781,12 +800,20 @@ class TenantFeaturesAPIView(APIView):
         # include it and who to ask.
         from apps.plans.upgrade import support_contacts, upgrade_catalog
 
+        from apps.authentication.web_access import web_access_allowed
+        from apps.core.capabilities import workspace_for
+
         return Response({
             "features": full_map,
             "modules": modules,
             "plan": plan_data,
             "role": getattr(request.user, "role", None),
             "capabilities": capabilities_for(request.user),
+            # Which web experience this person gets — computed here so the
+            # sidebar, route guard and landing page read one answer.
+            "workspace": workspace_for(request.user),
+            # False → an already-open web session signs itself out on boot.
+            "web_access_allowed": web_access_allowed(request.user),
             "upgrade": {**upgrade_catalog(full_map), "support": support_contacts()},
         })
 
@@ -1144,3 +1171,51 @@ class ProfileView(View):
 
 # Need this for the annotation in AgentListAPIView
 from django.db import models
+
+
+
+class AgentWebAccessAPIView(APIView):
+    """
+    GET/PATCH /api/v1/auth/web-access/   {"agent_web_access": true|false}
+
+    The tenant's "agents may sign in on the web" switch. Admin only: it is a
+    company-wide policy, and it is CRM_SETTINGS-shaped rather than
+    agent-management-shaped.
+    """
+
+    def get_permissions(self):
+        from apps.core.capabilities import Cap
+        from apps.core.permissions import capability_required
+
+        return [IsAuthenticatedAgent(), capability_required(Cap.CRM_SETTINGS)()]
+
+    def get(self, request):
+        from apps.authentication.web_access import agent_web_access_enabled
+
+        return Response({"agent_web_access": agent_web_access_enabled()})
+
+    def patch(self, request):
+        from apps.authentication.web_access import current_tenant
+
+        raw = request.data.get("agent_web_access")
+        if not isinstance(raw, bool):
+            return Response(
+                {"error": "invalid", "message": "agent_web_access must be true or false."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        tenant = current_tenant()
+        if tenant is None:
+            return Response({"error": "no_tenant"}, status=status.HTTP_400_BAD_REQUEST)
+
+        tenant.agent_web_access = raw
+        tenant.save(update_fields=["agent_web_access"])
+        AuditLog.log(
+            action=AuditAction.SETTINGS_CHANGE,
+            actor_type="tenant_admin",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            entity_type="Tenant",
+            description=f"Agent web sign-in turned {'on' if raw else 'off'}",
+            request=request,
+        )
+        return Response({"agent_web_access": raw})

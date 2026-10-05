@@ -25,6 +25,7 @@ from apps.authentication.views import (
     AgentRefreshTokenAPIView,
     AgentSetPasswordAPIView,
     AgentStatusUpdateAPIView,
+    AgentWebAccessAPIView,
     LiveAgentsAPIView,
     TeamListAPIView,
     TeamDetailAPIView,
@@ -52,6 +53,7 @@ urlpatterns = [
     # Tenant plan / feature entitlements (drives client-side UI gating)
     path("features/", TenantFeaturesAPIView.as_view(), name="api_tenant_features"),
     path("capabilities/", CapabilitiesAPIView.as_view(), name="api_capabilities"),
+    path("web-access/", AgentWebAccessAPIView.as_view(), name="api_agent_web_access"),
 
     # Live agent monitoring
     path("status/", AgentStatusUpdateAPIView.as_view(), name="api_agent_status"),

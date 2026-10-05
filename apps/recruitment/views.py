@@ -651,7 +651,7 @@ class OfferConvertView(APIView):
 
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ATS_OFFERS
-    required_capability = Cap.ATS_OFFER
+    required_capability = Cap.ATS_ONBOARD
 
     def post(self, request, pk):
         from apps.hrms.serializers import EmployeeSerializer
@@ -677,7 +677,7 @@ class SuggestEmployeeCodeView(APIView):
 
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ATS_OFFERS
-    required_capability = Cap.ATS_OFFER
+    required_capability = Cap.ATS_ONBOARD
 
     def get(self, request):
         return Response({"employee_code": onboarding_svc.suggest_employee_code()})
@@ -766,3 +766,67 @@ class RecruitmentDashboardView(APIView):
             },
             "avg_time_to_hire_days": avg_time_to_hire,
         })
+
+
+# ============================================================
+# Pickers — people a recruiter needs to choose, and nothing more
+# ============================================================
+
+class RecruitmentPeopleView(APIView):
+    """
+    GET /api/v1/recruitment/people/
+
+    Active agents as {id, name, role} — for the interview panel and the
+    hiring-manager picker.
+
+    The recruitment screens used to call /auth/agents/ for this, which is
+    manager/admin only: HR got a 403 the moment they tried to schedule an
+    interview, and a recruiter always would. This returns exactly the three
+    fields a picker needs, so it can be opened to ats.view without handing out
+    emails, phone numbers, login history or anything else on the agent list.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.ATS_JOB_OPENINGS
+    required_capability = Cap.ATS_VIEW
+
+    def get(self, request):
+        from apps.authentication.models import Agent
+
+        people = (
+            Agent.objects.filter(is_active=True)
+            .order_by("name")
+            .values("id", "name", "role")
+        )
+        return Response(list(people))
+
+
+class ReportingOptionsView(APIView):
+    """
+    GET /api/v1/recruitment/reporting-options/
+
+    Active HRMS employees as {id, name, designation} — the "Reports to" choice
+    on an offer.
+
+    The offer form used to call /hrms/employees/, which needs an HRMS
+    capability a recruiter will never have. Returns an empty list (not an
+    error) when the tenant has no HRMS module: an offer can still be made, it
+    just has nobody to report to yet.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.ATS_OFFERS
+    required_capability = Cap.ATS_VIEW
+
+    def get(self, request):
+        from apps.hrms.models import Employee
+
+        rows = (
+            Employee.objects.filter(is_active=True)
+            .select_related("agent")
+            .order_by("agent__name")
+        )
+        return Response([
+            {"id": e.pk, "name": e.agent.name, "designation": e.designation}
+            for e in rows
+        ])

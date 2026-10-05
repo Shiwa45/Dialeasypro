@@ -103,6 +103,16 @@ class Tenant(TenantMixin, TimeStampedModel):
     # back to LEAD_FORM_DEFAULTS, so an empty dict is the old form.
     lead_form_settings = models.JSONField(default=dict, blank=True)
 
+    # Whether agent and read-only users may sign in on the WEB app. They get a
+    # deliberately narrow workspace there (own dashboard, own leads, own
+    # calls); some companies still want their floor on the mobile app only.
+    # Default on. This governs the web client, not the API — see
+    # apps/authentication/web_access.py for why that line is drawn there.
+    agent_web_access = models.BooleanField(
+        default=True,
+        verbose_name="Agents may sign in on the web",
+    )
+
     max_agents_override = models.PositiveIntegerField(
         null=True,
         blank=True,

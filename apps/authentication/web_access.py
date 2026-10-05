@@ -16,21 +16,53 @@ So it governs the WEB CLIENT: the React app identifies itself with an
 tenant has switched web access off, and /auth/features/ reports the setting so
 a session that was already open signs itself out on its next boot. The mobile
 app sends no such header and is never affected.
+
+Plan gating
+-----------
+Two of these rules are sold, not just configured:
+
+* Agent web sign-in is a plan feature (FeatureKey.AGENT_WEB_ACCESS). Without
+  it, agents and read-only users are refused on the web whatever the tenant
+  setting says; with it, the tenant setting decides.
+* The Recruiter role exists only for tenants with the Recruitment module.
+  A recruiter on a tenant without it has nothing to do anywhere, so they are
+  refused on EVERY client, and the role cannot be handed out.
 """
 from django.db import connection
 
-from apps.core.constants import AgentRole
+from apps.core.constants import AgentRole, FeatureKey, ModuleKey
 
 WEB_CLIENT_HEADER = "HTTP_X_CLIENT"
 WEB_CLIENT_VALUE = "web"
 
 REFUSAL = {
     "error": "web_access_disabled",
+    "reason": "setting",
     "message": (
         "Your company has turned off web sign-in for agents. "
         "Please use the DialSathi mobile app."
     ),
 }
+
+REFUSAL_NOT_IN_PLAN = {
+    "error": "web_access_disabled",
+    "reason": "plan",
+    "message": (
+        "Web sign-in for agents isn't included in your company's plan. "
+        "Please use the DialSathi mobile app."
+    ),
+}
+
+REFUSAL_NO_RECRUITMENT = {
+    "error": "recruitment_not_in_plan",
+    "reason": "plan",
+    "message": (
+        "Recruitment isn't included in your company's plan, so recruiter "
+        "accounts can't sign in. Please ask your admin."
+    ),
+}
+
+RECRUITMENT_FEATURES = tuple(ModuleKey.FEATURES[ModuleKey.RECRUITMENT])
 
 
 def is_web_client(request) -> bool:
@@ -58,14 +90,62 @@ def agent_web_access_enabled(tenant=None) -> bool:
     return bool(getattr(tenant, "agent_web_access", True))
 
 
-def web_access_allowed(agent, tenant=None) -> bool:
+def feature_checker(request=None):
     """
-    May this person use the web app at all?
+    `has_feature(key) -> bool` for the current tenant.
 
-    Only agent-workspace roles are ever refused. An admin who switches the
-    setting off must never be able to lock THEMSELVES out of the screen that
-    switches it back on.
+    Uses the one the feature-flag middleware put on the request (cached,
+    plan + add-ons), and resolves the same effective map itself when there is
+    no such request — a call from a shell, a task, or a test.
     """
-    if getattr(agent, "role", None) not in AgentRole.AGENT_WORKSPACE_ROLES:
-        return True
-    return agent_web_access_enabled(tenant)
+    has_feature = getattr(request, "has_feature", None) if request is not None else None
+    if callable(has_feature):
+        return has_feature
+
+    from apps.core.middleware import TenantFeatureFlagMiddleware
+
+    tenant = current_tenant()
+    if tenant is None:
+        return lambda key: False
+    features = TenantFeatureFlagMiddleware(lambda r: None)._get_tenant_features(tenant)
+    return lambda key: bool(features.get(key, False))
+
+
+def agent_web_in_plan(has_feature) -> bool:
+    return bool(has_feature(FeatureKey.AGENT_WEB_ACCESS))
+
+
+def recruitment_in_plan(has_feature) -> bool:
+    """The Recruitment module counts only when ALL its features are on — the
+    same rule /auth/features/ uses for `modules`, so the web app and the API
+    always agree on whether a tenant 'has recruitment'."""
+    return all(has_feature(key) for key in RECRUITMENT_FEATURES)
+
+
+def refusal_for(agent, has_feature, *, web: bool, tenant=None):
+    """
+    Why this person may not use this client, as the error payload — or None.
+
+    Only agent-workspace roles and recruiters are ever refused. An admin who
+    switches the setting off must never be able to lock THEMSELVES out of the
+    screen that switches it back on.
+    """
+    role = getattr(agent, "role", None)
+
+    if role == AgentRole.RECRUITER and not recruitment_in_plan(has_feature):
+        return REFUSAL_NO_RECRUITMENT
+
+    if web and role in AgentRole.AGENT_WORKSPACE_ROLES:
+        if not agent_web_in_plan(has_feature):
+            return REFUSAL_NOT_IN_PLAN
+        if not agent_web_access_enabled(tenant):
+            return REFUSAL
+
+    return None
+
+
+def web_access_allowed(agent, has_feature=None, tenant=None) -> bool:
+    """May this person use the web app at all?"""
+    if has_feature is None:
+        has_feature = feature_checker()
+    return refusal_for(agent, has_feature, web=True, tenant=tenant) is None

@@ -119,6 +119,7 @@ class AgentCreateSerializer(serializers.ModelSerializer):
 
     def validate_role(self, value):
         # Only admins can create admins (enforced in view permissions)
+        check_role_in_plan(value, self.context.get("request"))
         return value
 
     def validate(self, data):
@@ -135,6 +136,24 @@ class AgentCreateSerializer(serializers.ModelSerializer):
         agent.must_change_password = True
         agent.save()
         return agent
+
+
+def check_role_in_plan(role, request):
+    """
+    Refuse a role the tenant's plan doesn't include.
+
+    The Recruiter role only means something with the Recruitment module: a
+    recruiter on a tenant without it could sign in to nothing at all (login
+    refuses them — see web_access.refusal_for). So it can't be handed out.
+    """
+    if role != AgentRole.RECRUITER:
+        return
+    from apps.authentication.web_access import feature_checker, recruitment_in_plan
+
+    if not recruitment_in_plan(feature_checker(request)):
+        raise serializers.ValidationError(
+            "The Recruiter role needs the Recruitment module on your plan."
+        )
 
 
 def check_admin_removal(actor, target, *, deactivating=False, new_role=None):
@@ -207,8 +226,14 @@ class AgentUpdateSerializer(serializers.ModelSerializer):
         """
         request = self.context.get("request")
         actor = getattr(request, "user", None)
-        if actor is None or value == getattr(self.instance, "role", None):
+        if value == getattr(self.instance, "role", None):
             return value
+        # No request means no actor to check the change against — refuse
+        # rather than wave it through. (This is how /auth/me/ used to let an
+        # agent promote themselves.)
+        if actor is None:
+            raise serializers.ValidationError("Role can't be changed here.")
+        check_role_in_plan(value, request)
 
         if actor.role != AgentRole.ADMIN:
             actor_level = AgentRole.HIERARCHY.get(actor.role, 0)
@@ -228,6 +253,28 @@ class AgentUpdateSerializer(serializers.ModelSerializer):
                 new_role=data.get("role"),
             )
         return data
+
+
+class AgentSelfUpdateSerializer(serializers.ModelSerializer):
+    """
+    What a person may change on their OWN profile (PATCH /auth/me/).
+
+    Deliberately not AgentUpdateSerializer: role, is_active, employee_id and
+    shift settings are the admin's to decide, not the agent's.
+    """
+
+    class Meta:
+        model = Agent
+        fields = ["name", "phone", "timezone", "language_preference"]
+
+    def validate_phone(self, value):
+        if value:
+            from apps.core.utils import normalize_indian_phone
+            normalized = normalize_indian_phone(value)
+            if not normalized:
+                raise serializers.ValidationError("Invalid Indian mobile number.")
+            return normalized
+        return value
 
 
 class PasswordChangeSerializer(serializers.Serializer):

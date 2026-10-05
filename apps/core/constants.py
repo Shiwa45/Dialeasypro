@@ -70,6 +70,9 @@ class FeatureKey:
     AGENT_MONITORING = "agent_monitoring"
     AGENT_GPS_TRACKING = "agent_gps_tracking"
     AGENT_PERFORMANCE_REPORTS = "agent_performance"
+    # Agents / read-only users may sign in to the WEB app (their own leads,
+    # calls and performance). Without it they use the mobile app only.
+    AGENT_WEB_ACCESS = "agent_web_access"
 
     # ---- Reports & Analytics -------------------------------
     BASIC_REPORTS = "basic_reports"
@@ -121,6 +124,7 @@ class FeatureKey:
         CUSTOM_FIELDS, LEAD_SCORING, LEAD_PIPELINE, LEAD_IMPORT, LEAD_EXPORT,
         FOLLOW_UP_AUTOMATION, CONTACT_HISTORY,
         TEAM_MANAGEMENT, AGENT_MONITORING, AGENT_GPS_TRACKING, AGENT_PERFORMANCE_REPORTS,
+        AGENT_WEB_ACCESS,
         BASIC_REPORTS, ADVANCED_REPORTS, SCHEDULED_REPORTS, CUSTOM_DASHBOARDS,
         API_ACCESS, WHITE_LABEL, PRIORITY_SUPPORT,
         AI_CALL_TRANSCRIPTION, AI_CALL_INSIGHTS,
@@ -172,6 +176,7 @@ class FeatureKey:
         AGENT_MONITORING: "Real-time Agent Monitoring",
         AGENT_GPS_TRACKING: "Agent GPS Tracking",
         AGENT_PERFORMANCE_REPORTS: "Agent Performance Reports",
+        AGENT_WEB_ACCESS: "Agent Web Panel (agents sign in on the web)",
         BASIC_REPORTS: "Basic Reports",
         ADVANCED_REPORTS: "Advanced Analytics & Reports",
         SCHEDULED_REPORTS: "Scheduled Email Reports",

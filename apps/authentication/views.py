@@ -56,6 +56,7 @@ from apps.authentication.serializers import (
     AgentLoginSerializer,
     AgentProfileSerializer,
     AgentSerializer,
+    AgentSelfUpdateSerializer,
     AgentUpdateSerializer,
     PasswordChangeSerializer,
     TeamSerializer,
@@ -212,24 +213,29 @@ class AgentLoginAPIView(APIView):
             )
             raise InvalidCredentialsException()
 
-        # Web sign-in policy for agent-workspace roles. Checked only AFTER the
-        # password: refusing first would tell anyone with an email address
-        # which accounts are agents. See apps/authentication/web_access.py.
+        # Plan and web sign-in policy: agents/read-only on the web need the
+        # plan feature AND the tenant switch; recruiters need the Recruitment
+        # module on any client. Checked only AFTER the password: refusing
+        # first would tell anyone with an email address which accounts are
+        # agents. See apps/authentication/web_access.py.
         from apps.authentication.web_access import (
-            REFUSAL, is_web_client, web_access_allowed,
+            feature_checker, is_web_client, refusal_for,
         )
 
-        if is_web_client(request) and not web_access_allowed(agent):
+        refusal = refusal_for(
+            agent, feature_checker(request), web=is_web_client(request),
+        )
+        if refusal is not None:
             AuditLog.log(
                 action=AuditAction.LOGIN_FAILED,
                 actor_type="agent",
                 actor_id=agent.pk,
                 actor_email=agent.email,
                 entity_repr=agent.name,
-                description="Web sign-in refused — agent web access is off for this company",
+                description=f"Sign-in refused — {refusal['error']} ({refusal['reason']})",
                 request=request,
             )
-            return Response(REFUSAL, status=status.HTTP_403_FORBIDDEN)
+            return Response(refusal, status=status.HTTP_403_FORBIDDEN)
 
         # Generate tokens
         tokens = generate_tokens_for_agent(agent)
@@ -387,7 +393,11 @@ class AgentProfileAPIView(APIView):
         return Response(serializer.data)
 
     def patch(self, request):
-        serializer = AgentUpdateSerializer(
+        # AgentSelfUpdateSerializer, NOT AgentUpdateSerializer: the admin
+        # serializer accepts role / is_active / employee_id, and with no
+        # request in its context its role check had no actor to compare — so
+        # any agent could PATCH their own role to "admin" here.
+        serializer = AgentSelfUpdateSerializer(
             request.user, data=request.data, partial=True
         )
         serializer.is_valid(raise_exception=True)
@@ -800,8 +810,10 @@ class TenantFeaturesAPIView(APIView):
         # include it and who to ask.
         from apps.plans.upgrade import support_contacts, upgrade_catalog
 
-        from apps.authentication.web_access import web_access_allowed
+        from apps.authentication.web_access import feature_checker, refusal_for
         from apps.core.capabilities import workspace_for
+
+        refusal = refusal_for(request.user, feature_checker(request), web=True)
 
         return Response({
             "features": full_map,
@@ -812,8 +824,10 @@ class TenantFeaturesAPIView(APIView):
             # Which web experience this person gets — computed here so the
             # sidebar, route guard and landing page read one answer.
             "workspace": workspace_for(request.user),
-            # False → an already-open web session signs itself out on boot.
-            "web_access_allowed": web_access_allowed(request.user),
+            # False → an already-open web session signs itself out on boot,
+            # showing web_access_message (plan downgraded, switch turned off).
+            "web_access_allowed": refusal is None,
+            "web_access_message": refusal["message"] if refusal else "",
             "upgrade": {**upgrade_catalog(full_map), "support": support_contacts()},
         })
 
@@ -1181,6 +1195,12 @@ class AgentWebAccessAPIView(APIView):
     The tenant's "agents may sign in on the web" switch. Admin only: it is a
     company-wide policy, and it is CRM_SETTINGS-shaped rather than
     agent-management-shaped.
+
+    The switch only means something on a plan that includes agent web access
+    (FeatureKey.AGENT_WEB_ACCESS). GET always answers — with
+    `available_in_plan` so the settings screen can show an upgrade prompt —
+    but changing it on a plan without the feature is a 402, like any other
+    locked feature.
     """
 
     def get_permissions(self):
@@ -1190,12 +1210,24 @@ class AgentWebAccessAPIView(APIView):
         return [IsAuthenticatedAgent(), capability_required(Cap.CRM_SETTINGS)()]
 
     def get(self, request):
-        from apps.authentication.web_access import agent_web_access_enabled
+        from apps.authentication.web_access import (
+            agent_web_access_enabled, agent_web_in_plan, feature_checker,
+        )
 
-        return Response({"agent_web_access": agent_web_access_enabled()})
+        return Response({
+            "agent_web_access": agent_web_access_enabled(),
+            "available_in_plan": agent_web_in_plan(feature_checker(request)),
+        })
 
     def patch(self, request):
-        from apps.authentication.web_access import current_tenant
+        from apps.authentication.web_access import (
+            agent_web_in_plan, current_tenant, feature_checker,
+        )
+        from apps.core.constants import FeatureKey
+        from apps.core.exceptions import FeatureNotEnabledException
+
+        if not agent_web_in_plan(feature_checker(request)):
+            raise FeatureNotEnabledException(FeatureKey.AGENT_WEB_ACCESS)
 
         raw = request.data.get("agent_web_access")
         if not isinstance(raw, bool):
@@ -1218,4 +1250,4 @@ class AgentWebAccessAPIView(APIView):
             description=f"Agent web sign-in turned {'on' if raw else 'off'}",
             request=request,
         )
-        return Response({"agent_web_access": raw})
+        return Response({"agent_web_access": raw, "available_in_plan": True})

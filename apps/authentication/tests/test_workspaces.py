@@ -10,13 +10,15 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.authentication.models import Agent
 from apps.authentication.views import (
-    AgentLoginAPIView, AgentWebAccessAPIView, TenantFeaturesAPIView,
+    AgentDetailAPIView, AgentListAPIView, AgentLoginAPIView, AgentProfileAPIView,
+    AgentWebAccessAPIView, TenantFeaturesAPIView,
 )
+from apps.authentication.web_access import feature_checker
 from apps.calls.models import CallLog
 from apps.communications.models import WhatsAppConversation
 from apps.communications.views import WhatsAppConversationListView
 from apps.core.capabilities import Cap, Workspace, has_capability, workspace_for
-from apps.core.constants import AgentRole
+from apps.core.constants import AgentRole, FeatureKey, ModuleKey
 from apps.leads.models import Lead
 from apps.leads.views import LeadDetailView, LeadNoteListCreateView, LeadStatusUpdateView
 from apps.recruitment.views import (
@@ -30,6 +32,11 @@ pytestmark = pytest.mark.django_db
 
 PASSWORD = "Pw@12345678"
 factory = APIRequestFactory()
+
+# Plan shapes, as the feature map a request would carry.
+EVERYTHING = set(FeatureKey.ALL)
+NO_AGENT_WEB = EVERYTHING - {FeatureKey.AGENT_WEB_ACCESS}
+NO_RECRUITMENT = EVERYTHING - set(ModuleKey.FEATURES[ModuleKey.RECRUITMENT])
 
 
 def _agent(email, role):
@@ -86,12 +93,13 @@ def _lead(phone, owner=None, **kw):
     return Lead.objects.create(name=f"Lead {phone[-3:]}", phone=phone, assigned_to=owner, **kw)
 
 
-def _call(view, method, path, user, data=None, gated=False, headers=None, **kwargs):
+def _call(view, method, path, user, data=None, features=EVERYTHING, headers=None, **kwargs):
     request = getattr(factory, method)(path, data, format="json", **(headers or {}))
     if user is not None:
         force_authenticate(request, user=user)
-    if gated:
-        request.has_feature = lambda key: True
+    if features is not None:
+        enabled = set(features)
+        request.has_feature = lambda key: key in enabled
     response = view.as_view()(request, **kwargs)
     response.render()
     return response
@@ -144,9 +152,10 @@ def test_hr_and_admin_keep_onboarding():
 WEB = {"HTTP_X_CLIENT": "web"}
 
 
-def _login(email, password=PASSWORD, web=True):
+def _login(email, password=PASSWORD, web=True, features=EVERYTHING):
     return _call(AgentLoginAPIView, "post", "/api/v1/auth/login/", None,
-                 {"email": email, "password": password}, headers=WEB if web else None)
+                 {"email": email, "password": password}, features=features,
+                 headers=WEB if web else None)
 
 
 def test_agent_signs_in_on_web_by_default(tenant, asha):
@@ -159,6 +168,7 @@ def test_web_access_off_refuses_agent_on_web(tenant, asha):
     response = _login(asha.email)
     assert response.status_code == 403
     assert response.data["error"] == "web_access_disabled"
+    assert response.data["reason"] == "setting"
     assert "access" not in response.data
 
 
@@ -204,7 +214,7 @@ def test_features_report_workspace_and_web_access(tenant, asha, recruiter, admin
 def test_admin_reads_and_flips_the_switch(tenant, admin):
     response = _call(AgentWebAccessAPIView, "get", "/api/v1/auth/web-access/", admin)
     assert response.status_code == 200
-    assert response.data == {"agent_web_access": True}
+    assert response.data == {"agent_web_access": True, "available_in_plan": True}
 
     response = _call(AgentWebAccessAPIView, "patch", "/api/v1/auth/web-access/", admin,
                      {"agent_web_access": False})
@@ -331,7 +341,7 @@ def test_whatsapp_threads_are_scoped_to_visible_leads(admin, asha, bilal, hr):
 # ---------------------------------------------------------------------------
 
 def test_recruiter_people_picker_returns_only_picker_fields(recruiter, asha):
-    response = _call(RecruitmentPeopleView, "get", "/api/v1/recruitment/people/", recruiter, gated=True)
+    response = _call(RecruitmentPeopleView, "get", "/api/v1/recruitment/people/", recruiter)
     assert response.status_code == 200
     assert response.data
     for row in response.data:
@@ -342,23 +352,163 @@ def test_recruiter_people_picker_returns_only_picker_fields(recruiter, asha):
 @pytest.mark.parametrize("role", [AgentRole.AGENT, AgentRole.READONLY, AgentRole.ACCOUNTS])
 def test_non_recruitment_roles_cannot_use_the_pickers(role):
     person = _agent(f"{role}-pk@x.com", role)
-    assert _call(RecruitmentPeopleView, "get", "/api/v1/recruitment/people/", person,
-                 gated=True).status_code == 403
-    assert _call(ReportingOptionsView, "get", "/api/v1/recruitment/reporting-options/", person,
-                 gated=True).status_code == 403
+    assert _call(RecruitmentPeopleView, "get", "/api/v1/recruitment/people/", person).status_code == 403
+    assert _call(ReportingOptionsView, "get", "/api/v1/recruitment/reporting-options/", person).status_code == 403
 
 
 @pytest.mark.parametrize("role", [AgentRole.RECRUITER, AgentRole.HR])
 def test_reporting_options_open_to_recruitment(role):
     person = _agent(f"{role}-ro@x.com", role)
-    response = _call(ReportingOptionsView, "get", "/api/v1/recruitment/reporting-options/", person,
-                     gated=True)
+    response = _call(ReportingOptionsView, "get", "/api/v1/recruitment/reporting-options/", person)
     assert response.status_code == 200
     assert isinstance(response.data, list)
 
 
 def test_recruiter_cannot_onboard_but_hr_reaches_the_offer(recruiter, hr):
     path = "/api/v1/recruitment/offers/999999/convert-to-employee/"
-    assert _call(OfferConvertView, "post", path, recruiter, {}, gated=True, pk=999999).status_code == 403
+    assert _call(OfferConvertView, "post", path, recruiter, {}, pk=999999).status_code == 403
     # HR passes the permission check and gets the honest "no such offer".
-    assert _call(OfferConvertView, "post", path, hr, {}, gated=True, pk=999999).status_code == 404
+    assert _call(OfferConvertView, "post", path, hr, {}, pk=999999).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Plan gating: agent web access
+# ---------------------------------------------------------------------------
+
+def test_plan_without_agent_web_refuses_agents_on_web(tenant, asha, viewer):
+    for person in (asha, viewer):
+        response = _login(person.email, features=NO_AGENT_WEB)
+        assert response.status_code == 403
+        assert response.data["error"] == "web_access_disabled"
+        assert response.data["reason"] == "plan"
+        assert "access" not in response.data
+
+
+def test_plan_without_agent_web_still_allows_the_mobile_app(tenant, asha):
+    assert _login(asha.email, web=False, features=NO_AGENT_WEB).status_code == 200
+
+
+def test_plan_without_agent_web_never_blocks_admins(tenant, admin):
+    assert _login(admin.email, features=NO_AGENT_WEB).status_code == 200
+
+
+def test_plan_beats_the_tenant_switch(tenant, asha):
+    # Switch on (the default) does not help without the plan feature.
+    assert tenant.agent_web_access is True
+    assert _login(asha.email, features=NO_AGENT_WEB).status_code == 403
+
+
+def test_features_report_the_plan_refusal_with_its_reason(tenant, asha, admin):
+    response = _call(TenantFeaturesAPIView, "get", "/api/v1/auth/features/", asha,
+                     features=NO_AGENT_WEB)
+    assert response.data["web_access_allowed"] is False
+    assert "plan" in response.data["web_access_message"]
+    assert FeatureKey.AGENT_WEB_ACCESS in response.data["features"]
+    response = _call(TenantFeaturesAPIView, "get", "/api/v1/auth/features/", admin,
+                     features=NO_AGENT_WEB)
+    assert response.data["web_access_allowed"] is True
+    assert response.data["web_access_message"] == ""
+
+
+def test_switch_reports_plan_availability(tenant, admin):
+    response = _call(AgentWebAccessAPIView, "get", "/api/v1/auth/web-access/", admin,
+                     features=NO_AGENT_WEB)
+    assert response.status_code == 200
+    assert response.data == {"agent_web_access": True, "available_in_plan": False}
+
+
+def test_switch_cannot_be_changed_without_the_plan_feature(tenant, admin):
+    response = _call(AgentWebAccessAPIView, "patch", "/api/v1/auth/web-access/", admin,
+                     {"agent_web_access": False}, features=NO_AGENT_WEB)
+    assert response.status_code == 402
+    assert response.data["feature_key"] == FeatureKey.AGENT_WEB_ACCESS
+    tenant.refresh_from_db()
+    assert tenant.agent_web_access is True
+
+
+# ---------------------------------------------------------------------------
+# Plan gating: the Recruiter role
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("web", [True, False])
+def test_recruiter_cannot_sign_in_without_recruitment(tenant, recruiter, web):
+    response = _login(recruiter.email, web=web, features=NO_RECRUITMENT)
+    assert response.status_code == 403
+    assert response.data["error"] == "recruitment_not_in_plan"
+    assert "access" not in response.data
+
+
+def test_recruiter_signs_in_with_recruitment(tenant, recruiter):
+    assert _login(recruiter.email, features=EVERYTHING).status_code == 200
+
+
+def test_partial_recruitment_is_not_recruitment(tenant, recruiter):
+    partial = EVERYTHING - {FeatureKey.ATS_OFFERS}
+    assert _login(recruiter.email, features=partial).status_code == 403
+
+
+def test_open_recruiter_session_is_told_to_leave(tenant, recruiter):
+    response = _call(TenantFeaturesAPIView, "get", "/api/v1/auth/features/", recruiter,
+                     features=NO_RECRUITMENT)
+    assert response.data["web_access_allowed"] is False
+    assert "Recruitment" in response.data["web_access_message"]
+
+
+def _create(actor, role, features):
+    return _call(AgentListAPIView, "post", "/api/v1/auth/agents/", actor, {
+        "email": f"new-{role}@x.com", "name": "New Person", "role": role,
+        "password": PASSWORD, "confirm_password": PASSWORD,
+    }, features=features)
+
+
+def test_recruiter_role_cannot_be_created_without_recruitment(admin):
+    response = _create(admin, AgentRole.RECRUITER, NO_RECRUITMENT)
+    assert response.status_code == 400
+    assert "role" in response.data or "Recruit" in str(response.data)
+    assert not Agent.objects.filter(email="new-recruiter@x.com").exists()
+
+
+def test_recruiter_role_can_be_created_with_recruitment(admin):
+    response = _create(admin, AgentRole.RECRUITER, EVERYTHING)
+    assert response.status_code == 201, response.data
+    assert Agent.objects.get(email="new-recruiter@x.com").role == AgentRole.RECRUITER
+
+
+def test_other_roles_do_not_need_recruitment(admin):
+    assert _create(admin, AgentRole.AGENT, NO_RECRUITMENT).status_code == 201
+
+
+def test_nobody_can_be_switched_to_recruiter_without_recruitment(admin, asha):
+    response = _call(AgentDetailAPIView, "patch", f"/api/v1/auth/agents/{asha.pk}/", admin,
+                     {"role": AgentRole.RECRUITER}, features=NO_RECRUITMENT, pk=asha.pk)
+    assert response.status_code == 400
+    asha.refresh_from_db()
+    assert asha.role == AgentRole.AGENT
+
+
+def test_an_existing_recruiter_can_still_be_edited_after_a_downgrade(admin, recruiter):
+    response = _call(AgentDetailAPIView, "patch", f"/api/v1/auth/agents/{recruiter.pk}/", admin,
+                     {"name": "Rita K", "role": AgentRole.RECRUITER}, features=NO_RECRUITMENT,
+                     pk=recruiter.pk)
+    assert response.status_code == 200
+    recruiter.refresh_from_db()
+    assert recruiter.name == "Rita K"
+
+
+# ---------------------------------------------------------------------------
+# Own profile: no self-promotion
+# ---------------------------------------------------------------------------
+
+def test_an_agent_cannot_promote_themselves_through_their_profile(asha):
+    response = _call(AgentProfileAPIView, "patch", "/api/v1/auth/me/", asha,
+                     {"name": "Asha R", "role": "admin", "is_active": True, "employee_id": "X1"})
+    assert response.status_code == 200
+    asha.refresh_from_db()
+    assert asha.name == "Asha R"
+    assert asha.role == AgentRole.AGENT
+    assert asha.employee_id != "X1"
+
+
+def test_feature_checker_works_without_a_request():
+    has_feature = feature_checker()
+    assert isinstance(has_feature(FeatureKey.AGENT_WEB_ACCESS), bool)

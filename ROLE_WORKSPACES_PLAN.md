@@ -137,3 +137,20 @@ API refuses it (403) for a recruiter.
   workspace mechanism built here can give them focused ones in a later change.
 - **The shared API still lets agents create leads and send messages** — the
   mobile app depends on both. The web simply doesn't offer them.
+
+---
+
+## Addendum — plan gating (added after the first build)
+
+**Request:** agent web access only on selected plans; the Recruiter role only for tenants with Recruitment unlocked.
+
+| Rule | How it works |
+|---|---|
+| Agent web access is a plan feature | New feature key `agent_web_access` ("Agent Web Panel"). Agents / read-only users may sign in on the web only when the plan (or an add-on entitlement) includes it **and** the tenant switch is on. The plan wins: switch on + feature off = refused. Mobile app unaffected. |
+| Which plans get it | Migration `plans/0005` adds the feature to every existing plan: **on** for Business and Enterprise, **off** (but present as a checkbox) for the others. Change per plan in Django admin → Plans. New installs: `setup_initial_data` gives Business/Enterprise every feature. |
+| Settings → Web Access | Shows the upgrade screen when the plan lacks the feature; `PATCH /auth/web-access/` returns 402 `upgrade_required`. `GET` returns `available_in_plan`. |
+| Recruiter role needs Recruitment | "Has Recruitment" = all four ATS features (same rule as `modules.recruitment` in `/auth/features/`). Without it: the role can't be assigned (create/edit → 400), a recruiter can't sign in on **any** client (403 `recruitment_not_in_plan`), and an open session is signed out with the reason. Existing recruiters can still be edited/re-roled by admins. |
+| Open sessions | `/auth/features/` returns `web_access_allowed` + `web_access_message`; the web app signs the person out with that message (plan downgraded, switch off, Recruitment removed). |
+| Security fix found on the way | `PATCH /auth/me/` used the admin serializer with no actor — any user could set their own `role` to `admin`. Now uses `AgentSelfUpdateSerializer` (name, phone, timezone, language only), and the admin serializer refuses a role change with no actor. |
+
+Code: `apps/authentication/web_access.py` (`feature_checker`, `refusal_for`, `recruitment_in_plan`, `agent_web_in_plan`), login + features + web-access views, `check_role_in_plan` in serializers. Tests: `apps/authentication/tests/test_workspaces.py`, `apps/plans/tests/test_agent_web_feature_migration.py`.

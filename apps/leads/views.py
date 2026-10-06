@@ -26,6 +26,7 @@ from django.db import transaction
 from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 from rest_framework import generics, status
+from rest_framework.exceptions import APIException
 from rest_framework.parsers import MultiPartParser
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
@@ -124,6 +125,20 @@ def leads_visible_to(agent):
 
     # Secure default: own assigned leads only.
     return qs.filter(assigned_to=agent)
+
+
+class LeadUnavailable(APIException):
+    """404 that says why: `lead_not_assigned` or `lead_deleted`."""
+
+    status_code = status.HTTP_404_NOT_FOUND
+    default_code = "not_found"
+
+    def __init__(self, code, message):
+        super().__init__(message, code)
+        self._payload = {"error": code, "message": message}
+
+    def get_error_payload(self):
+        return self._payload
 
 
 def assert_lead_visible(agent, lead_id):
@@ -283,6 +298,27 @@ class LeadDetailView(generics.RetrieveUpdateDestroyAPIView):
         return leads_visible_to(self.request.user).prefetch_related(
             "followups", "notes", "activities", "custom_field_values__field"
         ).select_related("assigned_to")
+
+    def get_object(self):
+        """
+        The lead, or the reason the caller cannot have it.
+
+        A plain 404 left the app to print "status code of 404". It is usually
+        an ordinary event — a notification or follow-up for a lead that has
+        since gone to another agent or been deleted — and the agent should be
+        told which. Who has the lead now is not said.
+        """
+        from django.http import Http404
+
+        try:
+            return super().get_object()
+        except Http404:
+            lead = Lead.objects.filter(pk=self.kwargs.get("pk")).only("is_deleted").first()
+            if lead is None:
+                raise
+            if lead.is_deleted:
+                raise LeadUnavailable("lead_deleted", "This lead has been deleted.")
+            raise LeadUnavailable("lead_not_assigned", "This lead is no longer assigned to you.")
 
     def perform_destroy(self, instance):
         instance.is_deleted = True

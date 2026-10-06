@@ -577,11 +577,10 @@ class _ActionBar extends StatelessWidget {
 
 /// What the lead screen shows when the lead cannot be loaded.
 ///
-/// It printed the raw DioException ("This exception was thrown because the
-/// response has a status code of 404…"). A 404 here is an ordinary event — a
-/// notification or follow-up still pointing at a lead that has since been
-/// reassigned or deleted, which the server rightly refuses to show — and it
-/// needs saying in words, with a way out.
+/// It printed the raw DioException ("…status code of 404…"). Not having a
+/// lead is usually ordinary — a notification or follow-up for a lead since
+/// reassigned or deleted — and the server now says which (`error`:
+/// lead_not_assigned / lead_deleted), so the agent is told in words.
 class LeadUnavailableView extends StatelessWidget {
   final Object error;
   final VoidCallback onRetry;
@@ -589,16 +588,37 @@ class LeadUnavailableView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final notFound = error is DioException && (error as DioException).response?.statusCode == 404;
+    final response = error is DioException ? (error as DioException).response : null;
+    final data = response?.data;
+    final code = data is Map ? data['error'] as String? : null;
+    final notFound = response?.statusCode == 404;
+
+    final (IconData icon, String title, String message) = switch (code) {
+      'lead_not_assigned' => (
+          Icons.person_off_outlined,
+          'This lead is no longer assigned to you',
+          'It has been reassigned to another agent. Ask your manager if it should come back to you.',
+        ),
+      'lead_deleted' => (
+          Icons.delete_outline,
+          'This lead has been deleted',
+          'It is no longer in the CRM.',
+        ),
+      _ when notFound => (
+          Icons.search_off_outlined,
+          'This lead could not be found',
+          'It may have been removed. Check your leads list.',
+        ),
+      _ => (Icons.cloud_off_outlined, 'Could not load this lead', ApiClient.errorMessage(error)),
+    };
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(title: const Text('Lead')),
       body: EmptyStateView(
-        icon: notFound ? Icons.person_off_outlined : Icons.cloud_off_outlined,
-        title: notFound ? 'This lead is not available' : 'Could not load this lead',
-        message: notFound
-            ? 'It may have been reassigned to another agent or deleted. Ask your manager if you think it should still be yours.'
-            : ApiClient.errorMessage(error),
+        icon: icon,
+        title: title,
+        message: message,
         buttonLabel: notFound ? 'Go to my leads' : 'Try again',
         onAction: notFound ? () => context.go('/leads') : onRetry,
       ),

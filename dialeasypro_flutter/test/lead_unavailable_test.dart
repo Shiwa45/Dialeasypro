@@ -8,12 +8,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:dialeasypro/features/leads/lead_detail_screen.dart';
 
-DioException _status(int code) {
+DioException _status(int code, String error) {
   final options = RequestOptions(path: '/leads/952/');
   return DioException(
     requestOptions: options,
     type: DioExceptionType.badResponse,
-    response: Response(requestOptions: options, statusCode: code, data: {'error': 'not_found'}),
+    response: Response(requestOptions: options, statusCode: code, data: {'error': error}),
   );
 }
 
@@ -24,13 +24,25 @@ Future<void> _pump(WidgetTester tester, Object error, {VoidCallback? onRetry}) a
 }
 
 void main() {
-  testWidgets('a lead that is gone is explained in words', (tester) async {
-    await _pump(tester, _status(404));
+  testWidgets('a lead given to someone else says it is no longer assigned to you', (tester) async {
+    await _pump(tester, _status(404, 'lead_not_assigned'));
 
-    expect(find.text('This lead is not available'), findsOneWidget);
-    expect(find.textContaining('reassigned to another agent or deleted'), findsOneWidget);
+    expect(find.text('This lead is no longer assigned to you'), findsOneWidget);
+    expect(find.textContaining('reassigned to another agent'), findsOneWidget);
     expect(find.text('Go to my leads'), findsOneWidget);
     expect(find.textContaining('DioException'), findsNothing);
+  });
+
+  testWidgets('a deleted lead says it was deleted', (tester) async {
+    await _pump(tester, _status(404, 'lead_deleted'));
+
+    expect(find.text('This lead has been deleted'), findsOneWidget);
+  });
+
+  testWidgets('an unknown lead is simply not found', (tester) async {
+    await _pump(tester, _status(404, 'not_found'));
+
+    expect(find.text('This lead could not be found'), findsOneWidget);
   });
 
   testWidgets('any other failure offers a retry, without the raw exception', (tester) async {

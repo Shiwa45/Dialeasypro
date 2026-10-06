@@ -79,8 +79,8 @@ class CallInsight(TimeStampedModel):
     generated_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
-        verbose_name = "Call Insight"
-        verbose_name_plural = "Call Insights"
+        verbose_name = "AI Call Summary"
+        verbose_name_plural = "AI Call Summaries"
         ordering = ["-generated_at"]
         indexes = [
             models.Index(fields=["sentiment", "generated_at"]),

@@ -185,7 +185,7 @@ class FeatureKey:
         WHITE_LABEL: "White-label Branding",
         PRIORITY_SUPPORT: "Priority Support",
         AI_CALL_TRANSCRIPTION: "AI Call Transcription",
-        AI_CALL_INSIGHTS: "AI Call Insights (sentiment, coaching)",
+        AI_CALL_INSIGHTS: "AI Call Summary (sentiment, coaching)",
         HRMS_ATTENDANCE: "HRMS — Attendance & Timesheets",
         HRMS_LEAVE: "HRMS — Leave Management",
         HRMS_PAYROLL: "HRMS — Payroll & Payslips",

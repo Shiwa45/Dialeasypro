@@ -756,12 +756,16 @@ def send_followup_reminders_for_tenant(self, schema_name: str):
     # woken by last week's backlog.
     lookback = now - timedelta(hours=24)
 
-    due_followups = FollowUp.objects.filter(
+    from apps.leads.followup_rules import deliverable
+
+    # deliverable(): never for a deleted lead, a deactivated agent, or an
+    # agent the lead has since been taken away from.
+    due_followups = deliverable(FollowUp.objects.filter(
         is_completed=False,
         reminder_sent=False,
         scheduled_at__gte=lookback,
         scheduled_at__lte=window_end,
-    ).select_related("lead", "assigned_to")
+    )).select_related("lead", "assigned_to")
 
     notified = 0
     skipped = 0
@@ -826,12 +830,14 @@ def chase_overdue_followups_for_tenant(self, schema_name: str):
     cutoff = now - timedelta(hours=OVERDUE_CHASE_HOURS)
     last_hour = now - timedelta(minutes=59)
 
-    overdue = FollowUp.objects.filter(
+    from apps.leads.followup_rules import deliverable
+
+    overdue = deliverable(FollowUp.objects.filter(
         is_completed=False,
         scheduled_at__lt=now,
         scheduled_at__gte=cutoff,
         assigned_to__isnull=False,
-    ).select_related("lead", "assigned_to")
+    )).select_related("lead", "assigned_to")
 
     # One query for everything already chased this hour, rather than one per
     # follow-up. A busy tenant can easily have hundreds overdue.

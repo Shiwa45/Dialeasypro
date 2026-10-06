@@ -49,12 +49,15 @@ def calllog_post_save(sender, instance, created, **kwargs):
         from django.utils import timezone
         from apps.leads.models import FollowUp
         scheduled = timezone.now() + timedelta(hours=instance.disposition.auto_followup_hours)
+        # The lead's agent, not necessarily whoever made this call (a team
+        # lead calling an agent's lead) — see apps/leads/followup_rules.
         FollowUp.objects.create(
             lead=instance.lead,
-            assigned_to=instance.agent,
+            assigned_to_id=instance.lead.assigned_to_id or instance.agent_id,
             followup_type="call",
             scheduled_at=scheduled,
             notes=f"Auto-scheduled after call disposition: {instance.disposition.name}",
+            is_auto=True,
         )
         logger.debug(f"[Signal] Auto follow-up created for lead {instance.lead_id}")
     except Exception as exc:

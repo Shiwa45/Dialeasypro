@@ -188,6 +188,13 @@ def apply(buckets: dict[int, list[int]], *, actor=None) -> dict[int, int]:
                 assigned_to_id=agent_pk, assigned_at=now,
             )
         applied[agent_pk] = len(ids)
+
+    # Open follow-ups follow their lead to its new agent (followup_rules).
+    from apps.leads.followup_rules import follow_lead_owner
+
+    for ids in buckets.values():
+        for start in range(0, len(ids), 1000):
+            follow_lead_owner(ids[start:start + 1000])
     return applied
 
 

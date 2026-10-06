@@ -350,6 +350,10 @@ class Lead(SoftDeleteModel, TimeStampedModel):
         self.assigned_to = agent
         self.assigned_at = timezone.now()
         self.save(update_fields=["assigned_to", "assigned_at"])
+
+        from apps.leads.followup_rules import follow_lead_owner
+
+        follow_lead_owner([self.pk])
         LeadActivity.objects.create(
             lead=self,
             activity_type="assigned",
@@ -636,6 +640,11 @@ class FollowUp(TimeStampedModel):
     reminder_sent = models.BooleanField(default=False)
     reminder_sent_at = models.DateTimeField(null=True, blank=True)
 
+    # Booked by a call outcome's auto_followup_hours rather than by a person.
+    # A follow-up the agent then schedules by hand on the same lead replaces
+    # it (see FollowUpListCreateView), instead of both ringing.
+    is_auto = models.BooleanField(default=False)
+
     class Meta:
         verbose_name = "Follow-up"
         verbose_name_plural = "Follow-ups"
@@ -659,6 +668,11 @@ class FollowUp(TimeStampedModel):
 
         # The next thing owed on the lead — see Lead.refresh_next_followup.
         self.lead.refresh_next_followup()
+
+        # Its due/overdue notifications no longer need anyone's attention.
+        from apps.leads.followup_rules import retire_notifications
+
+        retire_notifications([self.pk])
 
         # Log activity
         LeadActivity.objects.create(

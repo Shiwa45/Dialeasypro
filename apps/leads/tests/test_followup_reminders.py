@@ -166,8 +166,11 @@ def test_followups_for_two_agents_each_reach_their_own(lead, agent):
     other = Agent.objects.create_agent(
         email="other@example.com", name="Other Agent", password="x",
     )
+    # Each on their own lead: a follow-up on a lead that belongs to someone
+    # else is not delivered at all (apps/leads/followup_rules.deliverable).
+    their_lead = Lead.objects.create(name="Other Lead", phone="+919812345679", assigned_to=other)
     mine = _followup(lead, agent, minutes_from_now=-120)
-    theirs = _followup(lead, other, minutes_from_now=-120)
+    theirs = _followup(their_lead, other, minutes_from_now=-120)
 
     _run_chaser()
 

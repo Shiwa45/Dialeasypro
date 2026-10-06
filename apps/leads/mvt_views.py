@@ -329,9 +329,11 @@ class FollowUpCreateMVTView(View):
         from apps.leads.forms import FollowUpForm
         form = FollowUpForm(request.POST)
         if form.is_valid():
+            from apps.leads.followup_rules import owner_for
+
             fu = form.save(commit=False)
             fu.lead = lead
-            fu.assigned_to = request.agent
+            fu.assigned_to = owner_for(lead, actor=request.agent)
             fu.save()
             messages.success(request, "Follow-up scheduled.")
         return render(request, "tenant_admin/leads/partials/followup_form.html", {

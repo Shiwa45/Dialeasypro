@@ -301,8 +301,14 @@ class LeadDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_update(self, serializer):
         old_status = serializer.instance.status
+        old_owner = serializer.instance.assigned_to_id
         lead = serializer.save()
         new_status = lead.status
+
+        if lead.assigned_to_id != old_owner:
+            from apps.leads.followup_rules import follow_lead_owner
+
+            follow_lead_owner([lead.pk])
 
         if old_status != new_status:
             LeadActivity.objects.create(
@@ -358,6 +364,11 @@ class LeadBulkAssignView(APIView):
         updated = Lead.objects.filter(
             pk__in=lead_ids, is_deleted=False
         ).update(assigned_to=agent, assigned_at=timezone.now())
+
+        # Their open follow-ups go with them — see followup_rules.
+        from apps.leads.followup_rules import follow_lead_owner
+
+        follow_lead_owner(lead_ids)
 
         return Response(
             {"updated": updated, "assigned_to": agent.name},
@@ -569,14 +580,32 @@ class FollowUpListCreateView(generics.ListCreateAPIView):
         ).select_related("assigned_to").order_by("scheduled_at")
 
     def perform_create(self, serializer):
+        from apps.leads.followup_rules import owner_for, retire_notifications
+
         agent = self.request.user
         assert_lead_visible(agent, self.kwargs["lead_id"])
-        followup = serializer.save(
-            lead_id=self.kwargs["lead_id"],
-            assigned_to=serializer.validated_data.get("assigned_to") or agent,
+        lead = Lead.objects.select_related("assigned_to").get(pk=self.kwargs["lead_id"])
+        # The lead's agent, not whoever happens to be scheduling it — see
+        # followup_rules. A team lead scheduling one on an agent's lead used to
+        # get every reminder themselves.
+        owner = owner_for(lead, actor=agent, requested=serializer.validated_data.get("assigned_to"))
+        followup = serializer.save(lead_id=lead.pk, assigned_to=owner)
+
+        # A follow-up scheduled by hand replaces the one the call outcome
+        # booked automatically: the agent has just said when to call back, and
+        # both ringing (24 h later AND at the time they chose) is noise.
+        superseded = list(
+            FollowUp.objects.filter(lead_id=lead.pk, is_auto=True, is_completed=False)
+            .exclude(pk=followup.pk)
+            .values_list("pk", flat=True)
         )
-        # The post_save signal has already refreshed next_followup_at.
-        lead = followup.lead
+        if superseded:
+            FollowUp.objects.filter(pk__in=superseded).update(
+                is_completed=True, completed_at=timezone.now(),
+                completion_notes="Replaced by a follow-up scheduled by hand.",
+            )
+            retire_notifications(superseded)
+            lead.refresh_next_followup()
 
         LeadActivity.objects.create(
             lead=lead,
@@ -626,13 +655,17 @@ class MyFollowUpsView(generics.ListAPIView):
         except (TypeError, ValueError):
             days = 14
 
+        from apps.leads.followup_rules import deliverable
+
         horizon = timezone.now() + timedelta(days=days)
+        # deliverable(): not for deleted leads, nor for a lead that has since
+        # gone to another agent. The phone builds its alarms from this list.
         return (
-            FollowUp.objects.filter(
+            deliverable(FollowUp.objects.filter(
                 assigned_to=self.request.user,
                 is_completed=False,
                 scheduled_at__lte=horizon,
-            )
+            ))
             .select_related("lead", "assigned_to")
             .order_by("scheduled_at")[:200]
         )

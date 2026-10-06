@@ -28,6 +28,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // flip to unauthenticated so the router sends the user to login cleanly
     // instead of surfacing a raw 401 on whatever screen they were on.
     ApiClient.onSessionExpired = () {
+      // The same local clean-up as logout(): otherwise the expired agent's
+      // follow-up alarms keep ringing on this phone, for whoever signs in
+      // next. (The server calls logout() makes need a token, which is gone.)
+      unawaited(NotificationService.instance.cancelAll().catchError((_) {}));
+      unawaited(NotificationService.instance.clearAnnounced().catchError((_) {}));
       if (mounted) state = const AuthState(status: AuthStatus.unauthenticated);
     };
     _init();

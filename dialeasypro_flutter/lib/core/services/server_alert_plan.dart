@@ -24,6 +24,12 @@ const int maxAlertsPerSync = 5;
 /// in the in-app list, which is where history belongs.
 const Duration serverAlertMaxAge = Duration(hours: 24);
 
+/// Kinds the phone already rings for itself: the scheduled reminders
+/// (reminder_plan.dart) fire at the due time and chase hourly while overdue.
+/// Raising the server's copy too put every due follow-up in the shade twice,
+/// and every hourly chase twice. They stay in the in-app list.
+const Set<String> phoneRingsItself = {'followup_due', 'followup_overdue'};
+
 /// An Android notification id for a server notification.
 ///
 /// A negative space of its own. Reminder ids (reminder_plan.occurrenceId) are
@@ -51,7 +57,13 @@ class ServerAlertPlan {
   /// shown, so they are never raised later out of their moment.
   final Set<int> announced;
 
-  const ServerAlertPlan({required this.show, required this.announced});
+  /// Something new concerns a follow-up (scheduled for me, due, overdue).
+  /// The phone's alarms were built from the last sync and may not know about
+  /// it — a follow-up scheduled from the web, or one that came with a lead
+  /// just reassigned to me — so the caller re-syncs them.
+  final bool followupsChanged;
+
+  const ServerAlertPlan({required this.show, required this.announced, this.followupsChanged = false});
 }
 
 /// Decide what to raise for [unread].
@@ -80,10 +92,13 @@ ServerAlertPlan planServerAlerts(
     });
 
   final show = <ServerAlert>[];
+  var followupsChanged = false;
   for (final n in fresh) {
     announced.add(n.id);
+    if (n.kind.startsWith('followup_')) followupsChanged = true;
 
     if (silent || show.length >= maxAlertsPerSync) continue;
+    if (phoneRingsItself.contains(n.kind)) continue;
 
     final at = n.createdAtLocal;
     if (at != null && now.difference(at) > serverAlertMaxAge) continue;
@@ -98,7 +113,7 @@ ServerAlertPlan planServerAlerts(
     ));
   }
 
-  return ServerAlertPlan(show: show, announced: announced);
+  return ServerAlertPlan(show: show, announced: announced, followupsChanged: followupsChanged);
 }
 
 /// Keep the told-set bounded: an id only matters until the row stops coming

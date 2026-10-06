@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/services/whatsapp_service.dart';
 import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
@@ -407,6 +408,9 @@ class _FollowupsTab extends ConsumerWidget {
                         onPressed: () async {
                           await LeadsService.instance.completeFollowup(fu.id);
                           ref.invalidate(_followupsProvider(leadId));
+                          // Its alarms (and hourly overdue chases) are still
+                          // armed on the phone until the reminders are rebuilt.
+                          unawaited(NotificationService.instance.syncFollowupReminders());
                           if (context.mounted) AppToast.show(context, 'Marked done', isSuccess: true);
                         },
                       ),
@@ -472,6 +476,8 @@ class _FollowupsTab extends ConsumerWidget {
               'notes': notesCtrl.text.trim(),
             });
             ref.invalidate(_followupsProvider(leadId));
+            // Arm its reminder now rather than at the next app resume.
+            unawaited(NotificationService.instance.syncFollowupReminders());
             if (ctx.mounted) { Navigator.pop(ctx); AppToast.show(context, 'Follow-up scheduled', isSuccess: true); }
           } catch (e) {
             if (ctx.mounted) AppToast.show(ctx, ApiClient.errorMessage(e), isError: true);

@@ -22,11 +22,12 @@ AppNotification _n(
   String title = 'Follow-up scheduled',
   String body = 'Ravi Kumar at 4:00 PM',
   String url = '/leads/54',
+  String kind = 'followup_scheduled',
   DateTime? at,
 }) =>
     AppNotification.fromJson({
       'id': id,
-      'kind': 'followup_scheduled',
+      'kind': kind,
       'title': title,
       'body': body,
       'url': url,
@@ -179,6 +180,42 @@ void main() {
 
     test('is left alone while it is small', () {
       expect(boundAnnounced({3, 1, 2}), [1, 2, 3]);
+    });
+  });
+
+  // The phone rings for due and overdue follow-ups itself (reminder_plan).
+  // Raising the server's copy as well put each one in the shade twice.
+  group('follow-up reminders the phone already rings for', () {
+    test('a due or overdue reminder is not raised a second time', () {
+      final plan = _plan([
+        _n(10, kind: 'followup_due', title: 'Follow up with Ravi'),
+        _n(11, kind: 'followup_overdue', title: 'Overdue: follow up with Ravi'),
+      ]);
+
+      expect(plan.show, isEmpty);
+      expect(plan.announced, containsAll([10, 11]), reason: 'told, so never raised later either');
+    });
+
+    test('but it does make the phone rebuild its alarms', () {
+      expect(_plan([_n(10, kind: 'followup_due')]).followupsChanged, isTrue);
+    });
+
+    test('a follow-up someone scheduled for me is still raised, and re-syncs', () {
+      final plan = _plan([_n(12, kind: 'followup_scheduled')]);
+
+      expect(plan.show.map((a) => a.id), [serverSlot(12)]);
+      expect(plan.followupsChanged, isTrue);
+    });
+
+    test('other notifications leave the alarms alone', () {
+      final plan = _plan([_n(13, kind: 'lead_assigned', title: 'New lead')]);
+
+      expect(plan.show, hasLength(1));
+      expect(plan.followupsChanged, isFalse);
+    });
+
+    test('nothing new means nothing to re-sync', () {
+      expect(_plan([_n(10, kind: 'followup_due')], announced: {10}).followupsChanged, isFalse);
     });
   });
 }

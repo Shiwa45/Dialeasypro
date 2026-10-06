@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/services/phone_service.dart';
 import '../../core/theme/colors.dart';
 import '../../core/utils/utils.dart';
@@ -602,7 +605,10 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
       return;
     }
 
-    // Schedule auto-followup if disposition requires it or user opted in
+    // The follow-up the agent chose. A disposition's automatic one is booked
+    // by the server when the call is saved (calls/signals.py) — the app used
+    // to book it again here, so every such outcome left two follow-ups and
+    // two sets of reminders. One scheduled here replaces the automatic one.
     if (_scheduleFollowup && _followupDate != null) {
       try {
         await LeadsService.instance.createFollowup(
@@ -614,19 +620,9 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
           },
         );
       } catch (_) {}
-    } else if (_selected!.autoFollowupHours != null && _selected!.autoFollowupHours! > 0) {
-      try {
-        final auto = DateTime.now().add(Duration(hours: _selected!.autoFollowupHours!));
-        await LeadsService.instance.createFollowup(
-          leadId,
-          {
-            'followup_type': 'call',
-            'scheduled_at': auto.toUtc().toIso8601String(),
-            'notes': 'Auto-scheduled from ${_selected!.name} disposition',
-          },
-        );
-      } catch (_) {}
     }
+    // Either way this lead now has a follow-up the phone should ring for.
+    unawaited(NotificationService.instance.syncFollowupReminders());
 
     if (mounted) {
       setState(() => _saving = false);

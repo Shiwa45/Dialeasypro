@@ -371,6 +371,11 @@ class NotificationService {
     );
 
     if (shown > 0) debugPrint('[Notifications] raised $shown server alert(s)');
+
+    // A follow-up changed on the server — scheduled for me from the web, due,
+    // or moved to me with a reassigned lead. Rebuild the alarms so the phone
+    // rings for it; the due/overdue alerts themselves are left to those alarms.
+    if (plan.followupsChanged && !silent) unawaited(syncFollowupReminders());
     return shown;
   }
 

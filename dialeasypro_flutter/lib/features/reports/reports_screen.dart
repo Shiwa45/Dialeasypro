@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/colors.dart';
 import '../../core/widgets/widgets.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
 
 final _reportsProvider = FutureProvider.autoDispose<Map<String, dynamic>>((_) async {
@@ -30,7 +31,13 @@ class ReportsScreen extends ConsumerWidget {
           loading: () => ListView(padding: const EdgeInsets.all(16), children: List.generate(4, (_) =>
             const Padding(padding: EdgeInsets.only(bottom: 12), child: ShimmerCard(height: 120)),
           )),
-          error: (e, _) => EmptyStateView(icon: Icons.error_outline, title: 'Failed', message: e.toString()),
+          error: (e, _) => EmptyStateView(
+            icon: Icons.error_outline,
+            title: 'Could not load reports',
+            message: ApiClient.errorMessage(e),
+            buttonLabel: 'Try again',
+            onAction: () => ref.invalidate(_reportsProvider),
+          ),
           data: (data) {
             final daily = data['daily'] as Map<String, dynamic>? ?? {};
             final funnel = data['funnel'] as Map<String, dynamic>? ?? {};

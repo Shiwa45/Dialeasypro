@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -145,7 +146,10 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> with Single
     final async = ref.watch(_leadDetailProvider(widget.leadId));
     return async.when(
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator(color: AppColors.yellow))),
-      error: (e, _) => Scaffold(appBar: AppBar(), body: Center(child: Text(e.toString()))),
+      error: (e, _) => LeadUnavailableView(
+        error: e,
+        onRetry: () => ref.invalidate(_leadDetailProvider(widget.leadId)),
+      ),
       data: (lead) => _build(lead),
     );
   }
@@ -566,6 +570,37 @@ class _ActionBar extends StatelessWidget {
             onPressed: onWhatsApp,
           )),
         ]),
+      ),
+    );
+  }
+}
+
+/// What the lead screen shows when the lead cannot be loaded.
+///
+/// It printed the raw DioException ("This exception was thrown because the
+/// response has a status code of 404…"). A 404 here is an ordinary event — a
+/// notification or follow-up still pointing at a lead that has since been
+/// reassigned or deleted, which the server rightly refuses to show — and it
+/// needs saying in words, with a way out.
+class LeadUnavailableView extends StatelessWidget {
+  final Object error;
+  final VoidCallback onRetry;
+  const LeadUnavailableView({super.key, required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final notFound = error is DioException && (error as DioException).response?.statusCode == 404;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: const Text('Lead')),
+      body: EmptyStateView(
+        icon: notFound ? Icons.person_off_outlined : Icons.cloud_off_outlined,
+        title: notFound ? 'This lead is not available' : 'Could not load this lead',
+        message: notFound
+            ? 'It may have been reassigned to another agent or deleted. Ask your manager if you think it should still be yours.'
+            : ApiClient.errorMessage(error),
+        buttonLabel: notFound ? 'Go to my leads' : 'Try again',
+        onAction: notFound ? () => context.go('/leads') : onRetry,
       ),
     );
   }

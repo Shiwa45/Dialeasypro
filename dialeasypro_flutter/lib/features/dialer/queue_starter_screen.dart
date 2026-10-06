@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/colors.dart';
 import '../../core/widgets/widgets.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
 import '../work/work_session.dart';
 import 'dialer_state.dart';
@@ -60,8 +61,13 @@ class QueueStarterScreen extends ConsumerWidget {
             ...List.generate(
                 3, (_) => const Padding(padding: EdgeInsets.only(bottom: 12), child: ShimmerCard(height: 96))),
           ]),
-          error: (e, _) =>
-              EmptyStateView(icon: Icons.error_outline, title: 'Could not load queues', message: e.toString()),
+          error: (e, _) => EmptyStateView(
+            icon: Icons.error_outline,
+            title: 'Could not load queues',
+            message: ApiClient.errorMessage(e),
+            buttonLabel: 'Try again',
+            onAction: () => ref.invalidate(availableQueuesProvider),
+          ),
           data: (queues) {
             final ready = queues.fold<int>(0, (sum, q) => sum + ((q['pending_count'] as num?)?.toInt() ?? 0));
             return ListView(

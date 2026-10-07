@@ -39,6 +39,9 @@ def calllog_post_save(sender, instance, created, **kwargs):
         except Exception as exc:
             logger.warning(f"[Signal] Could not update lead {lead.pk}: {exc}")
 
+    # ---- Lead status from the call outcome ----
+    _apply_outcome_status(instance)
+
     # ---- Auto follow-up from disposition ----
     if not instance.disposition:
         return
@@ -62,3 +65,29 @@ def calllog_post_save(sender, instance, created, **kwargs):
         logger.debug(f"[Signal] Auto follow-up created for lead {instance.lead_id}")
     except Exception as exc:
         logger.warning(f"[Signal] Auto follow-up failed: {exc}")
+
+
+# A won deal or a duplicate is settled; a call outcome does not reopen it.
+_STATUS_LOCKED = {"converted", "duplicate"}
+
+
+def _apply_outcome_status(call):
+    """
+    Move the lead to the status its call outcome stands for.
+
+    An outcome used to stop at the call: an agent saved "Connected –
+    Interested" and the lead stayed at Attempted, so the Leads screen's
+    Interested filter — which reads the lead's status — showed none of them.
+    """
+    disposition = call.disposition
+    target = getattr(disposition, "lead_status", "") if disposition else ""
+    if not target:
+        return
+    lead = call.lead
+    lead.refresh_from_db(fields=["status", "has_been_worked"])
+    if lead.status == target or lead.status in _STATUS_LOCKED:
+        return
+    try:
+        lead.update_status(target, agent=call.agent, note=f"Call outcome: {disposition.name}")
+    except Exception as exc:
+        logger.warning(f"[Signal] Could not set lead {lead.pk} status from outcome: {exc}")

@@ -24,7 +24,7 @@ class CallDispositionSerializer(serializers.ModelSerializer):
         model = CallDisposition
         fields = [
             "id", "name", "slug", "is_positive", "is_active",
-            "sort_order", "auto_followup_hours",
+            "sort_order", "auto_followup_hours", "lead_status",
         ]
 
     def validate_name(self, value):

@@ -24,6 +24,7 @@ DEFAULT_DISPOSITIONS = [
         "is_positive": True,
         "sort_order": 1,
         "auto_followup_hours": 24,
+        "lead_status": "interested",
     },
     {
         "name": "Connected – Callback Requested",
@@ -31,6 +32,7 @@ DEFAULT_DISPOSITIONS = [
         "is_positive": True,
         "sort_order": 2,
         "auto_followup_hours": 4,
+        "lead_status": "follow_up",
     },
     {
         "name": "Connected – Not Interested",
@@ -38,6 +40,7 @@ DEFAULT_DISPOSITIONS = [
         "is_positive": False,
         "sort_order": 3,
         "auto_followup_hours": None,
+        "lead_status": "not_interested",
     },
     {
         "name": "Connected – Already Purchased",
@@ -144,6 +147,8 @@ class Command(BaseCommand):
                         "is_positive": d["is_positive"],
                         "sort_order": d["sort_order"],
                         "auto_followup_hours": d.get("auto_followup_hours"),
+                        # What the outcome makes of the lead (blank = leave it).
+                        "lead_status": d.get("lead_status", ""),
                         "is_active": True,
                     },
                 )

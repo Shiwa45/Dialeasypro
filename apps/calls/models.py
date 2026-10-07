@@ -17,7 +17,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
-from apps.core.constants import CallDirection
+from apps.core.constants import CallDirection, LeadStatus
 from apps.core.models import TimeStampedModel, TimeStampedUUIDModel
 
 
@@ -40,6 +40,13 @@ class CallDisposition(TimeStampedModel):
     auto_followup_hours = models.PositiveIntegerField(
         null=True, blank=True,
         help_text="If set, auto-schedule a follow-up this many hours after call.",
+    )
+    # What a call with this outcome makes of the lead. Without it an outcome
+    # never touched the lead: "Connected – Interested" left the lead at
+    # Attempted, so filtering Leads by Interested found none of them.
+    lead_status = models.CharField(
+        max_length=20, blank=True, default="", choices=LeadStatus.CHOICES,
+        help_text="Move the lead to this status when a call is saved with this outcome. Blank = leave it.",
     )
 
     class Meta:

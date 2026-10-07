@@ -210,6 +210,22 @@ class SendWhatsAppView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        from apps.communications.whatsapp_ready import (
+            NOT_CONNECTED, mock_allowed, unmapped_placeholders, whatsapp_connected,
+        )
+
+        if not whatsapp_connected() and not mock_allowed():
+            return Response(NOT_CONNECTED, status=status.HTTP_400_BAD_REQUEST)
+        if template_id and serializer.validated_data.get("variables") is None:
+            missing = unmapped_placeholders(template)
+            if missing:
+                return Response(
+                    {"error": "template_variables_unmapped",
+                     "message": "This template's variables aren't mapped to lead fields yet: "
+                                + ", ".join("{{%d}}" % n for n in missing)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         send_single_whatsapp.apply_async(
             kwargs={
                 "schema_name": connection.schema_name,
@@ -403,11 +419,14 @@ class CampaignAudiencePreviewView(APIView):
         preview = BulkCampaign(audience_filters=filters)
         audience = _resolve_campaign_audience(preview)
 
-        with_phone = sum(1 for lead in audience if (lead.phone or "").strip())
+        # DND leads are skipped at send time, so they are not "will be sent to".
+        dnd = sum(1 for lead in audience if lead.is_dnd)
+        with_phone = sum(1 for lead in audience if (lead.phone or "").strip() and not lead.is_dnd)
         with_email = sum(1 for lead in audience if (lead.email or "").strip())
 
         return Response({
             "count": len(audience),
+            "dnd": dnd,
             # Channel matters: an audience of 400 leads with 12 email
             # addresses is not a 400-recipient email campaign.
             "with_phone": with_phone,
@@ -423,6 +442,46 @@ class BulkCampaignDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return BulkCampaign.objects.all()
+
+
+class CampaignRecipientListView(APIView):
+    """
+    GET /api/v1/comms/campaigns/{id}/recipients/?status=failed&page=1
+
+    Who a campaign went to and what happened to each message. A finished
+    campaign was a card with a count and nothing behind it — no way to see
+    which customers failed, or why.
+    """
+
+    permission_classes = [IsManagerOrAdmin]
+
+    def get(self, request, pk):
+        from apps.communications.models import CampaignRecipient
+
+        campaign = BulkCampaign.objects.filter(pk=pk).first()
+        if campaign is None:
+            return Response({"error": "not_found"}, status=404)
+        qs = (
+            CampaignRecipient.objects.filter(campaign=campaign)
+            .select_related("lead").order_by("status", "lead__name")
+        )
+        if status_param := request.query_params.get("status"):
+            qs = qs.filter(status=status_param)
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        rows = [
+            {
+                "id": r.pk,
+                "lead_id": r.lead_id,
+                "lead_name": r.lead.name if r.lead_id else "",
+                "phone": r.phone,
+                "status": r.status,
+                "error_message": r.error_message,
+                "sent_at": r.sent_at,
+            }
+            for r in page
+        ]
+        return paginator.get_paginated_response(rows)
 
 
 LAUNCHABLE_STATUSES = ("draft", "scheduled", "paused")
@@ -457,6 +516,17 @@ class BulkCampaignLaunchView(APIView):
                                 "Pick another before launching."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+        if campaign.channel == "whatsapp":
+            # Not connected → the mock provider would mark the whole audience
+            # "sent" with nothing delivered. Unmapped {{N}} → customers get the
+            # literal placeholder. Both refused here, before anything queues.
+            from apps.communications.tasks import whatsapp_launch_problem
+            from apps.communications.whatsapp_ready import NOT_CONNECTED
+
+            problem = whatsapp_launch_problem(campaign)
+            if problem:
+                code = "whatsapp_not_connected" if problem == NOT_CONNECTED["message"] else "campaign_not_ready"
+                return Response({"error": code, "message": problem}, status=status.HTTP_400_BAD_REQUEST)
 
         from apps.communications import tasks as comm_tasks
 
@@ -559,12 +629,12 @@ class WhatsAppConfigView(APIView):
     def get(self, request):
         self._require_whatsapp_feature(request)
         config = WhatsAppConfig.get_solo()
-        return Response(WhatsAppConfigSerializer(config).data)
+        return Response(WhatsAppConfigSerializer(config, context={"request": request}).data)
 
     def put(self, request):
         self._require_whatsapp_feature(request)
         config = WhatsAppConfig.get_solo()
-        serializer = WhatsAppConfigSerializer(config, data=request.data, partial=True)
+        serializer = WhatsAppConfigSerializer(config, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
         AuditLog.log(
@@ -578,7 +648,7 @@ class WhatsAppConfigView(APIView):
             request=request,
             is_sensitive=True,
         )
-        return Response(WhatsAppConfigSerializer(config).data)
+        return Response(WhatsAppConfigSerializer(config, context={"request": request}).data)
 
 
 class WhatsAppConfigTestView(APIView):

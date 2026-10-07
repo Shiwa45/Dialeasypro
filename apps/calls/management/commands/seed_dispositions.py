@@ -21,6 +21,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Connected – Interested",
         "slug": "connected_interested",
+        "marks_connected": True,
         "is_positive": True,
         "sort_order": 1,
         "auto_followup_hours": 24,
@@ -29,6 +30,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Connected – Callback Requested",
         "slug": "connected_callback",
+        "marks_connected": True,
         "is_positive": True,
         "sort_order": 2,
         "auto_followup_hours": 4,
@@ -37,6 +39,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Connected – Not Interested",
         "slug": "connected_not_interested",
+        "marks_connected": True,
         "is_positive": False,
         "sort_order": 3,
         "auto_followup_hours": None,
@@ -45,6 +48,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Connected – Already Purchased",
         "slug": "connected_purchased",
+        "marks_connected": True,
         "is_positive": False,
         "sort_order": 4,
         "auto_followup_hours": None,
@@ -53,6 +57,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Not Reachable",
         "slug": "not_reachable",
+        "marks_connected": False,
         "is_positive": False,
         "sort_order": 5,
         "auto_followup_hours": 6,
@@ -60,6 +65,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Busy",
         "slug": "busy",
+        "marks_connected": False,
         "is_positive": False,
         "sort_order": 6,
         "auto_followup_hours": 2,
@@ -67,6 +73,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Switched Off",
         "slug": "switched_off",
+        "marks_connected": False,
         "is_positive": False,
         "sort_order": 7,
         "auto_followup_hours": 12,
@@ -74,6 +81,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Wrong Number",
         "slug": "wrong_number",
+        "marks_connected": True,
         "is_positive": False,
         "sort_order": 8,
         "auto_followup_hours": None,
@@ -81,6 +89,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Do Not Disturb",
         "slug": "dnd",
+        "marks_connected": None,
         "is_positive": False,
         "sort_order": 9,
         "auto_followup_hours": None,
@@ -88,6 +97,7 @@ DEFAULT_DISPOSITIONS = [
     {
         "name": "Voicemail Left",
         "slug": "voicemail",
+        "marks_connected": False,
         "is_positive": False,
         "sort_order": 10,
         "auto_followup_hours": 24,
@@ -149,6 +159,8 @@ class Command(BaseCommand):
                         "auto_followup_hours": d.get("auto_followup_hours"),
                         # What the outcome makes of the lead (blank = leave it).
                         "lead_status": d.get("lead_status", ""),
+                        # Whether the outcome means the call was answered.
+                        "marks_connected": d.get("marks_connected"),
                         "is_active": True,
                     },
                 )

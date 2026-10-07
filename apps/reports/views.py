@@ -36,6 +36,31 @@ logger = logging.getLogger(__name__)
 CACHE_TTL = 300  # 5 minutes
 
 
+def _fill_days(daily_rows, date_from, date_to, max_days: int = 400) -> list[dict]:
+    """Daily call rows → one entry per calendar day in [date_from, date_to]."""
+    from datetime import date as _date
+
+    by_day = {str(r["date"]): r for r in daily_rows}
+    try:
+        start, end = _date.fromisoformat(str(date_from)), _date.fromisoformat(str(date_to))
+    except ValueError:
+        start = end = None
+    if not start or not end or end < start or (end - start).days > max_days:
+        days = sorted(by_day)
+    else:
+        days = [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)]
+    out = []
+    for d in days:
+        row = by_day.get(d, {"total": 0, "connected": 0})
+        out.append({
+            "date": d,
+            "total": row["total"],
+            "connected": row["connected"],
+            "connection_rate": round(row["connected"] / max(row["total"], 1) * 100, 1),
+        })
+    return out
+
+
 def _report_key(kind: str, *parts) -> str:
     """
     A report cache key that belongs to ONE tenant.
@@ -85,17 +110,26 @@ class AgentPerformanceReportView(APIView):
         cache_key = _report_key("agent_perf", date_from, date_to, agent_id or "all")
 
         def compute():
-            agents_qs = Agent.objects.filter(is_active=True)
+            # Active agents, plus anyone deactivated since who made calls in
+            # the range — their work in that period still happened.
+            called = CallLog.objects.filter(
+                started_at__date__gte=date_from, started_at__date__lte=date_to, agent__isnull=False,
+            ).values("agent_id")
+            agents_qs = Agent.objects.filter(Q(is_active=True) | Q(pk__in=called))
             if agent_id:
                 agents_qs = agents_qs.filter(pk=agent_id)
 
             report = []
             for agent in agents_qs:
-                leads = Lead.objects.filter(
-                    assigned_to=agent,
-                    created_at__date__gte=date_from,
-                    created_at__date__lte=date_to,
-                    is_deleted=False,
+                owned = Lead.objects.filter(assigned_to=agent, is_deleted=False)
+                # Leads the agent RECEIVED in the period: assigned to them in
+                # it (or created in it, for leads with no assignment time).
+                # Counting only leads created in the period showed "0 leads"
+                # for an agent working a hundred older ones.
+                leads = owned.filter(
+                    Q(assigned_at__date__gte=date_from, assigned_at__date__lte=date_to)
+                    | Q(assigned_at__isnull=True, created_at__date__gte=date_from,
+                        created_at__date__lte=date_to)
                 )
                 calls = CallLog.objects.filter(
                     agent=agent,
@@ -105,7 +139,7 @@ class AgentPerformanceReportView(APIView):
                 call_stats = calls.aggregate(
                     total_calls=Count("id"),
                     connected=Count("id", filter=Q(is_connected=True)),
-                    total_duration=Sum("duration_seconds"),
+                    total_duration=Sum("duration_seconds", filter=Q(is_connected=True)),
                 )
                 total = leads.count()
                 won = leads.filter(status=LeadStatus.CONVERTED).count()
@@ -115,6 +149,7 @@ class AgentPerformanceReportView(APIView):
                     "agent_role": agent.role,
                     "leads": {
                         "total": total,
+                        "owned": owned.count(),
                         "new": leads.filter(status=LeadStatus.NEW).count(),
                         "interested": leads.filter(status=LeadStatus.INTERESTED).count(),
                         "converted": won,
@@ -267,15 +302,10 @@ class CallAnalyticsReportView(APIView):
                     "avg_duration_seconds": round(aggregate["avg_duration"] or 0),
                     "total_cost_rupees": (aggregate["total_cost_paise"] or 0) / 100,
                 },
-                "daily_trend": [
-                    {
-                        "date": str(row["date"]),
-                        "total": row["total"],
-                        "connected": row["connected"],
-                        "connection_rate": round(row["connected"] / max(row["total"], 1) * 100, 1),
-                    }
-                    for row in daily
-                ],
+                # Every day in the range, zeros included. Days without calls
+                # used to be missing, so the chart's axis jumped from 12 Sep
+                # to 27 Sep as if they were consecutive.
+                "daily_trend": _fill_days(daily, date_from, date_to),
                 "by_disposition": by_disposition,
             }
 
@@ -303,17 +333,20 @@ class ConversionFunnelView(APIView):
         scope_key = f"agent{agent.pk}" if is_scoped else "all"
 
         params = request.query_params
+        # ?current=1 → where every lead stands NOW, whenever it arrived. The
+        # dashboard's pipeline wants that; the dated funnel only counts leads
+        # created in the range, so a tenant whose leads all came in five weeks
+        # ago saw "No pipeline data yet" on a full pipeline.
+        current = params.get("current") in ("1", "true", "yes")
         date_from = params.get("date_from", (timezone.localdate() - timedelta(days=90)).isoformat())
         date_to = params.get("date_to", timezone.localdate().isoformat())
 
-        cache_key = _report_key("funnel", scope_key, date_from, date_to)
+        cache_key = _report_key("funnel", scope_key, "current" if current else date_from, "" if current else date_to)
 
         def compute():
-            qs = Lead.objects.filter(
-                created_at__date__gte=date_from,
-                created_at__date__lte=date_to,
-                is_deleted=False,
-            )
+            qs = Lead.objects.filter(is_deleted=False)
+            if not current:
+                qs = qs.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
             if is_scoped:
                 qs = qs.filter(assigned_to=agent)
             total = qs.count()
@@ -334,7 +367,8 @@ class ConversionFunnelView(APIView):
             return {"funnel": funnel, "total": total, "lost": lost}
 
         return Response({
-            "period": {"date_from": date_from, "date_to": date_to},
+            "period": None if current else {"date_from": date_from, "date_to": date_to},
+            "current": current,
             **_cached(cache_key, compute),
         })
 
@@ -368,7 +402,7 @@ class DailyActivityView(APIView):
         call_stats = call_qs.aggregate(
             total=Count("id"),
             connected=Count("id", filter=Q(is_connected=True)),
-            total_duration=Sum("duration_seconds"),
+            total_duration=Sum("duration_seconds", filter=Q(is_connected=True)),
         )
 
         return Response({

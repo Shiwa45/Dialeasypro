@@ -27,6 +27,15 @@ from apps.core.storage import get_profile_photo_upload_path
 # Agent Manager
 # ============================================================
 
+
+# Monday–Saturday (0=Mon … 6=Sun). An empty list used to mean "every day is a
+# working day", so attendance marked every Sunday absent and payroll docked it.
+DEFAULT_WORKING_DAYS = [0, 1, 2, 3, 4, 5]
+
+
+def default_working_days():
+    return list(DEFAULT_WORKING_DAYS)
+
 class AgentManager(BaseUserManager):
     """Custom manager for the Agent model."""
 
@@ -147,10 +156,10 @@ class Agent(AbstractBaseUser, TimeStampedModel):
         help_text="Shift end time.",
     )
     working_days = models.JSONField(
-        default=list,
+        default=default_working_days,
         blank=True,
         help_text="List of working day numbers: 0=Mon, 1=Tue, ..., 6=Sun. "
-                  "E.g., [0,1,2,3,4] for Monday–Friday.",
+                  "E.g., [0,1,2,3,4] for Monday–Friday. Defaults to Monday–Saturday.",
     )
 
     # ---- Call Settings ------------------------------------

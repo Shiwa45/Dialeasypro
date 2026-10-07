@@ -15,7 +15,7 @@ from datetime import date, datetime, time, timedelta
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from apps.authentication.models import Agent, AgentStatus, AgentStatusLog
+from apps.authentication.models import Agent, AgentLoginSession, AgentStatus, AgentStatusLog
 from apps.authentication.presence import status_totals
 from apps.core.constants import AgentWorkStatus
 
@@ -61,15 +61,23 @@ def _day_bounds(day: date):
 
 def build_login_report(date_from: date, date_to: date, now=None) -> list[dict]:
     """
-    One row per (day, active agent), newest day first. An agent with no
-    activity on a day still gets a row — "never logged in" is part of the
-    report, not a gap in it.
+    One row per (day, agent), newest day first. An agent with no activity on
+    a day still gets a row — "never logged in" is part of the report, not a
+    gap in it.
+
+    Agents listed: everyone active now, plus anyone deactivated since who was
+    on the dialer or made calls in the range. Only active agents used to be
+    listed, so deactivating someone erased their past days — and their calls —
+    from every date range.
+
+    `first_sign_in` is the first sign-in on any client that day (web or app),
+    from the login sessions. The dialer intervals only exist for the app, so
+    someone who worked only on the web used to read "Not logged in".
     """
     now = now or timezone.now()
     range_start, _ = _day_bounds(date_from)
     _, range_end = _day_bounds(date_to)
 
-    agents = list(Agent.objects.filter(is_active=True).order_by("name"))
     live = dict(AgentStatus.objects.values_list("agent_id", "status"))
 
     logs_by_agent = defaultdict(list)
@@ -79,6 +87,21 @@ def build_login_report(date_from: date, date_to: date, now=None) -> list[dict]:
         logs_by_agent[log.agent_id].append(log)
 
     from apps.calls.models import CallLog
+
+    called = set(
+        CallLog.objects.filter(started_at__gte=range_start, started_at__lt=range_end, agent__isnull=False)
+        .values_list("agent_id", flat=True).distinct()
+    )
+    agents = list(
+        Agent.objects.filter(Q(is_active=True) | Q(pk__in=set(logs_by_agent) | called)).order_by("name")
+    )
+
+    sign_ins = {}
+    for agent_id, login_time in AgentLoginSession.objects.filter(
+        login_time__gte=range_start, login_time__lt=range_end,
+    ).order_by("login_time").values_list("agent_id", "login_time"):
+        key = (agent_id, timezone.localtime(login_time).date())
+        sign_ins.setdefault(key, login_time)
 
     calls = defaultdict(lambda: {"calls": 0, "connected": 0})
     for row in (
@@ -124,6 +147,11 @@ def build_login_report(date_from: date, date_to: date, now=None) -> list[dict]:
                 "agent_id": agent.id,
                 "name": agent.name,
                 "role": agent.role,
+                "is_active": agent.is_active,
+                "first_sign_in": (
+                    timezone.localtime(sign_ins[(agent.id, day)]).isoformat()
+                    if (agent.id, day) in sign_ins else None
+                ),
                 "status_now": status_now,
                 "online_now": online_now,
                 "first_online": timezone.localtime(first).isoformat() if first else None,

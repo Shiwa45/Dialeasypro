@@ -154,7 +154,7 @@ class PipelineStageListCreateView(generics.ListCreateAPIView):
         # A tenant that bought the module mid-subscription has no stages and
         # no way to create an application without them, so seed on first read.
         pipeline_svc.seed_pipeline()
-        return PipelineStage.objects.annotate(app_count=Count("applications"))
+        return PipelineStage.objects.annotate(app_count=Count("applications")).order_by("order", "id")
 
 
 class PipelineStageDetailView(generics.RetrieveUpdateDestroyAPIView):

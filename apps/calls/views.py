@@ -168,6 +168,13 @@ def _queue_ai_pipeline(call) -> None:
         logger.warning("Could not queue AI pipeline for call %s: %s", call.pk, exc)
 
 
+def _fill_duration_from_recording(call, rec):
+    """A connected call the dialer reported with 0 s takes the recording's length."""
+    if call.is_connected and not call.duration_seconds and rec.duration_seconds:
+        call.duration_seconds = int(rec.duration_seconds)
+        call.save(update_fields=["duration_seconds"])
+
+
 class CallRecordingUploadView(APIView):
     """
     POST /api/v1/calls/{id}/recording/   (multipart/form-data)
@@ -239,6 +246,7 @@ class CallRecordingUploadView(APIView):
                     "uploaded_at": timezone.now(),
                 },
             )
+            _fill_duration_from_recording(call, rec)
             _queue_ai_pipeline(call)
             return Response(
                 {"id": rec.pk, "playback_url": rec.cloud_url, "duration_seconds": rec.duration_seconds},
@@ -318,6 +326,7 @@ class CallRecordingUploadView(APIView):
                 "uploaded_at": timezone.now(),
             },
         )
+        _fill_duration_from_recording(call, rec)
         _queue_ai_pipeline(call)
 
         return Response(
@@ -701,7 +710,9 @@ class CallStatsView(APIView):
         stats = qs.aggregate(
             total_calls=Count("id"),
             connected_calls=Count("id", filter=Q(is_connected=True)),
-            total_duration=Sum("duration_seconds"),
+            # Talk time is connected calls only — a provider reports ring time
+            # as "duration" on unanswered calls too.
+            total_duration=Sum("duration_seconds", filter=Q(is_connected=True)),
             avg_duration=Avg("duration_seconds", filter=Q(is_connected=True)),
             total_cost_paise=Sum("call_cost_paise"),
         )

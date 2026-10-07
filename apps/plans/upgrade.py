@@ -28,7 +28,7 @@ def support_contacts() -> dict:
             return default
 
     return {
-        "platform_name": setting("platform_name", "TeleCRM"),
+        "platform_name": setting("platform_name", "DialSathi"),
         "email": setting("support_email", settings.SUPPORT_EMAIL),
         "phone": setting("support_phone", ""),
         "whatsapp": setting("support_whatsapp", ""),

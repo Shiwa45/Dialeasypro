@@ -61,8 +61,10 @@ def split_gst(
     rate = Decimal(gst_rate)
     taxable = q2(taxable_value)
 
+    from apps.core.constants import canonical_state_code
+
     interstate = bool(seller_state and buyer_state) and (
-        seller_state.strip().upper() != buyer_state.strip().upper()
+        canonical_state_code(seller_state) != canonical_state_code(buyer_state)
     )
 
     if interstate:

@@ -208,13 +208,22 @@ class WhatsAppTemplate(TimeStampedModel):
             text = text.replace(f"{{{{{i}}}}}", str(value))
         return text
 
+    @property
+    def provider_name(self) -> str:
+        """
+        What the provider knows this template as. Meta and the BSPs identify
+        a template by the name it was approved under, so that is the default;
+        provider_template_id overrides it where a provider issues its own id.
+        It used to be provider_template_id only — a field no screen could set —
+        so every real send went out with an empty template id.
+        """
+        return (self.provider_template_id or self.name or "").strip()
+
     def render(self, lead) -> str:
-        """Render template body substituting {{N}} with lead field values."""
-        text = self.body_text
-        for var_num, field_name in self.variable_mapping.items():
-            value = getattr(lead, field_name, "") or ""
-            text = text.replace(f"{{{{{var_num}}}}}", str(value))
-        return text
+        """Render the body for this lead using the variable mapping."""
+        from apps.communications.whatsapp_ready import template_values
+
+        return self.render_with(template_values(self, lead))
 
 
 class WhatsAppConversation(TimeStampedModel):

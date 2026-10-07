@@ -281,7 +281,7 @@ class LeadCreateSerializer(serializers.ModelSerializer):
         model = Lead
         fields = [
             "name", "phone", "alternate_phone", "email",
-            "city", "state", "pincode",
+            "city", "state", "pincode", "address", "is_dnd", "expected_close_date",
             "source", "status", "priority",
             # deal_value was missing while both clients send it on the new-lead
             # form, so an expected deal size typed at creation was accepted by
@@ -366,8 +366,10 @@ class LeadUpdateSerializer(serializers.ModelSerializer):
         model = Lead
         fields = [
             "name", "phone", "alternate_phone", "email",
-            "city", "state", "pincode",
-            "status", "priority", "score",
+            # source, address and is_dnd were shown on the lead and offered on
+            # the edit form, but not accepted here — an edit silently dropped them.
+            "city", "state", "pincode", "address",
+            "source", "status", "priority", "score", "is_dnd",
             "assigned_to", "budget", "requirement",
             "deal_value", "expected_close_date",
             "pipeline_stage", "tags", "custom_fields",
@@ -544,7 +546,10 @@ class CallQueueSerializer(serializers.ModelSerializer):
 
     def get_agents(self, obj):
         return [
-            {"id": m.agent_id, "name": m.agent.name, "role": m.agent.role}
+            {"id": m.agent_id, "name": m.agent.name, "role": m.agent.role,
+             # A deactivated agent stays a member until someone edits the
+             # queue; the screen flags it so a queue nobody can work is seen.
+             "is_active": m.agent.is_active}
             for m in obj.memberships.select_related("agent").all()
         ]
 

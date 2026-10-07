@@ -132,6 +132,19 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
 
     provider_service, provider_slug = _get_whatsapp_provider()
 
+    # No connected provider → the mock would "send" and every recipient would
+    # be marked sent with nothing delivered. Fail them honestly instead.
+    from apps.communications.whatsapp_ready import NOT_CONNECTED_REASON, mock_allowed
+
+    if provider_slug == "mock" and not mock_allowed():
+        failed_now = recipients.update(status="failed", error_message=NOT_CONNECTED_REASON)
+        from django.db.models import F
+        BulkCampaign.objects.filter(pk=campaign_id).update(
+            failed_count=F("failed_count") + failed_now,
+        )
+        _check_campaign_completion(campaign_id)
+        return
+
     sent, failed = 0, 0
     for recipient in recipients:
         # Re-checked inside the loop: a chunk of 50 takes a while, and an
@@ -148,7 +161,7 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
             # Call provider API
             message_id = provider_service.send_template(
                 phone=recipient.phone,
-                template_id=campaign.template.provider_template_id if campaign.template else "",
+                template_id=campaign.template.provider_name if campaign.template else "",
                 variables=_extract_variables(campaign.template, recipient.lead),
             )
 
@@ -193,6 +206,11 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
         sent_count=F("sent_count") + sent,
         failed_count=F("failed_count") + failed,
     )
+    if sent and campaign.template_id:
+        from apps.communications.models import WhatsAppTemplate
+        WhatsAppTemplate.objects.filter(pk=campaign.template_id).update(
+            usage_count=F("usage_count") + sent,
+        )
 
     # Check if campaign is complete
     _check_campaign_completion(campaign_id)
@@ -485,6 +503,20 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
 
         provider_service, provider_slug = _get_whatsapp_provider()
 
+        from apps.communications.whatsapp_ready import NOT_CONNECTED_REASON, mock_allowed
+
+        if provider_slug == "mock" and not mock_allowed():
+            # Recorded as FAILED so the lead's thread says what happened, and
+            # not retried: retrying cannot connect WhatsApp.
+            WhatsAppMessage.objects.create(
+                lead=lead, sent_by=sent_by, direction="outbound",
+                message_type="template" if template else "text",
+                content=template.render(lead) if template else message,
+                template=template, provider="mock", status="failed",
+                error_message=NOT_CONNECTED_REASON,
+            )
+            return
+
         if template:
             # The values the agent filled in when the app sends them; the
             # template's mapping otherwise. They used to be discarded in
@@ -493,7 +525,7 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
             values = variables if variables is not None else _extract_variables(template, lead)
             msg_id = provider_service.send_template(
                 phone=lead.phone,
-                template_id=template.provider_template_id,
+                template_id=template.provider_name,
                 variables=values,
             )
             # Record what the customer actually received.
@@ -508,6 +540,9 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
             provider=provider_slug,
             provider_message_id=msg_id, status="sent", sent_at=timezone.now(),
         )
+        if template:
+            from django.db.models import F
+            WhatsAppTemplate.objects.filter(pk=template.pk).update(usage_count=F("usage_count") + 1)
         LeadActivity.objects.create(
             lead=lead, activity_type="whatsapp",
             description=f"WhatsApp sent: {message[:80]}",
@@ -576,6 +611,8 @@ def _resolve_campaign_audience(campaign):
         qs = qs.filter(source=source)
     if assigned_to := filters.get("assigned_to"):
         qs = qs.filter(assigned_to_id=assigned_to)
+    if batch := filters.get("batch"):
+        qs = qs.filter(batch_id=batch)
     if tags := filters.get("tags"):
         for tag in tags:
             qs = qs.filter(tags__contains=tag)
@@ -771,15 +808,38 @@ def _get_sms_provider():
     return MockSMSProvider()
 
 
+def whatsapp_launch_problem(campaign) -> str:
+    """
+    Why this WhatsApp campaign can't go out, as a sentence — or "".
+
+    Shared by the launch button and the scheduler so a scheduled campaign is
+    held to exactly the rules a manual launch is.
+    """
+    from apps.communications.whatsapp_ready import (
+        NOT_CONNECTED, mock_allowed, unmapped_placeholders, whatsapp_connected,
+    )
+
+    if not whatsapp_connected() and not mock_allowed():
+        return NOT_CONNECTED["message"]
+    template = campaign.template
+    if template is None:
+        return "Pick a template before launching."
+    if not template.is_active or template.status != "approved":
+        return f'"{template.name}" is no longer an active, approved template.'
+    missing = unmapped_placeholders(template)
+    if missing:
+        nums = ", ".join("{{%d}}" % n for n in missing)
+        return f'Template "{template.name}" has unmapped variables ({nums}). Map them in Communications → Templates.'
+    return ""
+
+
 def _extract_variables(template, lead) -> list:
-    """Extract ordered variable values from a lead based on template mapping."""
-    if not template or not template.variable_mapping:
+    """Ordered values for {{1}}..{{N}} from the template's mapping."""
+    if not template:
         return []
-    result = []
-    for i in range(1, len(template.variable_mapping) + 1):
-        field = template.variable_mapping.get(str(i), "")
-        result.append(str(getattr(lead, field, "") or ""))
-    return result
+    from apps.communications.whatsapp_ready import template_values
+
+    return template_values(template, lead)
 
 
 @shared_task(base=TenantAwareTask, bind=True)
@@ -820,6 +880,15 @@ def launch_scheduled_campaigns(self, schema_name: str = None):
                 f"'{campaign.channel}' — skipping."
             )
             continue
+
+        if campaign.channel == "whatsapp":
+            refusal = whatsapp_launch_problem(campaign)
+            if refusal:
+                BulkCampaign.objects.filter(pk=campaign.pk, status="scheduled").update(
+                    status="failed", failure_reason=refusal[:500],
+                )
+                logger.warning(f"[Task] Scheduled campaign {campaign.name} not launched: {refusal}")
+                continue
 
         # Claim it first, conditionally. Beat ticks every few minutes and the
         # coordinator only marks the campaign "running" once it actually

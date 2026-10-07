@@ -286,7 +286,7 @@ class BaseWebhookView(View):
 
         LeadActivity.objects.create(
             lead=lead, activity_type="imported",
-            description=f"Lead received via {self.source or 'webhook'}",
+            description=f"Lead received via {dict(LeadSource.CHOICES).get(self.source, self.source) or 'webhook'}",
             meta={"source": self.source},
         )
         logger.info(f"[Integration] Lead created: {lead.name} ({lead.phone}) via {self.source}")

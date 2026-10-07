@@ -222,11 +222,8 @@ class LeadListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(campaign_name__icontains=campaign)
 
         if search := params.get("search"):
-            qs = qs.filter(
-                Q(name__icontains=search) |
-                Q(phone__icontains=search) |
-                Q(email__icontains=search)
-            )
+            from apps.leads.search import lead_search_q
+            qs = qs.filter(lead_search_q(search))
 
         if params.get("overdue") == "true":
             qs = qs.filter(
@@ -239,8 +236,10 @@ class LeadListCreateView(generics.ListCreateAPIView):
         if date_to := params.get("date_to"):
             qs = qs.filter(created_at__date__lte=date_to)
 
-        # Ordering
-        order_by = params.get("order_by", "-created_at")
+        # Ordering. The overdue list defaults to most-overdue first — it was
+        # newest-created first, which put the follow-ups in no useful order.
+        default_order = "next_followup_at" if params.get("overdue") == "true" else "-created_at"
+        order_by = params.get("order_by", default_order)
         allowed_orderings = [
             "created_at", "-created_at", "name", "-name",
             "next_followup_at", "-score", "score",
@@ -492,10 +491,8 @@ class LeadDistributeView(APIView):
         if d.get("sources"):
             qs = qs.filter(source__in=[s.lower() for s in d["sources"]])
         if d.get("search"):
-            term = d["search"]
-            qs = qs.filter(
-                Q(name__icontains=term) | Q(phone__icontains=term) | Q(email__icontains=term)
-            )
+            from apps.leads.search import lead_search_q
+            qs = qs.filter(lead_search_q(d["search"]))
 
         # created_at, not pk, so an equal split gives each agent a
         # time-coherent slice and a re-run produces the same plan.
@@ -1239,11 +1236,8 @@ class LeadExportView(APIView):
         if city := params.get("city"):
             qs = qs.filter(city__icontains=city)
         if search := params.get("search"):
-            qs = qs.filter(
-                Q(name__icontains=search)
-                | Q(phone__icontains=search)
-                | Q(email__icontains=search)
-            )
+            from apps.leads.search import lead_search_q
+            qs = qs.filter(lead_search_q(search))
         if params.get("overdue") == "true":
             qs = qs.filter(
                 next_followup_at__lt=timezone.now(),

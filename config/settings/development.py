@@ -121,3 +121,8 @@ AUTH_PASSWORD_VALIDATORS = []
 # SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"] = timedelta(minutes=5)
 
 print("⚡ TeleCRM running in DEVELOPMENT mode")
+
+# Local development may "send" WhatsApp through the mock provider (it only
+# logs). Never set in production: there, a send with no connected provider is
+# refused instead of being reported as delivered.
+WHATSAPP_ALLOW_MOCK = True

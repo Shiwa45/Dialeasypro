@@ -157,16 +157,51 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
 
 
 class WhatsAppTemplateSerializer(serializers.ModelSerializer):
+    # {{N}} numbers used in the body, and those with no lead field mapped —
+    # the web app shows a mapping row per placeholder and flags the gaps.
+    placeholders = serializers.SerializerMethodField()
+    unmapped = serializers.SerializerMethodField()
+
     class Meta:
         model = WhatsAppTemplate
         fields = [
             "id", "name", "category", "language",
             "header_type", "header_text", "header_media_url",
             "body_text", "footer_text",
-            "variable_mapping", "provider", "status",
-            "is_active", "usage_count",
+            "variable_mapping", "provider", "provider_template_id", "status",
+            "is_active", "usage_count", "placeholders", "unmapped",
         ]
         read_only_fields = ["id", "usage_count"]
+
+    def get_placeholders(self, obj) -> list:
+        from apps.communications.whatsapp_ready import placeholder_numbers
+        return placeholder_numbers(obj.body_text)
+
+    def get_unmapped(self, obj) -> list:
+        from apps.communications.whatsapp_ready import unmapped_placeholders
+        return unmapped_placeholders(obj)
+
+    def validate_variable_mapping(self, value):
+        from apps.communications.whatsapp_ready import LEAD_VARIABLE_FIELDS, is_valid_field
+
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Use {"1": "name", "2": "city"}.')
+        cleaned = {}
+        for key, field in value.items():
+            if not str(key).isdigit() or int(key) < 1:
+                raise serializers.ValidationError(f'"{key}" is not a variable number.')
+            field = str(field or "").strip()
+            if not field:
+                continue  # an unmapped row in the form
+            if not is_valid_field(field):
+                allowed = ", ".join(LEAD_VARIABLE_FIELDS)
+                raise serializers.ValidationError(
+                    f'"{field}" is not a lead field. Use one of: {allowed}, or custom:<field key>.'
+                )
+            cleaned[str(int(key))] = field
+        return cleaned
 
 
 class WhatsAppMessageSerializer(serializers.ModelSerializer):
@@ -276,6 +311,16 @@ class BulkCampaignCreateSerializer(serializers.ModelSerializer):
         channel = data.get("channel")
         if channel == "whatsapp" and not data.get("template"):
             raise serializers.ValidationError({"template": "Template required for WhatsApp campaigns."})
+        if channel == "whatsapp":
+            from apps.communications.whatsapp_ready import unmapped_placeholders
+
+            missing = unmapped_placeholders(data["template"])
+            if missing:
+                raise serializers.ValidationError({"template": (
+                    "Map this template's variables to lead fields first ("
+                    + ", ".join("{{%d}}" % n for n in missing)
+                    + ") — otherwise customers receive the placeholder text."
+                )})
         if channel == "email":
             if not data.get("email_subject"):
                 raise serializers.ValidationError({"email_subject": "Subject required for email campaigns."})

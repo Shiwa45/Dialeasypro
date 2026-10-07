@@ -72,7 +72,7 @@ def generate_call_report(self, schema_name: str, agent_id: int, date_str: str):
     report = calls.aggregate(
         total=Count("id"),
         connected=Count("id", filter=Q(is_connected=True)),
-        total_duration=Sum("duration_seconds"),
+        total_duration=Sum("duration_seconds", filter=Q(is_connected=True)),
         avg_duration=Avg("duration_seconds", filter=Q(is_connected=True)),
     )
     return {

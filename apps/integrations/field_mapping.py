@@ -96,6 +96,11 @@ def flatten_meta_field_data(field_data: list) -> dict:
     return out
 
 
+def _loose(name) -> str:
+    """'Company name', 'company_name', 'COMPANY-NAME?' → 'companyname'."""
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
 def apply_field_mapping(raw_fields: dict, mapping: dict | None) -> tuple[dict, dict]:
     """
     Apply the tenant's field mapping to a flat dict of incoming fields.
@@ -105,6 +110,11 @@ def apply_field_mapping(raw_fields: dict, mapping: dict | None) -> tuple[dict, d
       custom_values — {custom_field_key: value}
     """
     mapping = mapping or {}
+    # Match mapping keys loosely. The mapping screen stores the question as
+    # Meta labels it ("Company name", "BUDGET") while the lead's field_data is
+    # keyed by the field's name ("company_name", "budget") — an exact lookup
+    # missed every one, so mapped fields fell through and were never stored.
+    loose = {_loose(k): v for k, v in mapping.items()}
     lead_data: dict = {}
     custom_values: dict = {}
 
@@ -119,6 +129,8 @@ def apply_field_mapping(raw_fields: dict, mapping: dict | None) -> tuple[dict, d
 
         # Explicit tenant mapping wins; otherwise fall back to auto defaults.
         target = mapping.get(field_name)
+        if target is None:
+            target = loose.get(_loose(field_name))
         if target is None:
             target = AUTO_MAP.get(field_name.strip().lower().replace(" ", "_"))
 

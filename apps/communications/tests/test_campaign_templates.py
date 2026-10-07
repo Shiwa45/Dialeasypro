@@ -49,6 +49,8 @@ def _template(**overrides):
     fields = {
         "name": "diwali_offer", "category": "marketing", "language": "en",
         "body_text": "Hello {{1}}, our Diwali offer is live.",
+        # {{1}} must be mapped to a lead field or no campaign may use it.
+        "variable_mapping": {"1": "name"},
     }
     fields.update(overrides)
     return WhatsAppTemplate.objects.create(**fields)

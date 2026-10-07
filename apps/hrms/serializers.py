@@ -27,13 +27,16 @@ class EmployeeSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source="agent.email", read_only=True)
     role = serializers.CharField(source="agent.role", read_only=True)
     reporting_to_name = serializers.CharField(source="reporting_to.agent.name", read_only=True, default=None)
+    # The CRM login can be switched off while the employee record stays
+    # active (and on payroll); the roster flags that so HR can decide.
+    login_active = serializers.BooleanField(source="agent.is_active", read_only=True)
 
     class Meta:
         model = Employee
         fields = [
             "id", "agent", "name", "email", "role", "employee_code", "designation",
             "department", "employment_type", "reporting_to", "reporting_to_name",
-            "date_of_joining", "date_of_exit", "is_active",
+            "date_of_joining", "date_of_exit", "is_active", "login_active",
             "pan", "uan", "esi_number", "bank_account_number", "bank_ifsc",
         ]
         read_only_fields = ["id"]

@@ -33,9 +33,11 @@ class AgentProfileSerializer(serializers.ModelSerializer):
             "id", "email", "name", "phone", "employee_id",
             "role", "role_display", "is_tenant_admin",
             "profile_photo_url", "timezone", "language_preference",
-            "is_online", "last_active_at", "created_at",
+            "is_online", "last_active_at", "last_login", "total_login_count", "created_at",
         ]
-        read_only_fields = ["id", "email", "role", "is_tenant_admin", "created_at"]
+        read_only_fields = [
+            "id", "email", "role", "is_tenant_admin", "created_at", "last_login", "total_login_count",
+        ]
 
     def get_profile_photo_url(self, obj):
         if obj.profile_photo:
@@ -117,6 +119,9 @@ class AgentCreateSerializer(serializers.ModelSerializer):
             return normalized
         return value
 
+    def validate_working_days(self, value):
+        return _clean_working_days(value)
+
     def validate_role(self, value):
         # Only admins can create admins (enforced in view permissions)
         check_role_in_plan(value, self.context.get("request"))
@@ -136,6 +141,26 @@ class AgentCreateSerializer(serializers.ModelSerializer):
         agent.must_change_password = True
         agent.save()
         return agent
+
+
+def _clean_working_days(value):
+    """[0=Mon .. 6=Sun], de-duplicated and sorted; empty → Monday–Saturday."""
+    from apps.authentication.models import DEFAULT_WORKING_DAYS
+
+    if value in (None, ""):
+        return list(DEFAULT_WORKING_DAYS)
+    if not isinstance(value, (list, tuple)):
+        raise serializers.ValidationError("Use a list of day numbers, 0 = Monday … 6 = Sunday.")
+    days = set()
+    for d in value:
+        try:
+            d = int(d)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError(f"{d!r} is not a day number.")
+        if not 0 <= d <= 6:
+            raise serializers.ValidationError("Day numbers run from 0 (Monday) to 6 (Sunday).")
+        days.add(d)
+    return sorted(days) or list(DEFAULT_WORKING_DAYS)
 
 
 def check_role_in_plan(role, request):
@@ -189,10 +214,24 @@ class AgentUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Agent
+        # email is editable: the edit form always showed it as an input, but it
+        # was missing here, so a changed email was silently dropped.
         fields = [
-            "name", "phone", "employee_id", "role", "is_active",
+            "name", "email", "phone", "employee_id", "role", "is_active",
             "timezone", "shift_start", "shift_end", "working_days",
         ]
+
+    def validate_email(self, value):
+        value = (value or "").strip().lower()
+        clash = Agent.objects.filter(email__iexact=value)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError("Another agent already signs in with this email.")
+        return value
+
+    def validate_working_days(self, value):
+        return _clean_working_days(value)
 
     def validate_phone(self, value):
         if value:

@@ -4,7 +4,8 @@ from apps.communications.views import (
     WhatsAppTemplateListView, WhatsAppTemplateDetailView, WhatsAppMessageListView,
     SendWhatsAppView, SendSMSView, LogNativeWhatsAppView,
     BulkCampaignListCreateView, BulkCampaignDetailView,
-    BulkCampaignLaunchView, BulkCampaignPauseView,
+    BulkCampaignLaunchView,
+    CampaignRecipientListView, BulkCampaignPauseView,
     WhatsAppWebhookView, TemplateMediaUploadView,
     WhatsAppConfigView, WhatsAppConfigTestView,
     WhatsAppVerifyTokenView, WhatsAppConversationListView,
@@ -27,6 +28,7 @@ urlpatterns = [
     # Literal before "<uuid:pk>/" so it is not read as a campaign id.
     path("campaigns/preview-audience/", CampaignAudiencePreviewView.as_view(), name="api_campaign_preview_audience"),
     path("campaigns/<uuid:pk>/", BulkCampaignDetailView.as_view(), name="api_campaign_detail"),
+    path("campaigns/<uuid:pk>/recipients/", CampaignRecipientListView.as_view(), name="api_campaign_recipients"),
     path("campaigns/<uuid:pk>/launch/", BulkCampaignLaunchView.as_view(), name="api_campaign_launch"),
     path("campaigns/<uuid:pk>/pause/", BulkCampaignPauseView.as_view(), name="api_campaign_pause"),
     path("webhook/whatsapp/<str:provider>/", WhatsAppWebhookView.as_view(), name="api_wa_webhook"),

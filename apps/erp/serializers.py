@@ -46,7 +46,12 @@ class CustomerSerializer(serializers.ModelSerializer):
         return value.upper()
 
     def validate_state_code(self, value):
-        return value.upper()
+        from apps.core.constants import INDIAN_STATE_CODES, canonical_state_code
+
+        code = canonical_state_code(value)
+        if code and code not in INDIAN_STATE_CODES:
+            raise serializers.ValidationError(f'"{value}" is not an Indian state or UT code.')
+        return code
 
 
 class ProductSerializer(serializers.ModelSerializer):

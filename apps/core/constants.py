@@ -758,3 +758,15 @@ INDIAN_STATES = [
     ("UK", "Uttarakhand"),
     ("WB", "West Bengal"),
 ]
+
+# Other spellings of the same states/UTs in circulation (older GST code
+# lists, vehicle codes). The web app's customer form used these, while the
+# tenant's own state used the codes above — so a Telangana seller ("TS")
+# invoicing a Telangana customer ("TG") was charged IGST as if interstate.
+STATE_CODE_ALIASES = {"CT": "CG", "OR": "OD", "TG": "TS", "UT": "UK", "DD": "DN"}
+INDIAN_STATE_CODES = {code for code, _ in INDIAN_STATES}
+
+
+def canonical_state_code(code: str) -> str:
+    code = (code or "").strip().upper()
+    return STATE_CODE_ALIASES.get(code, code)

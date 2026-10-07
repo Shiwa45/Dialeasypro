@@ -48,6 +48,15 @@ class CallDisposition(TimeStampedModel):
         max_length=20, blank=True, default="", choices=LeadStatus.CHOICES,
         help_text="Move the lead to this status when a call is saved with this outcome. Blank = leave it.",
     )
+    # Whether this outcome means the call was answered. "Connected" used to be
+    # whatever the dialer sent, independent of the outcome the agent picked —
+    # so "Switched Off" calls counted as connected and "Already Purchased"
+    # ones as unanswered, and every connection rate was wrong. True/False make
+    # the outcome decide; None leaves it to the dialer.
+    marks_connected = models.BooleanField(
+        null=True, blank=True, default=None,
+        help_text="Answered (True), not answered (False), or let the dialer decide (empty).",
+    )
 
     class Meta:
         verbose_name = "Call Disposition"
@@ -155,6 +164,37 @@ class CallLog(TimeStampedModel):
             models.Index(fields=["started_at", "direction"]),
             models.Index(fields=["is_connected", "started_at"]),
         ]
+
+    def save(self, *args, **kwargs):
+        self.apply_outcome_rules()
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            kwargs["update_fields"] = list(set(update_fields) | {"is_connected", "duration_seconds"})
+        super().save(*args, **kwargs)
+
+    def apply_outcome_rules(self):
+        """
+        Keep `is_connected` and `duration_seconds` consistent with the call.
+
+        1. An outcome that says whether the call was answered decides
+           is_connected (see CallDisposition.marks_connected).
+        2. A connected call reported with no duration gets one from its own
+           timestamps — the dialer often sends start and end but duration 0,
+           which made every talk-time figure in the product read ~0.
+
+        An unanswered call keeps whatever duration it was given (a provider's
+        ring time); talk-time figures count connected calls only.
+        """
+        disposition = self.disposition if self.disposition_id else None
+        if disposition is not None and disposition.marks_connected is not None:
+            self.is_connected = disposition.marks_connected
+
+        if not self.is_connected:
+            return
+        if not self.duration_seconds and self.ended_at:
+            begin = self.connected_at or self.started_at
+            if begin and self.ended_at > begin:
+                self.duration_seconds = int((self.ended_at - begin).total_seconds())
 
     def __str__(self):
         direction = "→" if self.direction == CallDirection.OUTBOUND else "←"

@@ -810,7 +810,7 @@ class GstSummaryView(APIView):
             "b2c": render(b2c),
             "invoice_count": invoices.count(),
             "note": (
-                "Filing aid only. Credit notes raised outside this system, advances "
+                "Credit notes raised outside this system, advances "
                 "and reverse-charge supplies are not included — reconcile before filing."
             ),
         })

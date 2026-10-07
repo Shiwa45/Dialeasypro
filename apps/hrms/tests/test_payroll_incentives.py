@@ -25,8 +25,11 @@ PERIOD = date(2026, 9, 1)
 
 @pytest.fixture
 def agent(db):
+    # Works every day: these tests are about unrecorded days, and Monday–
+    # Saturday is now the default schedule (Sundays would be week-offs).
     return Agent.objects.create(
         name="Payroll Agent", email="payroll.agent@test.local", role="agent",
+        working_days=[0, 1, 2, 3, 4, 5, 6],
     )
 
 

@@ -74,10 +74,13 @@ def day_off_status(day, employee, holidays=None) -> str | None:
     if is_holiday:
         return AttendanceStatus.HOLIDAY
 
-    working_days = employee.agent.working_days or []
-    # Agent.working_days is [0=Mon .. 6=Sun]. Empty means "no schedule set" —
-    # treat every day as a working day rather than marking everything a week off.
-    if working_days and day.weekday() not in working_days:
+    # Agent.working_days is [0=Mon .. 6=Sun]. Empty means "no schedule set":
+    # that is Monday–Saturday, not every day — "every day" marked each Sunday
+    # absent and payroll docked a day for it.
+    from apps.authentication.models import DEFAULT_WORKING_DAYS
+
+    working_days = employee.agent.working_days or DEFAULT_WORKING_DAYS
+    if day.weekday() not in working_days:
         return AttendanceStatus.WEEK_OFF
     return None
 

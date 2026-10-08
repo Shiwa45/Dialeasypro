@@ -132,6 +132,16 @@ class CallLogSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "duration_seconds", "is_connected"]
 
 
+def _future_followup(value):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    if value is not None and value < timezone.now() - timedelta(minutes=5):
+        raise serializers.ValidationError("The call-back time must be in the future.")
+    return value
+
+
 class CallLogCreateSerializer(serializers.ModelSerializer):
     """
     A call logged by an agent (the app's post-call screen, the web's Log call).
@@ -152,6 +162,8 @@ class CallLogCreateSerializer(serializers.ModelSerializer):
     )
     is_connected = serializers.BooleanField(required=False)
     client_call_id = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    # When to call back, for an answered call (booked as a follow-up).
+    followup_at = serializers.DateTimeField(required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = CallLog
@@ -159,9 +171,12 @@ class CallLogCreateSerializer(serializers.ModelSerializer):
         # no end time (the app always sends one).
         fields = [
             "id", "lead", "direction", "phone_number", "started_at", "ended_at",
-            "duration_seconds", "is_connected", "disposition", "notes", "client_call_id",
+            "duration_seconds", "is_connected", "disposition", "notes", "client_call_id", "followup_at",
         ]
         read_only_fields = ["id"]
+
+    def validate_followup_at(self, value):
+        return _future_followup(value)
 
     def validate_disposition(self, disposition):
         if disposition is not None and not disposition.is_active:
@@ -223,6 +238,10 @@ class CallOutcomeSerializer(serializers.Serializer):
     is_connected = serializers.BooleanField(required=False)
     duration_seconds = serializers.IntegerField(min_value=0, required=False)
     notes = serializers.CharField(required=False, allow_blank=True)
+    followup_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate_followup_at(self, value):
+        return _future_followup(value)
 
     def validate(self, data):
         from apps.calls.services.outcomes import OutcomeMismatch, check_outcome_matches

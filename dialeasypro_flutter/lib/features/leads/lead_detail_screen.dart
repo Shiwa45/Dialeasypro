@@ -17,6 +17,7 @@ import '../../data/services/services.dart';
 import '../auth/auth_provider.dart';
 import '../dialer/dialer_state.dart';
 import '../../data/services/api_client.dart';
+import '../calls/call_outcome_sheet.dart';
 
 final _leadDetailProvider = FutureProvider.autoDispose.family<Lead, int>((_, id) => LeadsService.instance.getLead(id));
 final _notesProvider = FutureProvider.autoDispose.family<List<LeadNote>, int>((_, id) => LeadsService.instance.listNotes(id).then((r) => r.results));
@@ -318,8 +319,20 @@ class _OverviewTab extends StatelessWidget {
             const Expanded(flex: 2, child: Text('SCORE', style: AppTextStyles.label)),
             Expanded(flex: 3, child: ScoreBar(score: lead.score)),
           ]),
-          const Divider(), InfoRow(label: 'Contacts', value: '${lead.contactCount}×'),
-          const Divider(), InfoRow(label: 'Last Contact', value: Fmt.relative(lead.lastContactedAt)),
+          // Dials vs answered: the stage alone can't tell "never reached"
+          // from "spoke to them".
+          const Divider(), InfoRow(label: 'Calls', value: lead.dialAttempts == 0
+              ? 'Not called yet'
+              : '${lead.dialAttempts} dialled · ${lead.connectedCalls} answered'),
+          if (lead.dialAttempts > 0) ...[
+            const Divider(),
+            InfoRow(label: 'Last Call', value: [
+              lead.lastCallConnected == true ? 'Answered' : 'Not answered',
+              if (lead.lastDispositionName != null) lead.lastDispositionName!,
+              Fmt.relative(lead.lastDialedAt),
+            ].join(' · ')),
+          ],
+          const Divider(), InfoRow(label: 'Last Spoke', value: Fmt.relative(lead.lastContactedAt)),
           const Divider(), InfoRow(label: 'Next F/U', value: lead.nextFollowupAt != null ? Fmt.dateTime(lead.nextFollowupAt) : '—'),
           const Divider(), InfoRow(label: 'Created', value: Fmt.date(lead.createdAt)),
         ])).animate().fadeIn(delay: 100.ms),
@@ -553,10 +566,23 @@ class _CallsTab extends ConsumerWidget {
                   Row(children: [
                     Text(c.durationDisplay, style: AppTextStyles.h5),
                     const SizedBox(width: 8),
-                    if (c.isConnected) const TagChip(label: 'Connected', backgroundColor: AppColors.success, textColor: AppColors.white)
-                    else const TagChip(label: 'No Answer', backgroundColor: AppColors.greyLight),
-                    if (c.dispositionName != null) Padding(padding: const EdgeInsets.only(left: 6), child: TagChip(label: c.dispositionName!)),
+                    if (c.isConnected) const TagChip(label: 'Answered', backgroundColor: AppColors.success, textColor: AppColors.white)
+                    else const TagChip(label: 'Not answered', backgroundColor: AppColors.greyLight),
                   ]),
+                  Padding(padding: const EdgeInsets.only(top: 4), child: c.dispositionName != null
+                      ? TagChip(label: c.dispositionName!)
+                      : GestureDetector(
+                          // Saved without an outcome (click-to-call, a
+                          // provider call): set it here.
+                          onTap: () async {
+                            final updated = await showCallOutcomeSheet(context, c);
+                            if (updated != null) {
+                              ref.invalidate(_callsForLeadProvider(leadId));
+                              ref.invalidate(_leadDetailProvider(leadId));
+                            }
+                          },
+                          child: const TagChip(label: '⚠ Set outcome', backgroundColor: AppColors.warningBg),
+                        )),
                   const SizedBox(height: 3),
                   Text(Fmt.relative(c.startedAt), style: AppTextStyles.caption),
                   if (c.notes.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text(c.notes, style: AppTextStyles.caption, maxLines: 2, overflow: TextOverflow.ellipsis)),

@@ -280,6 +280,12 @@ All 28 bugs are fixed, using the plan's defaults for the open decisions:
 - Each save sends `client_call_id`, and a refused save shows the server's reason.
 - Status changes to Lost, Invalid or Converted ask for a reason.
 
+- **History**: filter chips are grouped Answered / Not answered, with a "Needs outcome" filter. Each call shows Answered or Not answered, and a call without an outcome has "⚠ Set outcome". That opens a sheet (`features/calls/call_outcome_sheet.dart`) that asks Answered? first and calls `PATCH /calls/{id}/outcome/`.
+- **Lead page**: the Calls tab has the same "Set outcome" action. The Overview shows "Calls: X dialled · Y answered" and the last call's outcome.
+- **Dialer lead card and leads list**: show how the last call went, so the agent knows before dialling again.
+- An unanswered call is saved with 0 s talk time (ring time used to show as call duration). Dispositions cached by an older version are sorted into answered/not by name, so an offline agent can still save a call.
+- New tests: `test/disposition_model_test.dart`. `test/app_update_test.dart` is updated.
+
 I couldn't compile it here because the Flutter SDK download is blocked. Run `flutter analyze && flutter test` before building. The widget test `test/disposition_dropdown_test.dart` is updated for the new flow.
 
 **Deploy order:**
@@ -288,3 +294,15 @@ I couldn't compile it here because the Flutter SDK download is blocked. Run `flu
 3. App build.
 
 Run `python manage.py seed_dispositions --all` only if you want to re-run the upgrade by hand.
+
+### Change (8 Oct): automatic follow-ups only for Busy, Call back later and Voicemail
+
+- Only **Busy** (1 h), **Call back later** (4 h) and **Voicemail / IVR** (24 h) book a follow-up automatically.
+- Every other built-in outcome books none: Interested, Ringing / no answer, Switched off, Not reachable, Rejected, Send details and the rest. Admins can still set hours on any outcome in Settings.
+- Migration `calls/0009`:
+  - clears the hours on the other built-in outcomes;
+  - restores the default hours on the three if they had none;
+  - leaves outcomes a tenant added themselves alone;
+  - leaves follow-ups already booked as they are.
+- At most one automatic follow-up is open per lead. Reaching the lead, or closing it, retires a pending one.
+- The agent can set an exact follow-up time when saving a call: an optional field in the web Log call dialog (`followup_at`), and the app's picker, which opens for Call back later. This replaces the automatic one.

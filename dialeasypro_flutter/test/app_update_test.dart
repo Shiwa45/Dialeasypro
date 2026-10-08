@@ -69,13 +69,15 @@ void main() {
     testWidgets('shows what is known', (tester) async {
       await pump(tester, lead({
         'source_display': 'IndiaMART', 'budget': '5000000', 'email': 'ravi@example.com',
-        'contact_count': 3,
+        'dial_attempts': 3, 'connected_calls': 1,
+        'last_call_connected': true, 'last_disposition_name': 'Call back later',
       }));
 
       expect(find.text('IndiaMART'), findsOneWidget);
       expect(find.text('₹50.0L'), findsOneWidget);
       expect(find.text('ravi@example.com'), findsOneWidget);
-      expect(find.text('3×'), findsOneWidget);
+      expect(find.text('3× · 1 answered'), findsOneWidget);
+      expect(find.text('Answered · Call back later'), findsOneWidget, reason: 'how the last call went');
     });
 
     testWidgets('leaves out what is empty', (tester) async {

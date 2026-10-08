@@ -624,10 +624,9 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
       return;
     }
 
-    // The follow-up the agent chose. A disposition's automatic one is booked
-    // by the server when the call is saved (calls/signals.py) — the app used
-    // to book it again here, so every such outcome left two follow-ups and
-    // two sets of reminders. One scheduled here replaces the automatic one.
+    // The follow-up the agent chose. The server books one automatically only
+    // for Busy, Call back later and Voicemail; one scheduled here replaces it.
+    // For any other outcome this is the only follow-up there is.
     if (_scheduleFollowup && _followupDate != null) {
       try {
         await LeadsService.instance.createFollowup(
@@ -823,7 +822,9 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
                 HapticFeedback.selectionClick();
                 setState(() {
                   _selected = dispositions.firstWhere((d) => d.id == id);
-                  // "Call back later": the agent says when, straight away.
+                  // "Call back later": offer the exact time straight away.
+                  // Left empty, the server books it in the outcome's default
+                  // hours (only Busy, Call back later and Voicemail book one).
                   if (_selected!.slug == 'callback') _scheduleFollowup = true;
                 });
               },

@@ -10,13 +10,18 @@ import '../../data/models/models.dart';
 import '../../data/services/services.dart';
 import '../ai/call_insight_sheet.dart';
 import '../features_provider.dart';
+import 'call_outcome_sheet.dart';
 
-/// The outcome the History list is filtered to; null shows every call.
-final _dispositionFilterProvider = StateProvider.autoDispose<int?>((_) => null);
+/// What the History list is filtered to: null = every call, 'none' = calls
+/// still waiting for an outcome, otherwise a disposition id.
+final _dispositionFilterProvider = StateProvider.autoDispose<String?>((_) => null);
 
 final _callsListProvider = FutureProvider.autoDispose<PaginatedResponse<CallLog>>((ref) {
-  final disposition = ref.watch(_dispositionFilterProvider);
-  return CallsService.instance.listCalls(disposition: disposition);
+  final filter = ref.watch(_dispositionFilterProvider);
+  return CallsService.instance.listCalls(
+    needsOutcome: filter == 'none',
+    disposition: filter == null || filter == 'none' ? null : int.tryParse(filter),
+  );
 });
 
 final _historyDispositionsProvider = FutureProvider.autoDispose<List<CallDisposition>>(
@@ -56,9 +61,9 @@ class CallsScreen extends ConsumerWidget {
                   border: Border(bottom: BorderSide(color: AppColors.line, width: 1)),
                 ),
                 child: Row(children: [
-                  Expanded(child: _CallStat(label: 'TODAY', value: '${today['total'] ?? 0}', sub: '${today['connected'] ?? 0} connected')),
+                  Expanded(child: _CallStat(label: 'TODAY', value: '${today['total'] ?? 0}', sub: '${today['connected'] ?? 0} answered')),
                   Container(width: 2, height: 40, color: AppColors.muted.withOpacity(0.3)),
-                  Expanded(child: _CallStat(label: 'RATE', value: '${period['connection_rate'] ?? 0}%', sub: 'connection')),
+                  Expanded(child: _CallStat(label: 'RATE', value: '${period['connection_rate'] ?? 0}%', sub: 'answered')),
                   Container(width: 2, height: 40, color: AppColors.muted.withOpacity(0.3)),
                   Expanded(child: _CallStat(label: 'AVG', value: Fmt.duration((period['avg_duration_seconds'] as int?) ?? 0), sub: 'duration')),
                 ]),
@@ -79,13 +84,23 @@ class CallsScreen extends ConsumerWidget {
                     selected: filter == null,
                     onTap: () => ref.read(_dispositionFilterProvider.notifier).state = null,
                   ),
-                  for (final d in dispositions)
-                    _FilterChip(
-                      label: d.name,
-                      selected: filter == d.id,
-                      onTap: () => ref.read(_dispositionFilterProvider.notifier).state =
-                          filter == d.id ? null : d.id,
-                    ),
+                  _FilterChip(
+                    label: 'Needs outcome',
+                    selected: filter == 'none',
+                    onTap: () => ref.read(_dispositionFilterProvider.notifier).state =
+                        filter == 'none' ? null : 'none',
+                  ),
+                  // Answered-call outcomes first, then unanswered ones.
+                  for (final group in [true, false]) ...[
+                    _GroupLabel(group ? 'ANSWERED' : 'NOT ANSWERED'),
+                    for (final d in dispositions.where((d) => d.isConnectedOutcome == group))
+                      _FilterChip(
+                        label: d.name,
+                        selected: filter == '${d.id}',
+                        onTap: () => ref.read(_dispositionFilterProvider.notifier).state =
+                            filter == '${d.id}' ? null : '${d.id}',
+                      ),
+                  ],
                 ],
               ),
             )),
@@ -96,7 +111,12 @@ class CallsScreen extends ConsumerWidget {
             ))),
             error: (_, __) => const SliverFillRemaining(child: EmptyStateView(icon: Icons.error_outline, title: 'Failed')),
             data: (res) => res.results.isEmpty
-                ? SliverFillRemaining(child: filter != null
+                ? SliverFillRemaining(child: filter == 'none'
+                    ? const EmptyStateView(
+                        icon: Icons.task_alt, title: 'Every call has an outcome',
+                        message: 'Nothing waiting',
+                      )
+                    : filter != null
                     ? const EmptyStateView(
                         icon: Icons.filter_alt_off, title: 'No calls with this outcome',
                         message: 'Pick another outcome, or All',
@@ -128,8 +148,8 @@ class CallsScreen extends ConsumerWidget {
                               Row(children: [
                                 Expanded(child: Text(c.leadName ?? c.phoneNumber, style: AppTextStyles.h5, overflow: TextOverflow.ellipsis)),
                                 const SizedBox(width: 6),
-                                if (c.isConnected) const TagChip(label: '✓', backgroundColor: AppColors.success, textColor: AppColors.white)
-                                else const TagChip(label: '✕', backgroundColor: AppColors.greyLight),
+                                if (c.isConnected) const TagChip(label: '✓ Answered', backgroundColor: AppColors.success, textColor: AppColors.white)
+                                else const TagChip(label: '✕ Not answered', backgroundColor: AppColors.greyLight),
                               ]),
                               const SizedBox(height: 3),
                               Row(children: [
@@ -138,7 +158,17 @@ class CallsScreen extends ConsumerWidget {
                                 Text(Fmt.relative(c.startedAt), style: AppTextStyles.caption),
                               ]),
                               if (c.dispositionName != null) Padding(padding: const EdgeInsets.only(top: 4),
-                                child: TagChip(label: c.dispositionName!)),
+                                child: TagChip(label: c.dispositionName!))
+                              else Padding(padding: const EdgeInsets.only(top: 4),
+                                child: GestureDetector(
+                                  // Saved without an outcome (click-to-call, a
+                                  // provider call): set it here.
+                                  onTap: () async {
+                                    final updated = await showCallOutcomeSheet(context, c);
+                                    if (updated != null) ref.invalidate(_callsListProvider);
+                                  },
+                                  child: const TagChip(label: '⚠ Set outcome', backgroundColor: AppColors.warningBg),
+                                )),
                             ])),
                             // Only offered when the call has audio to analyse.
                             if (showInsights && c.recordingUrl != null)
@@ -198,5 +228,18 @@ class _FilterChip extends StatelessWidget {
         )),
       ),
     ),
+  );
+}
+
+class _GroupLabel extends StatelessWidget {
+  final String text;
+  const _GroupLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(left: 4, right: 8),
+    child: Center(child: Text(text, style: const TextStyle(
+      fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 10,
+      color: AppColors.muted, letterSpacing: 0.5))),
   );
 }

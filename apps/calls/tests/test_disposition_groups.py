@@ -242,13 +242,99 @@ def test_wrong_number_makes_the_lead_invalid_not_lost(asha, outcomes):
 def test_only_one_automatic_follow_up_stays_open(asha, outcomes):
     lead = _lead(asha)
 
-    _call(asha, lead, outcomes["no_answer"], minutes_ago=10)
-    _call(asha, lead, outcomes["interested"], minutes_ago=5)
-    _call(asha, lead, outcomes["callback"])
+    _call(asha, lead, outcomes["busy"], minutes_ago=10)
+    _call(asha, lead, outcomes["voicemail"])
 
     open_auto = FollowUp.objects.filter(lead=lead, is_auto=True, is_completed=False)
     assert open_auto.count() == 1
-    assert "Call back later" in open_auto.get().notes
+    assert "Voicemail" in open_auto.get().notes
+
+
+@pytest.mark.parametrize("slug", ["busy", "callback", "voicemail"])
+def test_busy_callback_and_voicemail_book_a_follow_up(asha, outcomes, slug):
+    lead = _lead(asha)
+
+    _call(asha, lead, outcomes[slug])
+
+    assert FollowUp.objects.filter(lead=lead, is_auto=True, is_completed=False).count() == 1
+
+
+@pytest.mark.parametrize("slug", [
+    "interested", "send_details", "meeting_scheduled", "call_dropped", "language_barrier",
+    "no_answer", "switched_off", "not_reachable", "rejected",
+])
+def test_other_outcomes_book_no_follow_up(asha, outcomes, slug):
+    """Interested, Ringing, Switched off… used to book one for every lead."""
+    lead = _lead(asha)
+
+    _call(asha, lead, outcomes[slug])
+
+    assert not FollowUp.objects.filter(lead=lead).exists()
+
+
+def test_reaching_the_lead_retires_the_pending_retry(asha, outcomes):
+    lead = _lead(asha)
+    _call(asha, lead, outcomes["busy"], minutes_ago=10)
+    assert FollowUp.objects.filter(lead=lead, is_auto=True, is_completed=False).count() == 1
+
+    _call(asha, lead, outcomes["interested"])
+
+    assert not FollowUp.objects.filter(lead=lead, is_completed=False).exists()
+
+
+def test_the_agent_sets_the_call_back_time_with_the_call(asha, outcomes):
+    lead = _lead(asha)
+    when = (timezone.now() + timedelta(days=2)).replace(microsecond=0)
+
+    r = _post_call(asha, lead=lead.pk, is_connected=True, disposition=outcomes["callback"].pk,
+                   client_call_id="c-fu", followup_at=when.isoformat())
+
+    assert r.status_code == 201, r.data
+    fu = FollowUp.objects.get(lead=lead)
+    assert fu.is_auto is False and fu.scheduled_at == when
+    assert "Call back later" in fu.notes
+
+
+def test_a_call_back_time_in_the_past_is_refused(asha, outcomes):
+    lead = _lead(asha)
+
+    r = _post_call(asha, lead=lead.pk, is_connected=True, disposition=outcomes["callback"].pk,
+                   client_call_id="c-fu2", followup_at=(timezone.now() - timedelta(days=1)).isoformat())
+
+    assert r.status_code == 400
+
+
+def test_the_defaults_book_follow_ups_only_for_busy_callback_and_voicemail(outcomes):
+    booking = set(CallDisposition.objects.exclude(auto_followup_hours=None).values_list("slug", flat=True))
+    assert booking == {"busy", "callback", "voicemail"}
+
+
+def test_an_admin_can_still_turn_it_on_for_another_outcome(admin, asha, outcomes):
+    request = APIRequestFactory().patch(
+        f"/api/v1/calls/dispositions/{outcomes['no_answer'].pk}/", {"auto_followup_hours": 3}, format="json")
+    force_authenticate(request, user=admin)
+    r = call_views.CallDispositionDetailView.as_view()(request, pk=outcomes["no_answer"].pk)
+    assert r.status_code == 200, r.data
+
+    lead = _lead(asha)
+    _call(asha, lead, CallDisposition.objects.get(pk=outcomes["no_answer"].pk))
+    assert FollowUp.objects.filter(lead=lead, is_auto=True).count() == 1
+
+
+def test_the_migration_keeps_only_the_three(outcomes):
+    migration = importlib.import_module("apps.calls.migrations.0009_auto_followup_busy_callback_voicemail")
+    CallDisposition.objects.filter(slug__in=["interested", "no_answer"]).update(auto_followup_hours=24)
+    CallDisposition.objects.filter(slug="callback").update(auto_followup_hours=None)
+    CallDisposition.objects.filter(slug="busy").update(auto_followup_hours=3)
+    custom = CallDisposition.objects.create(name="Site visit", slug="site-visit-m", auto_followup_hours=48)
+
+    migration.forwards(django_apps, None)
+
+    hours = dict(CallDisposition.objects.values_list("slug", "auto_followup_hours"))
+    assert hours["interested"] is None and hours["no_answer"] is None
+    assert hours["callback"] == 4, "turned back on with its default"
+    assert hours["busy"] == 3, "a tenant's own hours are kept"
+    assert hours[custom.slug] == 48, "outcomes a tenant added keep their setting"
 
 
 def test_a_hand_booked_follow_up_is_left_alone(asha, outcomes):

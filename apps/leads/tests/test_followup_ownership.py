@@ -228,7 +228,8 @@ def test_managers_keep_reminders_for_unassigned_leads_they_scheduled(manager):
 # ---- Auto follow-ups and completion -------------------------------------
 
 def test_the_call_outcome_auto_follow_up_goes_to_the_lead_agent(lead, asha, lead_tl):
-    callback = CallDisposition.objects.create(name="Call back", slug="call-back-x", auto_followup_hours=24)
+    callback = CallDisposition.objects.create(name="No answer", slug="no-answer-x", auto_followup_hours=24,
+                                              category="not_connected")
 
     CallLog.objects.create(agent=lead_tl, lead=lead, phone_number=lead.phone, disposition=callback)
 

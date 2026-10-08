@@ -138,12 +138,16 @@ def _replace_auto_followups(lead, note: str) -> None:
         retire_notifications(open_auto)
 
 
-def apply_call_outcome(call, *, actor=None, new_dial: bool = True) -> None:
+def apply_call_outcome(call, *, actor=None, new_dial: bool = True, followup_at=None) -> None:
     """
     Bring the call's lead up to date with this call.
 
     new_dial=False when an outcome is set on a call that already counted as
     a dial (click-to-call, then "Set outcome").
+
+    followup_at: when the agent said to call back (an answered call). It is
+    booked as an ordinary follow-up — answered-call outcomes never book one
+    automatically.
     """
     from apps.leads.models import FollowUp, Lead, LeadActivity
 
@@ -209,20 +213,33 @@ def apply_call_outcome(call, *, actor=None, new_dial: bool = True) -> None:
         },
     )
 
-    # ---- Follow-ups: at most one open automatic one --------------------
-    if disposition is None:
+    # ---- Follow-ups -------------------------------------------------------
+    # Only an outcome with auto_followup_hours books a follow-up on its own —
+    # by default Busy, Call back later and Voicemail; "Interested", "Ringing"
+    # and the rest used to book one too, for every such lead. At most one
+    # automatic follow-up is open per lead. A time the agent gives
+    # (followup_at) replaces it. Once the lead has been reached, or closed, a
+    # pending automatic one is retired.
+    if disposition is None and followup_at is None:
         return
-    closes = (status or lead.status) in LeadStatus.FINAL_STATUSES or disposition.sets_dnd
-    if closes or disposition.auto_followup_hours:
-        _replace_auto_followups(lead, f"Replaced after call outcome: {disposition.name}")
-    if not closes and disposition.auto_followup_hours:
+    assignee = lead.assigned_to_id or call.agent_id  # the lead's agent, not necessarily the caller
+    closes = (status or lead.status) in LeadStatus.FINAL_STATUSES or (disposition is not None and disposition.sets_dnd)
+    retry_hours = disposition.auto_followup_hours if disposition is not None else None
+    label = disposition.name if disposition is not None else "call"
+    if closes or call.is_connected or retry_hours or followup_at:
+        _replace_auto_followups(lead, f"Replaced after call outcome: {label}")
+    if not closes and retry_hours and not followup_at:
         FollowUp.objects.create(
-            lead=lead,
-            # The lead's agent, not necessarily whoever made this call.
-            assigned_to_id=lead.assigned_to_id or call.agent_id,
-            followup_type="call",
-            scheduled_at=timezone.now() + timedelta(hours=disposition.auto_followup_hours),
-            notes=f"Auto-scheduled after call outcome: {disposition.name}",
+            lead=lead, assigned_to_id=assignee, followup_type="call",
+            scheduled_at=timezone.now() + timedelta(hours=retry_hours),
+            notes=f"Auto-scheduled after call outcome: {label}",
             is_auto=True,
+        )
+    if followup_at and not closes:
+        FollowUp.objects.create(
+            lead=lead, assigned_to_id=assignee, followup_type="call",
+            scheduled_at=followup_at,
+            notes=f"Call back — {label}" + (f": {call.notes}" if call.notes else ""),
+            is_auto=False,
         )
     lead.refresh_next_followup()

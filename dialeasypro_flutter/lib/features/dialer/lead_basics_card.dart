@@ -30,8 +30,17 @@ class LeadBasicsCard extends StatelessWidget {
         (Icons.phone_forwarded_outlined, 'Alt. phone', Fmt.displayPhone(lead.alternatePhone)),
       if ([lead.city, lead.state].any((v) => v.isNotEmpty))
         (Icons.place_outlined, 'Location', [lead.city, lead.state].where((v) => v.isNotEmpty).join(', ')),
-      (Icons.call_made, 'Called before', lead.contactCount == 0 ? 'Never' : '${lead.contactCount}×'),
-      if (_has(lead.lastContactedAt)) (Icons.history, 'Last contact', Fmt.relative(lead.lastContactedAt)),
+      (Icons.call_made, 'Called before', lead.dialAttempts == 0
+          ? 'Never'
+          : '${lead.dialAttempts}× · ${lead.connectedCalls} answered'),
+      // What happened last time, so the agent doesn't open with the wrong pitch.
+      if (lead.dialAttempts > 0)
+        (Icons.history, 'Last call', [
+          lead.lastCallConnected == true ? 'Answered' : 'Not answered',
+          if (lead.lastDispositionName != null) lead.lastDispositionName!,
+          if (_has(lead.lastDialedAt)) Fmt.relative(lead.lastDialedAt),
+        ].join(' · ')),
+      if (_has(lead.lastContactedAt)) (Icons.record_voice_over_outlined, 'Last spoke', Fmt.relative(lead.lastContactedAt)),
       if (_has(lead.nextFollowupAt))
         (Icons.event_outlined, lead.followupOverdue ? 'Follow-up (overdue)' : 'Follow-up',
          Fmt.dateTime(lead.nextFollowupAt)),

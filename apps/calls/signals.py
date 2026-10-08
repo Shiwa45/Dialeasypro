@@ -30,6 +30,9 @@ def calllog_post_save(sender, instance, created, **kwargs):
     from apps.calls.services.outcomes import apply_call_outcome
 
     try:
-        apply_call_outcome(instance, actor=getattr(instance, "_actor", None))
+        apply_call_outcome(
+            instance, actor=getattr(instance, "_actor", None),
+            followup_at=getattr(instance, "_followup_at", None),
+        )
     except Exception as exc:  # noqa: BLE001 — never lose the call itself
         logger.warning(f"[Signal] Could not apply call {instance.pk} to its lead: {exc}", exc_info=True)

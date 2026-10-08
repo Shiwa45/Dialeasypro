@@ -126,8 +126,10 @@ class CallLogListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         # The lead is brought up to date — status, counters, activity, auto
         # follow-up — by the CallLog post_save signal (calls/services/outcomes).
-        call = CallLog(agent=self.request.user, **serializer.validated_data)
+        data = dict(serializer.validated_data)
+        call = CallLog(agent=self.request.user, **{k: v for k, v in data.items() if k != "followup_at"})
         call._actor = self.request.user
+        call._followup_at = data.get("followup_at")
         call.save()
         serializer.instance = call
 
@@ -172,7 +174,7 @@ class CallOutcomeView(APIView):
             call.notes = data["notes"]
             fields.append("notes")
         call.save(update_fields=fields)
-        apply_call_outcome(call, actor=request.user, new_dial=False)
+        apply_call_outcome(call, actor=request.user, new_dial=False, followup_at=data.get("followup_at"))
 
         call = CallLog.objects.select_related("agent", "lead", "disposition", "recording").get(pk=call.pk)
         return Response(CallLogSerializer(call, context={"request": request}).data)

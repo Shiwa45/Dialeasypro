@@ -114,6 +114,8 @@ class CallsService {
   Future<PaginatedResponse<CallLog>> listCalls({
     int page = 1, String? leadId, String? direction, String? connected,
     String? dateFrom, String? dateTo, int? disposition,
+    /// Only calls still waiting for an outcome.
+    bool needsOutcome = false,
   }) async {
     final r = await _dio.get('/calls/', queryParameters: {
       'page': page, 'page_size': 25,
@@ -122,10 +124,23 @@ class CallsService {
       if (connected != null && connected.isNotEmpty) 'connected': connected,
       if (dateFrom != null) 'date_from': dateFrom,
       if (dateTo != null) 'date_to': dateTo,
-      if (disposition != null) 'disposition': disposition,
+      if (needsOutcome) 'disposition': 'none'
+      else if (disposition != null) 'disposition': disposition,
     });
     return PaginatedResponse.fromJson(r.data, CallLog.fromJson);
   }
+
+  /// Set the outcome of a call saved without one. The outcome must belong to
+  /// the call status (answered / not) — the server refuses a mismatch.
+  Future<CallLog> setOutcome(String callId, {
+    required int disposition, required bool connected, int? durationSeconds, String? notes,
+  }) async =>
+      CallLog.fromJson((await _dio.patch('/calls/$callId/outcome/', data: {
+        'disposition': disposition,
+        'is_connected': connected,
+        if (durationSeconds != null) 'duration_seconds': durationSeconds,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      })).data);
 
   Future<CallLog> createCall(Map<String, dynamic> data) async =>
       CallLog.fromJson((await _dio.post('/calls/', data: data)).data);

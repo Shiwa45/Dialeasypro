@@ -130,9 +130,21 @@ class Lead {
   final String? assignedToName, budget, dealValue, nextFollowupAt, lastContactedAt;
   final String requirement;
   final bool followupOverdue, isDnd;
+  /// Answered calls (the server counts only those now).
   final int contactCount;
   final List<String> tags;
   final String createdAt;
+
+  // ---- What the lead's calls came to (kept up to date by the server) ----
+  /// Outcome of the most recent call that has one.
+  final String? lastDispositionName;
+  /// 'connected' / 'not_connected' — which group that outcome is in.
+  final String? lastDispositionCategory;
+  /// Whether the most recent call was answered (null: never called).
+  final bool? lastCallConnected;
+  final String? lastDialedAt;
+  /// Calls made to the lead, and how many of them were answered.
+  final int dialAttempts, connectedCalls;
 
   /// Custom field values. The app never parsed these, so every tenant's
   /// custom fields — imported from CSV, set on the web, the fields a sales
@@ -160,6 +172,8 @@ class Lead {
     this.requirement = '', this.followupOverdue = false, this.isDnd = false,
     this.contactCount = 0, this.tags = const [], required this.createdAt,
     this.customFields = const [], this.customFieldsLoaded = false,
+    this.lastDispositionName, this.lastDispositionCategory, this.lastCallConnected,
+    this.lastDialedAt, this.dialAttempts = 0, this.connectedCalls = 0,
   });
 
   factory Lead.fromJson(Map<String, dynamic> j) => Lead(
@@ -198,6 +212,13 @@ class Lead {
     ],
     customFieldsLoaded: j.containsKey('custom_field_values'),
     createdAt: j['created_at'] as String? ?? '',
+    lastDispositionName: j['last_disposition_name'] as String?,
+    lastDispositionCategory: j['last_disposition_category'] as String?,
+    lastCallConnected: j['last_call_connected'] as bool?,
+    lastDialedAt: j['last_dialed_at'] as String?,
+    // An older server has no counters: fall back to the contact count.
+    dialAttempts: (j['dial_attempts'] as num?)?.toInt() ?? (j['contact_count'] as num?)?.toInt() ?? 0,
+    connectedCalls: (j['connected_calls'] as num?)?.toInt() ?? 0,
   );
 
   String get initials => name.split(' ').map((n) => n.isNotEmpty ? n[0] : '').take(2).join().toUpperCase();
@@ -315,13 +336,19 @@ class CallLog {
   final int durationSeconds;
   final bool isConnected;
   final int? disposition;
+  /// 'connected' / 'not_connected' — the group of the call's outcome.
+  final String? dispositionCategory;
+
+  /// Saved without an outcome (a click-to-call, a provider call): the agent
+  /// still has to say how it went.
+  bool get needsOutcome => disposition == null;
 
   const CallLog({
     required this.id, this.agent, this.agentName, this.lead, this.leadName,
     required this.direction, required this.phoneNumber, required this.startedAt,
     this.endedAt, this.durationSeconds = 0, this.durationDisplay = '—',
     this.isConnected = false, this.disposition, this.dispositionName,
-    this.notes = '', this.provider = '', this.recordingUrl,
+    this.notes = '', this.provider = '', this.recordingUrl, this.dispositionCategory,
   });
 
   factory CallLog.fromJson(Map<String, dynamic> j) => CallLog(
@@ -339,6 +366,7 @@ class CallLog {
     isConnected: j['is_connected'] as bool? ?? false,
     disposition: j['disposition'] as int?,
     dispositionName: j['disposition_name'] as String?,
+    dispositionCategory: j['disposition_category'] as String?,
     notes: j['notes'] as String? ?? '',
     provider: j['provider'] as String? ?? '',
     recordingUrl: _extractRecordingUrl(j),
@@ -353,6 +381,10 @@ String? _extractRecordingUrl(Map<String, dynamic> j) {
   }
   return j['recording_url'] as String?;
 }
+
+final _notConnectedWords = RegExp(
+    r'not reachable|unreachable|busy|switched off|switch off|voicemail|voice mail|no answer|'
+    r'not answered|not connected|ringing|rnr|out of service|invalid number|rejected|ivr');
 
 class CallDisposition {
   final int id;
@@ -385,9 +417,14 @@ class CallDisposition {
   }
 
   factory CallDisposition.fromJson(Map<String, dynamic> j) {
-    // An older server sends marks_connected (true / false / null) instead.
+    // An older server (or a list cached before this version) has no
+    // category: use marks_connected, else read the name.
     final marks = j['marks_connected'];
-    final category = j['category'] as String? ?? (marks == false ? 'not_connected' : 'connected');
+    final category = j['category'] as String? ??
+        (marks == true ? 'connected'
+        : marks == false ? 'not_connected'
+        : _notConnectedWords.hasMatch('${j['slug'] ?? ''} ${j['name'] ?? ''}'.toLowerCase().replaceAll('_', ' '))
+            ? 'not_connected' : 'connected');
     return CallDisposition(
       id: j['id'] as int,
       name: j['name'] as String? ?? '',

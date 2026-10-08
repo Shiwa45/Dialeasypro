@@ -71,7 +71,7 @@ def _list(user, **params):
 # ---- Adding ------------------------------------------------------------
 
 def test_an_admin_can_add_an_outcome(admin):
-    r = _post(admin, name="Site visit booked", is_positive=True, auto_followup_hours=48)
+    r = _post(admin, name="Site visit booked", is_positive=True, auto_followup_hours=48, category="not_connected")
 
     assert r.status_code == 201, r.data
     added = CallDisposition.objects.get(name="Site visit booked")
@@ -130,7 +130,8 @@ def test_an_agent_cannot_add_one(agent):
 # ---- Editing -----------------------------------------------------------
 
 def test_an_admin_can_correct_an_outcome(admin):
-    d = CallDisposition.objects.create(name="Callback", slug="callback", auto_followup_hours=2)
+    d = CallDisposition.objects.create(name="Callback", slug="callback", auto_followup_hours=2,
+                                       category="not_connected")
 
     r = _patch(admin, d.pk, name="Callback requested", auto_followup_hours=6, is_positive=True)
 

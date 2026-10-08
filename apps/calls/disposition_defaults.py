@@ -18,28 +18,35 @@ CONNECTED = "connected"
 NOT_CONNECTED = "not_connected"
 
 # slug, name, category, lead_status, auto_followup_hours, is_positive, sets_dnd, sort_order
+#
+# Automatic follow-ups (auto_followup_hours): only Busy, Call back later and
+# Voicemail book one. Every other outcome books none — the agent schedules a
+# follow-up by hand when one is needed.
 DEFAULTS = [
     # ---- Connected (the call was answered) -----------------------------
-    ("interested", "Interested", CONNECTED, "interested", 24, True, False, 1),
+    ("interested", "Interested", CONNECTED, "interested", None, True, False, 1),
     ("callback", "Call back later", CONNECTED, "follow_up", 4, True, False, 2),
-    ("send_details", "Send details (WhatsApp / email)", CONNECTED, "follow_up", 24, True, False, 3),
-    ("meeting_scheduled", "Meeting / visit / demo scheduled", CONNECTED, "negotiation", 24, True, False, 4),
+    ("send_details", "Send details (WhatsApp / email)", CONNECTED, "follow_up", None, True, False, 3),
+    ("meeting_scheduled", "Meeting / visit / demo scheduled", CONNECTED, "negotiation", None, True, False, 4),
     ("converted", "Sale done / Converted", CONNECTED, "converted", None, True, False, 5),
     ("not_interested", "Not interested", CONNECTED, "not_interested", None, False, False, 6),
     ("already_purchased", "Already purchased / not required", CONNECTED, "lost", None, False, False, 7),
     ("wrong_person", "Wrong person / wrong number", CONNECTED, "invalid", None, False, False, 8),
     ("dnd_request", "Asked not to call (DND)", CONNECTED, "lost", None, False, True, 9),
     ("language_barrier", "Language barrier", CONNECTED, "", None, False, False, 10),
-    ("call_dropped", "Call dropped mid-conversation", CONNECTED, "", 1, False, False, 11),
+    ("call_dropped", "Call dropped mid-conversation", CONNECTED, "", None, False, False, 11),
     # ---- Not connected (the call was not answered) ---------------------
-    ("no_answer", "Ringing, no answer", NOT_CONNECTED, "", 2, False, False, 21),
+    ("no_answer", "Ringing, no answer", NOT_CONNECTED, "", None, False, False, 21),
     ("busy", "Busy", NOT_CONNECTED, "", 1, False, False, 22),
-    ("switched_off", "Switched off", NOT_CONNECTED, "", 6, False, False, 23),
-    ("not_reachable", "Not reachable / out of coverage", NOT_CONNECTED, "", 4, False, False, 24),
-    ("rejected", "Call rejected / cut", NOT_CONNECTED, "", 2, False, False, 25),
+    ("switched_off", "Switched off", NOT_CONNECTED, "", None, False, False, 23),
+    ("not_reachable", "Not reachable / out of coverage", NOT_CONNECTED, "", None, False, False, 24),
+    ("rejected", "Call rejected / cut", NOT_CONNECTED, "", None, False, False, 25),
     ("invalid_number", "Invalid / out-of-service number", NOT_CONNECTED, "invalid", None, False, False, 26),
     ("voicemail", "Voicemail / IVR", NOT_CONNECTED, "", 24, False, False, 27),
 ]
+
+# The built-in outcomes that book a follow-up automatically.
+AUTO_FOLLOWUP_SLUGS = ("busy", "callback", "voicemail")
 
 FIELDS = ("slug", "name", "category", "lead_status", "auto_followup_hours", "is_positive", "sets_dnd", "sort_order")
 
@@ -144,5 +151,11 @@ def upgrade_dispositions(CallDisposition) -> dict:
         CallDisposition.objects.filter(pk=row.pk).update(
             category=category, marks_connected=category == CONNECTED,
         )
+
+    # 4. Only Busy, Call back later and Voicemail book an automatic follow-up
+    #    among the built-in outcomes.
+    CallDisposition.objects.filter(is_system=True).exclude(slug__in=AUTO_FOLLOWUP_SLUGS).exclude(
+        auto_followup_hours=None,
+    ).update(auto_followup_hours=None)
 
     return {"renamed": renamed, "created": created}

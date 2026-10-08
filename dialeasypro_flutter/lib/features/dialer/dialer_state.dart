@@ -475,7 +475,9 @@ class DialerNotifier extends StateNotifier<DialerState> {
         'direction': 'outbound',
         'started_at': call.startedAt.toUtc().toIso8601String(),
         'ended_at': (call.endedAt ?? DateTime.now()).toUtc().toIso8601String(),
-        'duration_seconds': call.durationSec,
+        // Talk time only for an answered call: an unanswered one's "duration"
+        // is ringing, and showed as e.g. "1m 30s · Not answered".
+        'duration_seconds': call.wasConnected ? call.durationSec : 0,
         'is_connected': call.wasConnected,
         'disposition': dispositionId,
         'notes': notes,

@@ -363,9 +363,22 @@ class _LeadTile extends StatelessWidget {
               const Spacer(),
               ScoreBar(score: lead.score),
             ]),
-            if (lead.nextFollowupAt != null) Padding(
+            // One line: how the last call went, then the next follow-up.
+            if (lead.dialAttempts > 0 || lead.nextFollowupAt != null) Padding(
               padding: const EdgeInsets.only(top: 3),
               child: Row(children: [
+                if (lead.dialAttempts > 0) ...[
+                  Icon(lead.lastCallConnected == true ? Icons.call : Icons.phone_missed,
+                      size: 11, color: lead.lastCallConnected == true ? AppColors.success : AppColors.grey),
+                  const SizedBox(width: 3),
+                  Flexible(child: Text(
+                    lead.lastDispositionName ?? (lead.lastCallConnected == true ? 'Answered' : 'Not answered'),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: AppColors.text2),
+                  )),
+                  if (lead.nextFollowupAt != null) const SizedBox(width: 8),
+                ],
+                if (lead.nextFollowupAt != null) ...[
                 Icon(
                   lead.followupOverdue ? Icons.warning_amber_rounded : Icons.access_time,
                   size: 11,
@@ -384,6 +397,7 @@ class _LeadTile extends StatelessWidget {
                     ),
                   ),
                 ),
+                ],
               ]),
             ),
           ]),

@@ -56,7 +56,10 @@ def test_an_interested_outcome_makes_the_lead_interested(asha, interested):
 
     lead.refresh_from_db()
     assert lead.status == "interested"
-    assert LeadActivity.objects.filter(lead=lead, activity_type="status_change").exists()
+    # One feed line for the call, saying what it did to the lead.
+    line = LeadActivity.objects.get(lead=lead, activity_type="call")
+    assert line.meta["new_status"] == "interested"
+    assert "Interested" in line.description
 
 
 def test_the_interested_filter_now_finds_it(asha, interested):

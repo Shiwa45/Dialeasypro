@@ -59,6 +59,23 @@ def _bad(message, code="invalid", http=400):
     return Response({"error": code, "message": message}, status=http)
 
 
+class _ProtectedDeleteMixin:
+    """
+    Deleting a customer or product that a quotation, order or invoice uses
+    raised ProtectedError — an HTTP 500. Answer with what to do instead.
+    """
+
+    protected_message = "It is used on documents, so it can't be deleted. Mark it inactive instead."
+
+    def destroy(self, request, *args, **kwargs):
+        from django.db.models import ProtectedError
+
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return _bad(self.protected_message, "in_use", 409)
+
+
 # ============================================================
 # Masters
 # ============================================================
@@ -72,13 +89,21 @@ class CustomerListCreateView(generics.ListCreateAPIView):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
+        from django.db.models import Q
+
         qs = Customer.objects.all()
-        if search := self.request.query_params.get("search"):
-            qs = qs.filter(name__icontains=search)
+        p = self.request.query_params
+        if search := p.get("search"):
+            qs = qs.filter(
+                Q(name__icontains=search) | Q(gstin__icontains=search)
+                | Q(phone__icontains=search) | Q(email__icontains=search)
+            )
+        if p.get("active") in ("true", "false"):
+            qs = qs.filter(is_active=p.get("active") == "true")
         return qs
 
 
-class CustomerDetailView(generics.RetrieveUpdateDestroyAPIView):
+class CustomerDetailView(_ProtectedDeleteMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = CustomerSerializer
     queryset = Customer.objects.all()
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
@@ -103,7 +128,7 @@ class ProductListCreateView(generics.ListCreateAPIView):
         return qs
 
 
-class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ProductDetailView(_ProtectedDeleteMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ProductSerializer
     queryset = Product.objects.all()
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
@@ -132,12 +157,15 @@ class QuotationListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if not data["customer"].is_active:
+            return _bad(f"{data['customer'].name} is inactive.", "inactive_customer")
         quotation = doc_svc.create_quotation(
-            customer=serializer.validated_data["customer"],
+            customer=data["customer"],
             created_by=request.user,
-            quotation_date=serializer.validated_data.get("quotation_date") or None,
-            valid_until=serializer.validated_data.get("valid_until"),
-            notes=serializer.validated_data.get("notes", ""),
+            quotation_date=data.get("quotation_date"),
+            valid_until=data.get("valid_until"),
+            notes=data.get("notes", ""),
         )
         return Response(QuotationSerializer(quotation).data, status=status.HTTP_201_CREATED)
 
@@ -199,10 +227,13 @@ class QuotationStatusView(APIView):
     required_feature = FeatureKey.ERP_QUOTATIONS
     required_capability = Cap.ERP_MANAGE
 
-    # From -> allowed to
+    # From -> allowed to. A draft can be accepted directly (the customer said
+    # yes on the phone); a sent quotation can go back to draft to be revised —
+    # once sent, its lines are frozen so the record matches what the customer
+    # was given.
     TRANSITIONS = {
-        QuotationStatus.DRAFT: {QuotationStatus.SENT},
-        QuotationStatus.SENT: {QuotationStatus.ACCEPTED, QuotationStatus.REJECTED},
+        QuotationStatus.DRAFT: {QuotationStatus.SENT, QuotationStatus.ACCEPTED, QuotationStatus.REJECTED},
+        QuotationStatus.SENT: {QuotationStatus.ACCEPTED, QuotationStatus.REJECTED, QuotationStatus.DRAFT},
     }
 
     def post(self, request, pk):
@@ -217,6 +248,17 @@ class QuotationStatusView(APIView):
                 f"Cannot move a {quotation.status} quotation to {target}. "
                 f"Allowed: {sorted(allowed) or 'none — already final'}.",
                 "invalid_transition",
+            )
+        if target in (QuotationStatus.SENT, QuotationStatus.ACCEPTED) and not quotation.items.exists():
+            return _bad("Add at least one line before sending or accepting.", "empty_quotation")
+        if (
+            target in (QuotationStatus.SENT, QuotationStatus.ACCEPTED)
+            and quotation.valid_until and quotation.valid_until < timezone.localdate()
+        ):
+            return _bad(
+                f"This quotation lapsed on {quotation.valid_until:%d %b %Y}. "
+                "Extend \"valid until\" first (revise it as a draft).",
+                "expired",
             )
         quotation.status = target
         quotation.save(update_fields=["status", "updated_at"])
@@ -307,8 +349,11 @@ class SalesOrderListView(generics.ListAPIView):
 
     def get_queryset(self):
         qs = SalesOrder.objects.select_related("customer").prefetch_related("items")
-        if status_filter := self.request.query_params.get("status"):
+        p = self.request.query_params
+        if status_filter := p.get("status"):
             qs = qs.filter(status=status_filter)
+        if customer := p.get("customer"):
+            qs = qs.filter(customer_id=customer)
         return qs
 
 
@@ -322,6 +367,24 @@ class SalesOrderDetailView(generics.RetrieveAPIView):
         return SalesOrder.objects.select_related("customer").prefetch_related("items")
 
 
+class SalesOrderCancelView(APIView):
+    """POST /orders/{id}/cancel/ {reason?} — there was no way to cancel an order."""
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.ERP_SALES_ORDERS
+    required_capability = Cap.ERP_MANAGE
+
+    def post(self, request, pk):
+        order = SalesOrder.objects.filter(pk=pk).first()
+        if order is None:
+            return _bad("Sales order not found.", "not_found", 404)
+        try:
+            order = doc_svc.cancel_order(order, reason=(request.data.get("reason") or "").strip())
+        except ValueError as exc:
+            return _bad(str(exc), "invalid_transition")
+        return Response(SalesOrderSerializer(order).data)
+
+
 class SalesOrderInvoiceView(APIView):
     """POST /orders/{id}/invoice/ → raises a DRAFT invoice."""
 
@@ -333,10 +396,17 @@ class SalesOrderInvoiceView(APIView):
         order = SalesOrder.objects.filter(pk=pk).prefetch_related("items").first()
         if order is None:
             return _bad("Sales order not found.", "not_found", 404)
+        due_date = request.data.get("due_date") or None
+        if due_date:
+            from datetime import date as _date
+            try:
+                due_date = _date.fromisoformat(str(due_date))
+            except ValueError:
+                return _bad("Invalid due date.", "invalid_date")
+            if due_date < timezone.localdate():
+                return _bad("The due date can't be in the past.", "invalid_date")
         try:
-            invoice = doc_svc.order_to_invoice(
-                order, created_by=request.user, due_date=request.data.get("due_date") or None
-            )
+            invoice = doc_svc.order_to_invoice(order, created_by=request.user, due_date=due_date)
         except ValueError as exc:
             return _bad(str(exc), "invalid_transition")
         return Response(CustomerInvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
@@ -346,16 +416,47 @@ class SalesOrderInvoiceView(APIView):
 # Invoices
 # ============================================================
 
-class InvoiceListView(generics.ListAPIView):
+class InvoiceListView(generics.ListCreateAPIView):
+    """
+    GET  list invoices (status, customer, unpaid, date range, search).
+    POST create a stand-alone DRAFT invoice {customer, invoice_date?, due_date?, notes?}.
+
+    POST was never routed — the "New invoice" screen got a 405 every time, and
+    the customer filter was ignored, so a customer's history listed everyone's
+    invoices.
+    """
+
     serializer_class = CustomerInvoiceSerializer
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
     required_capability = Cap.ERP_VIEW
+    capability_by_method = {"POST": Cap.ERP_MANAGE}
     pagination_class = StandardResultsSetPagination
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if not data["customer"].is_active:
+            return _bad(f"{data['customer'].name} is inactive.", "inactive_customer")
+        invoice = doc_svc.create_invoice(
+            customer=data["customer"],
+            created_by=request.user,
+            invoice_date=data.get("invoice_date"),
+            due_date=data.get("due_date"),
+            notes=data.get("notes", ""),
+        )
+        return Response(CustomerInvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
+
     def get_queryset(self):
+        from django.db.models import Q
+
         qs = CustomerInvoice.objects.select_related("customer").prefetch_related("items")
         p = self.request.query_params
+        if customer := p.get("customer"):
+            qs = qs.filter(customer_id=customer)
+        if search := p.get("search"):
+            qs = qs.filter(Q(number__icontains=search) | Q(customer__name__icontains=search))
         if status_filter := p.get("status"):
             qs = qs.filter(status=status_filter)
         if p.get("unpaid") == "true":
@@ -396,17 +497,22 @@ class InvoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
                 f"An {invoice.status} invoice is a legal record and cannot be edited.",
                 "not_editable",
             )
-        return super().update(request, *args, **kwargs)
+        # Only the header fields a draft may change; customer, lines and
+        # totals have their own governed paths.
+        allowed = {"invoice_date", "due_date", "notes"}
+        data = {k: v for k, v in request.data.items() if k in allowed}
+        serializer = self.get_serializer(invoice, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(CustomerInvoiceSerializer(invoice).data)
 
     def destroy(self, request, *args, **kwargs):
         invoice = self.get_object()
-        if not invoice.is_editable:
-            return _bad(
-                f"An {invoice.status} invoice cannot be deleted — cancel it instead, "
-                f"which keeps its number in the GST sequence.",
-                "not_editable",
-            )
-        return super().destroy(request, *args, **kwargs)
+        try:
+            doc_svc.delete_draft_invoice(invoice)
+        except ValueError as exc:
+            return _bad(str(exc), "not_editable")
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class InvoiceItemView(APIView):
@@ -576,7 +682,9 @@ class TallyExportView(APIView):
             qs = qs.filter(invoice_date__lte=date_to)
 
         def rows():
-            for inv in qs.iterator():
+            # chunk_size is required after prefetch_related() (Django 5):
+            # without it this raised mid-stream and every download broke.
+            for inv in qs.iterator(chunk_size=200):
                 # One row per HSN group keeps GSTR-1 reconciliation simple.
                 hsn = ", ".join(sorted({i.hsn_sac for i in inv.items.all() if i.hsn_sac})) or "-"
                 yield [
@@ -597,6 +705,24 @@ class TallyExportView(APIView):
 # ============================================================
 # Payments ledger
 # ============================================================
+
+class PaymentDetailView(APIView):
+    """DELETE /payments/{id}/ — reverse a wrongly recorded payment."""
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.ERP_CUSTOMER_INVOICING
+    required_capability = Cap.ERP_PAYMENTS
+
+    def delete(self, request, pk):
+        payment = Payment.objects.filter(pk=pk).first()
+        if payment is None:
+            return _bad("Payment not found.", "not_found", 404)
+        try:
+            invoice = doc_svc.reverse_payment(payment)
+        except ValueError as exc:
+            return _bad(str(exc), "invalid_transition")
+        return Response(CustomerInvoiceSerializer(invoice).data)
+
 
 class PaymentListView(generics.ListAPIView):
     """

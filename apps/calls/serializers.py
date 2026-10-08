@@ -1,10 +1,14 @@
 """
 TeleCRM Backend — apps/calls/serializers.py
 """
+import logging
+
 from django.utils.text import slugify
 
 from rest_framework import serializers
 from apps.calls.models import CallDisposition, CallLog, CallRecording
+
+logger = logging.getLogger(__name__)
 
 
 class CallDispositionSerializer(serializers.ModelSerializer):
@@ -19,13 +23,23 @@ class CallDispositionSerializer(serializers.ModelSerializer):
     """
 
     slug = serializers.SlugField(max_length=50, required=False, allow_blank=True)
+    category_display = serializers.CharField(source="get_category_display", read_only=True)
 
     class Meta:
         model = CallDisposition
         fields = [
-            "id", "name", "slug", "is_positive", "is_active",
-            "sort_order", "auto_followup_hours", "lead_status", "marks_connected",
+            "id", "name", "slug", "category", "category_display", "is_positive", "is_active",
+            "sort_order", "auto_followup_hours", "lead_status", "sets_dnd",
+            "is_system", "marks_connected",
         ]
+        # marks_connected is derived from category (kept for older app builds).
+        read_only_fields = ["is_system", "marks_connected"]
+
+    def to_internal_value(self, data):
+        # An older settings screen sends marks_connected instead of category.
+        if isinstance(data, dict) and "category" not in data and data.get("marks_connected") in (True, False):
+            data = {**data, "category": "connected" if data["marks_connected"] else "not_connected"}
+        return super().to_internal_value(data)
 
     def validate_name(self, value):
         name = (value or "").strip()
@@ -44,6 +58,15 @@ class CallDispositionSerializer(serializers.ModelSerializer):
         return name
 
     def validate(self, attrs):
+        # A seeded outcome keeps its slug and group: the app, the reports and
+        # the AI suggestions refer to them.
+        if self.instance is not None and self.instance.is_system:
+            if attrs.get("slug") and attrs["slug"] != self.instance.slug:
+                raise serializers.ValidationError({"slug": "A built-in outcome's slug can't be changed."})
+            if "category" in attrs and attrs["category"] != self.instance.category:
+                raise serializers.ValidationError(
+                    {"category": "A built-in outcome can't move to the other group. Add a new outcome instead."}
+                )
         # A blank slug on create means "name it for me". On update, a blank
         # one means "leave it alone" — regenerating it there would rename a
         # handle that call history and AI suggestions already point at.
@@ -84,10 +107,17 @@ class CallRecordingSerializer(serializers.ModelSerializer):
 
 class CallLogSerializer(serializers.ModelSerializer):
     agent_name = serializers.CharField(source="agent.name", read_only=True)
-    lead_name = serializers.CharField(source="lead.name", read_only=True)
+    lead_name = serializers.SerializerMethodField()
     duration_display = serializers.CharField(read_only=True)
     disposition_name = serializers.CharField(source="disposition.name", read_only=True)
+    disposition_category = serializers.CharField(source="disposition.category", read_only=True, default=None)
     recording = CallRecordingSerializer(read_only=True)
+
+    def get_lead_name(self, obj):
+        # The name at the time of the call when the lead has since been deleted.
+        if obj.lead_id and obj.lead is not None:
+            return obj.lead.name
+        return obj.lead_label or None
 
     class Meta:
         model = CallLog
@@ -95,15 +125,33 @@ class CallLogSerializer(serializers.ModelSerializer):
             "id", "agent", "agent_name", "lead", "lead_name",
             "direction", "phone_number", "started_at", "ended_at",
             "duration_seconds", "duration_display", "is_connected",
-            "disposition", "disposition_name", "notes",
-            "provider", "provider_call_id", "call_cost_paise",
+            "disposition", "disposition_name", "disposition_category", "notes",
+            "provider", "provider_call_id", "call_cost_paise", "client_call_id",
             "recording", "created_at",
         ]
         read_only_fields = ["id", "created_at", "duration_seconds", "is_connected"]
 
 
 class CallLogCreateSerializer(serializers.ModelSerializer):
-    """For manual call entry by agents."""
+    """
+    A call logged by an agent (the app's post-call screen, the web's Log call).
+
+    * An outcome is required — a call with none was invisible to every
+      outcome report and moved nothing on the lead.
+    * The outcome must belong to the call status: an answered call takes a
+      "connected" outcome, an unanswered one a "not connected" outcome.
+      Clients that send client_call_id (current web and app) get a 400 on a
+      mismatch. Older app builds are let through with the status they sent,
+      and the mismatch is logged, until they are retired.
+    * client_call_id makes a retry safe (see CallLogListCreateView.create).
+    """
+
+    disposition = serializers.PrimaryKeyRelatedField(
+        queryset=CallDisposition.objects.all(),
+        error_messages={"required": "Choose the call outcome.", "null": "Choose the call outcome."},
+    )
+    is_connected = serializers.BooleanField(required=False)
+    client_call_id = serializers.CharField(max_length=64, required=False, allow_blank=True)
 
     class Meta:
         model = CallLog
@@ -111,9 +159,14 @@ class CallLogCreateSerializer(serializers.ModelSerializer):
         # no end time (the app always sends one).
         fields = [
             "id", "lead", "direction", "phone_number", "started_at", "ended_at",
-            "duration_seconds", "is_connected", "disposition", "notes",
+            "duration_seconds", "is_connected", "disposition", "notes", "client_call_id",
         ]
         read_only_fields = ["id"]
+
+    def validate_disposition(self, disposition):
+        if disposition is not None and not disposition.is_active:
+            raise serializers.ValidationError(f'"{disposition.name}" is switched off. Choose another outcome.')
+        return disposition
 
     def validate_phone_number(self, value):
         from apps.core.utils import normalize_indian_phone
@@ -142,6 +195,45 @@ class CallLogCreateSerializer(serializers.ModelSerializer):
         started, ended = data.get("started_at"), data.get("ended_at")
         if started and ended and ended < started:
             raise serializers.ValidationError({"ended_at": "A call cannot end before it starts."})
+
+        from apps.calls.services.outcomes import OutcomeMismatch, check_outcome_matches
+        from apps.core.constants import DispositionCategory
+
+        disposition = data.get("disposition")
+        if "is_connected" not in data:
+            # Not said: the outcome's group says it.
+            data["is_connected"] = disposition.category == DispositionCategory.CONNECTED
+        else:
+            try:
+                check_outcome_matches(disposition, data["is_connected"])
+            except OutcomeMismatch as exc:
+                if data.get("client_call_id"):
+                    raise serializers.ValidationError({"disposition": str(exc)})
+                logger.warning("[Calls] Outcome/status mismatch from an older client: %s", exc)
+        return data
+
+
+class CallOutcomeSerializer(serializers.Serializer):
+    """Set the outcome of a call that was saved without one."""
+
+    disposition = serializers.PrimaryKeyRelatedField(
+        queryset=CallDisposition.objects.filter(is_active=True),
+        error_messages={"required": "Choose the call outcome.", "null": "Choose the call outcome."},
+    )
+    is_connected = serializers.BooleanField(required=False)
+    duration_seconds = serializers.IntegerField(min_value=0, required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        from apps.calls.services.outcomes import OutcomeMismatch, check_outcome_matches
+        from apps.core.constants import DispositionCategory
+
+        if "is_connected" not in data:
+            data["is_connected"] = data["disposition"].category == DispositionCategory.CONNECTED
+        try:
+            check_outcome_matches(data["disposition"], data["is_connected"])
+        except OutcomeMismatch as exc:
+            raise serializers.ValidationError({"disposition": str(exc)})
         return data
 
 

@@ -1,6 +1,10 @@
 // The call outcome is picked from one dropdown. It used to be a chip per
 // disposition, which filled the screen for a tenant with many of them and
 // pushed the notes and the save button out of sight.
+//
+// The agent first says whether the call was answered; only the outcomes for
+// that kind of call are offered (an unanswered call could be saved as
+// "Interested" before, and the server counted it as answered).
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,12 +17,12 @@ import 'package:dialeasypro/features/dialer/dialer_screen.dart';
 import 'package:dialeasypro/features/dialer/dialer_state.dart';
 
 const outcomes = [
-  CallDisposition(id: 1, name: 'Interested', slug: 'interested', isPositive: true),
+  CallDisposition(id: 1, name: 'Interested', slug: 'interested', isPositive: true, leadStatus: 'interested'),
   CallDisposition(id: 2, name: 'Call back later', slug: 'call-back', autoFollowupHours: 24),
   CallDisposition(id: 3, name: 'Not interested', slug: 'not-interested'),
   CallDisposition(id: 4, name: 'Wrong number', slug: 'wrong-number'),
-  CallDisposition(id: 5, name: 'Switched off', slug: 'switched-off'),
-  CallDisposition(id: 6, name: 'Busy', slug: 'busy'),
+  CallDisposition(id: 5, name: 'Switched off', slug: 'switched-off', category: 'not_connected'),
+  CallDisposition(id: 6, name: 'Busy', slug: 'busy', category: 'not_connected'),
   CallDisposition(id: 7, name: 'Site visit booked', slug: 'site-visit', isPositive: true),
 ];
 
@@ -55,8 +59,17 @@ void main() {
   });
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  testWidgets('the agent says whether it was answered before any outcome is offered', (tester) async {
+    await pumpOutcomeScreen(tester);
+
+    expect(find.byType(DropdownButtonFormField<int>), findsNothing);
+    expect(find.text('Choose Answered or Not answered first.'), findsOneWidget);
+  });
+
   testWidgets('outcomes are one dropdown, not a chip each', (tester) async {
     await pumpOutcomeScreen(tester);
+    await tester.tap(find.text('✓ Answered'));
+    await tester.pumpAndSettle();
 
     expect(find.byType(DropdownButtonFormField<int>), findsOneWidget);
     expect(find.text('Choose the call outcome'), findsOneWidget);
@@ -64,8 +77,35 @@ void main() {
     expect(find.text('Site visit booked'), findsNothing);
   });
 
-  testWidgets('picking an outcome selects it and says when it books a follow-up', (tester) async {
+  testWidgets('an answered call is offered only answered-call outcomes', (tester) async {
     await pumpOutcomeScreen(tester);
+    await tester.tap(find.text('✓ Answered'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(DropdownButtonFormField<int>));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Interested'), findsWidgets);
+    expect(find.text('Busy'), findsNothing);
+    expect(find.text('Switched off'), findsNothing);
+  });
+
+  testWidgets('an unanswered call is offered only unanswered-call outcomes', (tester) async {
+    await pumpOutcomeScreen(tester);
+    await tester.tap(find.text('✕ Not answered'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(DropdownButtonFormField<int>));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Busy'), findsWidgets);
+    expect(find.text('Interested'), findsNothing);
+  });
+
+  testWidgets('picking an outcome selects it and says what it does', (tester) async {
+    await pumpOutcomeScreen(tester);
+    await tester.tap(find.text('✓ Answered'));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byType(DropdownButtonFormField<int>));
     await tester.pumpAndSettle();
@@ -73,6 +113,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Call back later'), findsOneWidget);
-    expect(find.textContaining('follow-up is scheduled automatically in 24 h'), findsOneWidget);
+    expect(find.textContaining('follow-up in 24 h'), findsOneWidget);
   });
 }

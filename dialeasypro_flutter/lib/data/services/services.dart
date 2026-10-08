@@ -78,7 +78,12 @@ class LeadsService {
   Future<Lead> createLead(Map<String, dynamic> data) async => Lead.fromJson((await _dio.post('/leads/', data: data)).data);
   Future<Lead> updateLead(int id, Map<String, dynamic> data) async => Lead.fromJson((await _dio.patch('/leads/$id/', data: data)).data);
   Future<void> deleteLead(int id) async => await _dio.delete('/leads/$id/');
-  Future<void> updateStatus(int id, String status) async => await _dio.patch('/leads/$id/status/', data: {'status': status});
+  /// Lost and Invalid need a reason; so does Converted when an agent sets it.
+  Future<void> updateStatus(int id, String status, {String? reason}) async =>
+      await _dio.patch('/leads/$id/status/', data: {
+        'status': status,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      });
 
   Future<LeadStats> getStats() async => LeadStats.fromJson((await _dio.get('/leads/stats/')).data);
   Future<Map<String, dynamic>> getPipeline() async => (await _dio.get('/leads/pipeline/')).data;
@@ -154,7 +159,8 @@ class CallsService {
         await prefs.setString(_kDispositionsCache, jsonEncode([
           for (final d in fresh)
             {'id': d.id, 'name': d.name, 'slug': d.slug,
-             'is_positive': d.isPositive, 'auto_followup_hours': d.autoFollowupHours},
+             'is_positive': d.isPositive, 'auto_followup_hours': d.autoFollowupHours,
+             'category': d.category, 'lead_status': d.leadStatus, 'sets_dnd': d.setsDnd},
         ]));
         return fresh;
       } catch (e) {

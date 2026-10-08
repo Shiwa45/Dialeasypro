@@ -15,6 +15,7 @@ from apps.erp.views import (
     InvoiceItemView,
     InvoiceListView,
     PaymentCreateView,
+    PaymentDetailView,
     PaymentListView,
     ProductDetailView,
     ProductListCreateView,
@@ -23,6 +24,7 @@ from apps.erp.views import (
     QuotationItemView,
     QuotationListCreateView,
     QuotationStatusView,
+    SalesOrderCancelView,
     SalesOrderDetailView,
     SalesOrderInvoiceView,
     SalesOrderListView,
@@ -51,6 +53,7 @@ urlpatterns = [
     path("orders/", SalesOrderListView.as_view(), name="api_erp_orders"),
     path("orders/<int:pk>/", SalesOrderDetailView.as_view(), name="api_erp_order_detail"),
     path("orders/<int:pk>/invoice/", SalesOrderInvoiceView.as_view(), name="api_erp_order_invoice"),
+    path("orders/<int:pk>/cancel/", SalesOrderCancelView.as_view(), name="api_erp_order_cancel"),
 
     # Invoices
     path("invoices/", InvoiceListView.as_view(), name="api_erp_invoices"),
@@ -63,6 +66,7 @@ urlpatterns = [
 
     # Payments ledger
     path("payments/", PaymentListView.as_view(), name="api_erp_payments"),
+    path("payments/<int:pk>/", PaymentDetailView.as_view(), name="api_erp_payment_detail"),
 
     # Accounting export & reports
     path("export/tally/", TallyExportView.as_view(), name="api_erp_tally_export"),

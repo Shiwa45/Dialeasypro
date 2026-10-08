@@ -62,7 +62,9 @@ def test_a_successful_call_does(agent, lead):
         response = _call(agent, lead)
 
     assert response.status_code == 200
-    assert lead.contact_count == 1
+    # A dial, not yet a conversation: contact_count counts answered calls.
+    assert lead.dial_attempts == 1
+    assert lead.contact_count == 0
     assert lead.status == LeadStatus.ATTEMPTED
 
 

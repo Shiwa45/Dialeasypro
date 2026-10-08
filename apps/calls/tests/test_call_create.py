@@ -28,9 +28,16 @@ def bilal():
     return Agent.objects.create_agent(email="bilal@x.com", name="Bilal", password="Pw@12345678")
 
 
+@pytest.fixture(autouse=True)
+def answered():
+    from apps.calls.models import CallDisposition
+    return CallDisposition.objects.create(name="Interested", slug="interested-t", category="connected")
+
+
 def _log(agent, **data):
+    from apps.calls.models import CallDisposition
     body = {"direction": "outbound", "phone_number": "9812300001", "duration_seconds": 42,
-            "is_connected": True, **data}
+            "is_connected": True, "disposition": CallDisposition.objects.get(slug="interested-t").pk, **data}
     request = APIRequestFactory().post("/api/v1/calls/", body, format="json")
     force_authenticate(request, user=agent)
     response = CallLogListCreateView.as_view()(request)

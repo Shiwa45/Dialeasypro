@@ -283,13 +283,24 @@ class CallAnalyticsReportView(APIView):
                 .order_by("date")
             )
 
-            # By disposition
+            # By disposition, with its group (connected / not connected). Calls
+            # with no outcome are a bucket of their own rather than missing.
             by_disposition = list(
                 qs.filter(disposition__isnull=False)
-                .values("disposition__name", "disposition__is_positive")
+                .order_by()
+                .values("disposition_id", "disposition__name", "disposition__is_positive", "disposition__category")
                 .annotate(count=Count("id"))
                 .order_by("-count")
             )
+            no_outcome = qs.filter(disposition__isnull=True).count()
+            if no_outcome:
+                by_disposition.append({
+                    "disposition_id": None, "disposition__name": "No outcome",
+                    "disposition__is_positive": False, "disposition__category": None,
+                    "count": no_outcome,
+                })
+            # Answered calls with no talk time: a data-quality flag, not a rate.
+            connected_without_duration = qs.filter(is_connected=True, duration_seconds=0).count()
 
             return {
                 "summary": {
@@ -301,6 +312,8 @@ class CallAnalyticsReportView(APIView):
                     "total_duration_seconds": aggregate["total_duration"] or 0,
                     "avg_duration_seconds": round(aggregate["avg_duration"] or 0),
                     "total_cost_rupees": (aggregate["total_cost_paise"] or 0) / 100,
+                    "connected_without_duration": connected_without_duration,
+                    "no_outcome_calls": no_outcome,
                 },
                 # Every day in the range, zeros included. Days without calls
                 # used to be missing, so the chart's axis jumped from 12 Sep
@@ -350,25 +363,120 @@ class ConversionFunnelView(APIView):
             if is_scoped:
                 qs = qs.filter(assigned_to=agent)
             total = qs.count()
+            # Follow-up is a pipeline stage too (the same one as Interested);
+            # it was missing, so those leads vanished from the funnel.
             funnel_stages = [
                 LeadStatus.NEW, LeadStatus.ATTEMPTED, LeadStatus.CONTACTED,
-                LeadStatus.INTERESTED, LeadStatus.NEGOTIATION, LeadStatus.CONVERTED,
+                LeadStatus.INTERESTED, LeadStatus.FOLLOW_UP, LeadStatus.NEGOTIATION,
+                LeadStatus.CONVERTED,
             ]
-            funnel = []
-            for stage in funnel_stages:
-                count = qs.filter(status=stage).count()
-                funnel.append({
+            closed_stages = [LeadStatus.NOT_INTERESTED, LeadStatus.LOST, LeadStatus.INVALID, LeadStatus.DUPLICATE]
+            counts = {r["status"]: r["n"] for r in qs.order_by().values("status").annotate(n=Count("id"))}
+            labels = dict(LeadStatus.CHOICES)
+
+            def row(stage):
+                count = counts.get(stage, 0)
+                return {
                     "status": stage,
-                    "label": dict(LeadStatus.CHOICES).get(stage, stage),
+                    "label": labels.get(stage, stage),
                     "count": count,
                     "pct_of_total": round(count / total * 100, 1) if total else 0,
-                })
-            lost = qs.filter(status=LeadStatus.LOST).count()
-            return {"funnel": funnel, "total": total, "lost": lost}
+                }
+
+            funnel = [row(s) for s in funnel_stages]
+            closed = [row(s) for s in closed_stages]
+            return {
+                "funnel": funnel,
+                "closed": closed,
+                # Every lead, open and closed: the dashboard's pipeline shows
+                # all of them (Not Interested used to be left out of the total).
+                "pipeline": funnel + closed,
+                "total": total,
+                "lost": counts.get(LeadStatus.LOST, 0),
+            }
 
         return Response({
             "period": None if current else {"date_from": date_from, "date_to": date_to},
             "current": current,
+            **_cached(cache_key, compute),
+        })
+
+
+class AgentOutcomeReportView(APIView):
+    """
+    GET /api/v1/reports/agent-outcomes/?date_from&date_to
+
+    What each agent's calls came to, outcome by outcome — built from the
+    CALLS an agent made, not from the leads they own. Agent Performance reads
+    lead ownership, so an agent calling a colleague's leads got no credit for
+    any of it, and nothing showed how many calls ended Interested vs Busy.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess]
+    required_feature = FeatureKey.BASIC_REPORTS
+
+    def get(self, request):
+        from apps.calls.models import CallDisposition, CallLog
+
+        agent = request.user
+        is_scoped = not sees_everything(agent)
+        params = request.query_params
+        date_from = params.get("date_from", (timezone.localdate() - timedelta(days=30)).isoformat())
+        date_to = params.get("date_to", timezone.localdate().isoformat())
+        scope_key = f"agent{agent.pk}" if is_scoped else "all"
+        cache_key = _report_key("agent_outcomes", scope_key, date_from, date_to)
+
+        def compute():
+            qs = CallLog.objects.filter(
+                started_at__date__gte=date_from, started_at__date__lte=date_to, agent__isnull=False,
+            )
+            if is_scoped:
+                qs = qs.filter(agent=agent)
+
+            totals = (
+                qs.values("agent_id", "agent__name")
+                .annotate(
+                    dials=Count("id"),
+                    connected=Count("id", filter=Q(is_connected=True)),
+                    talk_seconds=Sum("duration_seconds", filter=Q(is_connected=True)),
+                    no_outcome=Count("id", filter=Q(disposition__isnull=True)),
+                )
+                .order_by("agent__name")
+            )
+            per_outcome = {}
+            for row in (
+                qs.filter(disposition__isnull=False)
+                .order_by()
+                .values("agent_id", "disposition_id")
+                .annotate(n=Count("id"))
+            ):
+                per_outcome.setdefault(row["agent_id"], {})[str(row["disposition_id"])] = row["n"]
+
+            used = set(qs.filter(disposition__isnull=False).values_list("disposition_id", flat=True))
+            dispositions = [
+                {"id": d.pk, "name": d.name, "category": d.category, "is_positive": d.is_positive}
+                for d in CallDisposition.objects.filter(Q(is_active=True) | Q(pk__in=used))
+                .order_by("category", "sort_order", "name")
+            ]
+
+            agents = []
+            for row in totals:
+                dials = row["dials"] or 0
+                connected = row["connected"] or 0
+                agents.append({
+                    "agent_id": row["agent_id"],
+                    "agent_name": row["agent__name"],
+                    "dials": dials,
+                    "connected": connected,
+                    "connection_rate": round(connected / dials * 100, 1) if dials else 0,
+                    "talk_seconds": row["talk_seconds"] or 0,
+                    "no_outcome": row["no_outcome"] or 0,
+                    "outcomes": per_outcome.get(row["agent_id"], {}),
+                })
+            return {"dispositions": dispositions, "agents": agents}
+
+        return Response({
+            "period": {"date_from": date_from, "date_to": date_to},
             **_cached(cache_key, compute),
         })
 

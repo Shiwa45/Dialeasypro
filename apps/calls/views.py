@@ -37,9 +37,9 @@ from apps.calls.serializers import (
     CallLogSerializer,
     ClickToCallSerializer,
 )
-from apps.core.constants import AgentRole, FeatureKey, LeadStatus
+from apps.core.constants import AgentRole, FeatureKey
 from apps.core.pagination import StandardResultsSetPagination
-from apps.leads.models import Lead, LeadActivity
+from apps.leads.models import Lead
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,13 @@ class CallLogListCreateView(generics.ListCreateAPIView):
         if direction := params.get("direction"):
             qs = qs.filter(direction=direction)
         if disposition := params.get("disposition"):
-            qs = qs.filter(disposition_id=disposition)
+            # "none": calls still waiting for an outcome.
+            if disposition == "none":
+                qs = qs.filter(disposition__isnull=True)
+            else:
+                qs = qs.filter(disposition_id=disposition)
+        if category := params.get("category"):
+            qs = qs.filter(disposition__category=category)
 
         # Whether a recording exists. The call log shows a recording column,
         # and "find me the calls I can actually listen back to" had no answer
@@ -100,43 +106,76 @@ class CallLogListCreateView(generics.ListCreateAPIView):
 
         return qs
 
+    def create(self, request, *args, **kwargs):
+        # A retry of a call already saved (the response was lost) returns that
+        # call instead of saving it twice.
+        client_call_id = str(request.data.get("client_call_id") or "").strip()
+        if client_call_id:
+            existing = CallLog.objects.filter(agent=request.user, client_call_id=client_call_id).first()
+            if existing is not None:
+                return Response(CallLogSerializer(existing, context={"request": request}).data,
+                                status=status.HTTP_200_OK)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        call = CallLog.objects.select_related("agent", "lead", "disposition").get(pk=serializer.instance.pk)
+        # The full call, with the outcome's name (the create shape had none).
+        return Response(CallLogSerializer(call, context={"request": request}).data,
+                        status=status.HTTP_201_CREATED)
+
     def perform_create(self, serializer):
-        call = serializer.save(agent=self.request.user)
-        # Update lead's last_contacted_at and contact_count
-        if call.lead:
-            call.lead.log_contact(contact_type="call")
-            # A dialed lead is now "worked" — it must never be served again as a
-            # fresh/new lead, and the queue lock it was pulled under is released.
-            lead = call.lead
-            lead.has_been_worked = True
-            lead.last_dialed_at = timezone.now()
-            lead.locked_by = None
-            lead.locked_at = None
-            lead.lock_expires_at = None
-            lead.locked_queue = None
-            # Auto-advance status: new → attempted so the lead is never
-            # treated as untouched again. Only advance from "new" — we must
-            # never downgrade a lead that's already at a later stage.
-            update_fields = [
-                "has_been_worked", "last_dialed_at",
-                "locked_by", "locked_at", "lock_expires_at", "locked_queue",
-            ]
-            if lead.status == LeadStatus.NEW:
-                lead.status = LeadStatus.ATTEMPTED
-                update_fields.append("status")
-            lead.save(update_fields=update_fields)
-            # Log in lead activity feed
-            LeadActivity.objects.create(
-                lead=call.lead,
-                activity_type="call",
-                description=(
-                    f"Call {'connected' if call.is_connected else 'not connected'} "
-                    f"— {call.duration_display}"
-                    + (f". {call.notes}" if call.notes else "")
-                ),
-                performed_by=self.request.user,
-                meta={"call_id": str(call.id), "duration": call.duration_seconds},
+        # The lead is brought up to date — status, counters, activity, auto
+        # follow-up — by the CallLog post_save signal (calls/services/outcomes).
+        call = CallLog(agent=self.request.user, **serializer.validated_data)
+        call._actor = self.request.user
+        call.save()
+        serializer.instance = call
+
+
+class CallOutcomeView(APIView):
+    """
+    PATCH /api/v1/calls/{id}/outcome/  {disposition, is_connected?, duration_seconds?, notes?}
+
+    Set the outcome of a call saved without one — a click-to-call, a "Call
+    back" from the call log, a provider call. There was no way to do it, so
+    those calls stayed outcome-less (or were logged a second time by hand).
+    """
+
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
+
+    def patch(self, request, pk):
+        from apps.calls.serializers import CallOutcomeSerializer
+        from apps.calls.services.outcomes import apply_call_outcome
+
+        call = calls_visible_to(request.user, CallLog.objects.all()).filter(pk=pk).first()
+        if call is None:
+            return Response({"error": "not_found", "message": "Call not found."}, status=404)
+        is_manager = request.user.role in (AgentRole.ADMIN, AgentRole.MANAGER) or getattr(
+            request.user, "is_tenant_admin", False
+        )
+        if call.agent_id != request.user.pk and not is_manager:
+            return Response(
+                {"error": "forbidden", "message": "Only the agent who made this call can set its outcome."},
+                status=403,
             )
+
+        serializer = CallOutcomeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        call.disposition = data["disposition"]
+        call.is_connected = data["is_connected"]
+        fields = ["disposition", "is_connected"]
+        if "duration_seconds" in data:
+            call.duration_seconds = data["duration_seconds"]
+            fields.append("duration_seconds")
+        if data.get("notes"):
+            call.notes = data["notes"]
+            fields.append("notes")
+        call.save(update_fields=fields)
+        apply_call_outcome(call, actor=request.user, new_dial=False)
+
+        call = CallLog.objects.select_related("agent", "lead", "disposition", "recording").get(pk=call.pk)
+        return Response(CallLogSerializer(call, context={"request": request}).data)
 
 
 class CallLogDetailView(generics.RetrieveAPIView):
@@ -409,13 +448,11 @@ class ClickToCallView(APIView):
         # the log is deleted and the lead must go back to how it was.
         before = {"status": lead.status, "has_been_worked": lead.has_been_worked}
 
-        # Create CallLog in initiated state
-        call = CallLog.objects.create(
-            agent=agent,
-            lead=lead,
-            direction="outbound",
-            phone_number=phone,
-        )
+        # Create CallLog in initiated state. Its effect on the lead is applied
+        # only once the dial went out (see below).
+        call = CallLog(agent=agent, lead=lead, direction="outbound", phone_number=phone)
+        call._defer_outcome = True
+        call.save()
 
         # Attempt provider call
         try:
@@ -433,18 +470,12 @@ class ClickToCallView(APIView):
         call.provider_call_id = result.get("call_id", "")
         call.save(update_fields=["provider", "provider_call_id"])
 
-        # Mark the lead as worked & advance status (same as manual call
-        # logging) — only now the call has actually gone out. This used to run
-        # before dialling, so a failed call still bumped the contact count and
-        # moved the lead from New to Attempted.
-        lead.log_contact(contact_type="call")
-        update_fields = ["has_been_worked", "last_dialed_at"]
-        lead.has_been_worked = True
-        lead.last_dialed_at = timezone.now()
-        if lead.status == LeadStatus.NEW:
-            lead.status = LeadStatus.ATTEMPTED
-            update_fields.append("status")
-        lead.save(update_fields=update_fields)
+        # Now the call has gone out: the lead is worked, counted as dialled and
+        # moved from New to Attempted. The outcome is set afterwards with
+        # PATCH /calls/{id}/outcome/.
+        from apps.calls.services.outcomes import apply_call_outcome
+
+        apply_call_outcome(call, actor=agent)
 
         # Only a real provider rings anyone. In manual mode nothing is dialled
         # — the call is logged and the agent dials from their own phone — so
@@ -534,7 +565,10 @@ class CallDispositionListView(generics.ListCreateAPIView):
         qs = CallDisposition.objects.all()
         if self.request.query_params.get("include_inactive") not in ("true", "1"):
             qs = qs.filter(is_active=True)
-        return qs.order_by("sort_order", "name")
+        # ?category=connected|not_connected — the outcomes for one call status.
+        if category := self.request.query_params.get("category"):
+            qs = qs.filter(category=category)
+        return qs.order_by("category", "sort_order", "name")
 
 
 class CallDispositionDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -553,6 +587,12 @@ class CallDispositionDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         disposition = self.get_object()
+
+        if disposition.is_system:
+            return Response(
+                {"error": "built_in", "message": f'"{disposition.name}" is a built-in outcome. Switch it off instead.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if disposition.calls.exists():
             if disposition.is_active:

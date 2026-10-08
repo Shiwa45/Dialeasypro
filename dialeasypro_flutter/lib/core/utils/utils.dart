@@ -71,6 +71,7 @@ class Fmt {
     'interested': 'Interested', 'not_interested': 'Not Interested',
     'follow_up': 'Follow-up', 'negotiation': 'Negotiation',
     'converted': 'Converted', 'lost': 'Lost', 'duplicate': 'Duplicate',
+    'invalid': 'Invalid',
   };
 
   // Must mirror LeadSource.CHOICES in apps/core/constants.py. The backend

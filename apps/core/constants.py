@@ -509,6 +509,9 @@ class LeadStatus:
     WON = "converted"              # Alias: WON == CONVERTED (same DB value)
     LOST = "lost"
     DUPLICATE = "duplicate"
+    # Junk: wrong person, invalid or out-of-service number. Kept apart from
+    # LOST so a bad number never counts as a lost sale.
+    INVALID = "invalid"
 
     CHOICES = [
         (NEW, "New"),
@@ -521,13 +524,51 @@ class LeadStatus:
         (CONVERTED, "Converted / Won"),
         (LOST, "Lost"),
         (DUPLICATE, "Duplicate"),
+        (INVALID, "Invalid / Junk"),
     ]
 
-    # Final statuses (no further action needed)
-    FINAL_STATUSES = [CONVERTED, LOST, DUPLICATE]
+    # Final statuses (no further action needed). NOT_INTERESTED was in neither
+    # list, so it was left out of every count and could still be served by a
+    # calling queue.
+    FINAL_STATUSES = [CONVERTED, LOST, DUPLICATE, NOT_INTERESTED, INVALID]
+
+    # Closed without a sale. A call outcome may close a lead at any open
+    # stage; reopening one from here is logged as a reopen.
+    CLOSED_STATUSES = [NOT_INTERESTED, LOST, INVALID]
+
+    # Settled for good: no call outcome changes these.
+    LOCKED_STATUSES = [CONVERTED, DUPLICATE]
+
+    # Pipeline order. A call outcome only ever moves a lead FORWARD through
+    # these (a "Call back" on a lead in Negotiation used to drop it to
+    # Follow-up). Interested and Follow-up are the same stage.
+    STAGE_RANK = {
+        NEW: 0, ATTEMPTED: 1, CONTACTED: 2,
+        INTERESTED: 3, FOLLOW_UP: 3,
+        NEGOTIATION: 4, CONVERTED: 5,
+    }
+
+    # Changing a lead to one of these by hand needs a reason.
+    REASON_REQUIRED = [LOST, INVALID]
 
     # Active statuses (leads to work on — shown in pipeline board)
     ACTIVE_STATUSES = [NEW, ATTEMPTED, CONTACTED, INTERESTED, FOLLOW_UP, NEGOTIATION]
+
+
+# ============================================================
+# Call disposition groups
+# ============================================================
+
+class DispositionCategory:
+    """Whether an outcome belongs to an answered call or an unanswered one."""
+
+    CONNECTED = "connected"
+    NOT_CONNECTED = "not_connected"
+
+    CHOICES = [
+        (CONNECTED, "Connected (call answered)"),
+        (NOT_CONNECTED, "Not connected (call not answered)"),
+    ]
 
 
 # ============================================================

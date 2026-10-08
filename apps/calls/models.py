@@ -17,7 +17,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
-from apps.core.constants import CallDirection, LeadStatus
+from apps.core.constants import CallDirection, DispositionCategory, LeadStatus
 from apps.core.models import TimeStampedModel, TimeStampedUUIDModel
 
 
@@ -48,20 +48,41 @@ class CallDisposition(TimeStampedModel):
         max_length=20, blank=True, default="", choices=LeadStatus.CHOICES,
         help_text="Move the lead to this status when a call is saved with this outcome. Blank = leave it.",
     )
-    # Whether this outcome means the call was answered. "Connected" used to be
-    # whatever the dialer sent, independent of the outcome the agent picked —
-    # so "Switched Off" calls counted as connected and "Already Purchased"
-    # ones as unanswered, and every connection rate was wrong. True/False make
-    # the outcome decide; None leaves it to the dialer.
+    # Which group the outcome belongs to. The agent only sees the outcomes of
+    # the group matching the call status (answered or not), and the server
+    # refuses a mismatch. This replaces marks_connected, which let an outcome
+    # OVERWRITE the call status: a 0-second unanswered call given
+    # "Connected – Interested" was stored as connected.
+    category = models.CharField(
+        max_length=20, choices=DispositionCategory.CHOICES,
+        default=DispositionCategory.CONNECTED, db_index=True,
+        help_text="Connected (call answered) or not connected.",
+    )
+    # Kept in step with `category` for app builds that still read it.
+    # Never used to change a call's status any more.
     marks_connected = models.BooleanField(
         null=True, blank=True, default=None,
-        help_text="Answered (True), not answered (False), or let the dialer decide (empty).",
+        help_text="Derived from category — kept for older app builds.",
+    )
+    # A seeded default: its slug and group are fixed (other parts of the
+    # product refer to them) and it can be switched off but not deleted.
+    is_system = models.BooleanField(default=False)
+    # "Asked not to call": the lead is marked DND and leaves the queues.
+    sets_dnd = models.BooleanField(
+        default=False, help_text="Mark the lead Do Not Disturb when a call is saved with this outcome.",
     )
 
     class Meta:
         verbose_name = "Call Disposition"
         verbose_name_plural = "Call Dispositions"
         ordering = ["sort_order", "name"]
+
+    def save(self, *args, **kwargs):
+        self.marks_connected = self.category == DispositionCategory.CONNECTED
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            kwargs["update_fields"] = list(set(update_fields) | {"marks_connected"})
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -123,6 +144,14 @@ class CallLog(TimeStampedModel):
     )
     notes = models.TextField(blank=True, default="")
 
+    # The lead's name when the call was made. Deleting a lead clears the
+    # link, and the call history then said nothing about who was called.
+    lead_label = models.CharField(max_length=200, blank=True, default="")
+
+    # Sent by the app/web with each logged call. A retry after a lost
+    # response returns the call already saved instead of saving it twice.
+    client_call_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
     # ---- Integration Metadata ----------------------------
     # Telecom provider (Exotel, MCUBE, etc.) call ID
     provider = models.CharField(
@@ -164,20 +193,28 @@ class CallLog(TimeStampedModel):
             models.Index(fields=["started_at", "direction"]),
             models.Index(fields=["is_connected", "started_at"]),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "client_call_id"],
+                condition=~models.Q(client_call_id=""),
+                name="calllog_unique_client_call_id",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         self.apply_outcome_rules()
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:
-            kwargs["update_fields"] = list(set(update_fields) | {"is_connected", "duration_seconds"})
+            kwargs["update_fields"] = list(set(update_fields) | {"duration_seconds", "lead_label"})
         super().save(*args, **kwargs)
 
     def apply_outcome_rules(self):
         """
-        Keep `is_connected` and `duration_seconds` consistent with the call.
+        Keep `duration_seconds` consistent with the call, and remember the
+        lead's name on the call.
 
-        1. An outcome that says whether the call was answered decides
-           is_connected (see CallDisposition.marks_connected).
+        1. is_connected is never changed here: it is what the phone or the
+           provider reported (an outcome used to overwrite it).
         2. A connected call reported with no duration gets one from its own
            timestamps — the dialer often sends start and end but duration 0,
            which made every talk-time figure in the product read ~0.
@@ -185,9 +222,12 @@ class CallLog(TimeStampedModel):
         An unanswered call keeps whatever duration it was given (a provider's
         ring time); talk-time figures count connected calls only.
         """
-        disposition = self.disposition if self.disposition_id else None
-        if disposition is not None and disposition.marks_connected is not None:
-            self.is_connected = disposition.marks_connected
+        # The call status is a fact from the phone or the provider; the
+        # outcome no longer overwrites it (see CallDisposition.category).
+        if self.lead_id and not self.lead_label:
+            lead = getattr(self, "lead", None)
+            if lead is not None:
+                self.lead_label = (lead.name or "")[:200]
 
         if not self.is_connected:
             return

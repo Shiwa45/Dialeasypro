@@ -566,13 +566,27 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
   bool _scheduleFollowup = false;
   DateTime? _followupDate;
   bool _saving = false;
-  late bool _wasConnected;
+  /// Was the call answered? From the phone's call log when it could be read;
+  /// null when it couldn't — the agent must say before an outcome is offered.
+  bool? _wasConnected;
 
   @override
   void initState() {
     super.initState();
-    _wasConnected = widget.state.currentCall?.wasConnected ?? false;
-    _notesCtrl.text = widget.state.currentCall?.notes ?? '';
+    final call = widget.state.currentCall;
+    _wasConnected = call == null || call.outcomeSource == 'estimate' ? null : call.wasConnected;
+    _notesCtrl.text = call?.notes ?? '';
+  }
+
+  /// Answered and unanswered calls have different outcomes; changing the
+  /// answer clears an outcome picked from the other list.
+  void _setConnected(bool v) {
+    if (_wasConnected == v) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _wasConnected = v;
+      if (_selected != null && _selected!.isConnectedOutcome != v) _selected = null;
+    });
   }
 
   @override
@@ -582,6 +596,10 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
   }
 
   Future<void> _save() async {
+    if (_wasConnected == null) {
+      AppToast.show(context, 'Say whether the call was answered', isError: true);
+      return;
+    }
     if (_selected == null) {
       AppToast.show(context, 'Select a disposition', isError: true);
       return;
@@ -594,12 +612,13 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
       dispositionId: _selected!.id,
       dispositionName: _selected!.name,
       notes: _notesCtrl.text,
-      wasConnected: _wasConnected,
+      wasConnected: _wasConnected!,
     );
     if (!saved) {
       if (mounted) {
         setState(() => _saving = false);
-        AppToast.show(context, 'Could not save this call. Check your connection and try again.',
+        AppToast.show(context,
+            ref.read(dialerProvider).error ?? 'Could not save this call. Check your connection and try again.',
             isError: true);
       }
       return;
@@ -682,10 +701,12 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
                   style: const TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.yellow),
                 ),
                 const SizedBox(width: 10),
-                if (_wasConnected)
-                  const TagChip(label: '✓ Connected', backgroundColor: AppColors.success, textColor: AppColors.white)
+                if (_wasConnected == true)
+                  const TagChip(label: '✓ Answered', backgroundColor: AppColors.success, textColor: AppColors.white)
+                else if (_wasConnected == false)
+                  const TagChip(label: '✕ Not answered', backgroundColor: AppColors.greyLight)
                 else
-                  const TagChip(label: '✕ No Answer', backgroundColor: AppColors.greyLight),
+                  const TagChip(label: '? Confirm below', backgroundColor: AppColors.warningBg),
               ]),
             ])),
           ]),
@@ -693,33 +714,39 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
 
         const SizedBox(height: 16),
 
-        // Was connected toggle
+        // Was the call answered? Asked first: it decides which outcomes are
+        // offered. One flat list used to let an unanswered call be saved as
+        // "Connected – Interested", which the server then counted as answered.
         BrutalCard(
           padding: const EdgeInsets.all(10),
-          child: Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Was the call connected?', style: AppTextStyles.bodyMedium),
-              // Without the phone's call log the app cannot tell an answered
-              // call from an unanswered one — say so, rather than guess.
-              if (widget.state.currentCall?.outcomeSource == 'estimate')
-                const Text('Could not read this from the phone — please confirm.',
-                    style: AppTextStyles.caption),
-            ])),
-            Switch(
-              value: _wasConnected,
-              onChanged: (v) => setState(() => _wasConnected = v),
-              activeColor: AppColors.success,
-              activeTrackColor: AppColors.successBg,
-              inactiveThumbColor: AppColors.grey,
-              inactiveTrackColor: AppColors.greyLight,
-            ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Was the call answered? *', style: AppTextStyles.bodyMedium),
+            if (widget.state.currentCall?.outcomeSource == 'estimate')
+              const Text('Could not read this from the phone — please choose.',
+                  style: AppTextStyles.caption),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: ChoiceChip(
+                label: const Center(child: Text('✓ Answered')),
+                selected: _wasConnected == true,
+                onSelected: (_) => _setConnected(true),
+                selectedColor: AppColors.successBg,
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: ChoiceChip(
+                label: const Center(child: Text('✕ Not answered')),
+                selected: _wasConnected == false,
+                onSelected: (_) => _setConnected(false),
+                selectedColor: AppColors.greyLight,
+              )),
+            ]),
           ]),
         ),
 
         const SizedBox(height: 16),
 
         // Disposition selection
-        const Text('SELECT DISPOSITION *', style: AppTextStyles.label),
+        const Text('CALL OUTCOME *', style: AppTextStyles.label),
         const SizedBox(height: 8),
 
         dispositionsAsync.when(
@@ -734,7 +761,16 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
               onPressed: () => ref.invalidate(dispositionsProvider),
             ),
           ]),
-          data: (dispositions) {
+          data: (all) {
+            if (_wasConnected == null) {
+              return const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text('Choose Answered or Not answered first.',
+                    style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: AppColors.grey)),
+              );
+            }
+            // Only the outcomes for this kind of call.
+            final dispositions = all.where((d) => d.isConnectedOutcome == _wasConnected).toList();
             if (dispositions.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.all(16),
@@ -750,7 +786,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
             // the notes and the save button below the fold.
             return DropdownButtonFormField<int>(
               // Re-created when the list itself changes (e.g. after RETRY).
-              key: ValueKey(dispositions.map((d) => d.id).join(',')),
+              key: ValueKey('$_wasConnected-${dispositions.map((d) => d.id).join(',')}'),
               initialValue: dispositions.any((d) => d.id == _selected?.id) ? _selected!.id : null,
               isExpanded: true,
               menuMaxHeight: 360,
@@ -762,9 +798,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
                     ? const Icon(Icons.flag_outlined, color: AppColors.text3)
                     : Icon(_selected!.isPositive ? Icons.thumb_up : Icons.thumb_down,
                         size: 18, color: _selected!.isPositive ? AppColors.success : AppColors.error),
-                helperText: _selected?.autoFollowupHours != null && _selected!.autoFollowupHours! > 0
-                    ? 'A follow-up is scheduled automatically in ${_selected!.autoFollowupHours} h'
-                    : null,
+                helperText: _selected == null ? null : _selected!.effectLine,
               ),
               items: dispositions.map((d) => DropdownMenuItem<int>(
                 value: d.id,
@@ -787,7 +821,11 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
               )).toList(),
               onChanged: (id) {
                 HapticFeedback.selectionClick();
-                setState(() => _selected = dispositions.firstWhere((d) => d.id == id));
+                setState(() {
+                  _selected = dispositions.firstWhere((d) => d.id == id);
+                  // "Call back later": the agent says when, straight away.
+                  if (_selected!.slug == 'callback') _scheduleFollowup = true;
+                });
               },
             );
           },

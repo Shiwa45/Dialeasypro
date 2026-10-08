@@ -115,7 +115,7 @@ def analyse_call(self, schema_name, call_id):
     insight.save(update_fields=["status"])
 
     dispositions = {
-        d.slug: d for d in CallDisposition.objects.filter(is_active=True)
+        d.slug: d for d in CallDisposition.objects.filter(is_active=True, category="connected")
     }
 
     try:

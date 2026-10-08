@@ -157,7 +157,11 @@ class MoneyDocument(TimeStampedModel):
 class LineItem(models.Model):
     """A single priced row. Product details are snapshotted at add time."""
 
-    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="+")
+    # Null for a custom line (freight, packing, a one-off charge) — the forms
+    # always offered one, but the column was NOT NULL and every save failed.
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="+", null=True, blank=True,
+    )
     description = models.CharField(max_length=300, blank=True, default="")
     hsn_sac = models.CharField(max_length=10, blank=True, default="")
 

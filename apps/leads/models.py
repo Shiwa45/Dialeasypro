@@ -161,7 +161,7 @@ class Lead(SoftDeleteModel, TimeStampedModel):
     last_contacted_at = models.DateTimeField(null=True, blank=True)
     contact_count = models.PositiveIntegerField(
         default=0,
-        help_text="Total number of contact attempts (calls + messages).",
+        help_text="Answered calls. Unanswered dials are in dial_attempts.",
     )
 
     # ---- TRAI DND -------------------------------------------
@@ -230,6 +230,24 @@ class Lead(SoftDeleteModel, TimeStampedModel):
         null=True, blank=True,
         related_name="locked_leads",
     )
+
+    # ---- Call outcome summary --------------------------------
+    # Kept up to date by apps/calls/services/outcomes.py from the lead's calls.
+    # The Leads list and lead page can then say what happened on the last
+    # call, and tell "never reached" from "spoke to them".
+    last_disposition = models.ForeignKey(
+        "calls.CallDisposition",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="+",
+        help_text="Outcome of the most recent call that has one.",
+    )
+    last_call_connected = models.BooleanField(
+        null=True, blank=True, help_text="Whether the most recent call was answered.",
+    )
+    last_connected_at = models.DateTimeField(null=True, blank=True)
+    dial_attempts = models.PositiveIntegerField(default=0, help_text="Calls made to this lead.")
+    connected_calls = models.PositiveIntegerField(default=0, help_text="Calls that were answered.")
 
     class Meta:
         verbose_name = "Lead"

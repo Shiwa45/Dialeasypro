@@ -149,6 +149,10 @@ class LeadListSerializer(serializers.ModelSerializer):
     phone = serializers.SerializerMethodField()
     batch_label = serializers.SerializerMethodField()
     batch_number = serializers.IntegerField(source="batch.number", read_only=True, default=None)
+    last_disposition_name = serializers.CharField(source="last_disposition.name", read_only=True, default=None)
+    last_disposition_category = serializers.CharField(
+        source="last_disposition.category", read_only=True, default=None,
+    )
 
     class Meta:
         model = Lead
@@ -163,6 +167,9 @@ class LeadListSerializer(serializers.ModelSerializer):
             "campaign_name", "ad_name",
             "batch", "batch_number", "batch_label",
             "tags", "is_dnd", "created_at",
+            "last_disposition", "last_disposition_name", "last_disposition_category",
+            "last_call_connected", "last_dialed_at", "last_connected_at",
+            "dial_attempts", "connected_calls",
         ]
 
     def get_batch_label(self, obj) -> str | None:
@@ -194,6 +201,10 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     followup_overdue = serializers.BooleanField(read_only=True)
     days_since_last_contact = serializers.IntegerField(read_only=True)
     whatsapp_attribution = serializers.SerializerMethodField()
+    last_disposition_name = serializers.CharField(source="last_disposition.name", read_only=True, default=None)
+    last_disposition_category = serializers.CharField(
+        source="last_disposition.category", read_only=True, default=None,
+    )
 
     class Meta:
         model = Lead
@@ -210,8 +221,16 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             "is_dnd", "tags",
             "followups", "notes", "activities", "custom_field_values",
             "created_at", "updated_at",
+            "last_disposition", "last_disposition_name", "last_disposition_category",
+            "last_call_connected", "last_dialed_at", "last_connected_at",
+            "dial_attempts", "connected_calls",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "assigned_at"]
+        read_only_fields = [
+            "id", "created_at", "updated_at", "assigned_at",
+            # Kept up to date from the lead's calls (calls/services/outcomes).
+            "last_disposition", "last_call_connected", "last_dialed_at", "last_connected_at",
+            "dial_attempts", "connected_calls", "contact_count", "last_contacted_at",
+        ]
 
     def get_whatsapp_attribution(self, obj) -> dict | None:
         """

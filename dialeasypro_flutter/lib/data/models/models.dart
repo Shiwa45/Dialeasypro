@@ -1,6 +1,7 @@
 // ============================================================
 // DialSathi — Data Models
 // ============================================================
+import '../../core/utils/utils.dart';
 
 class Agent {
   final int id;
@@ -358,19 +359,46 @@ class CallDisposition {
   final String name, slug;
   final bool isPositive;
   final int? autoFollowupHours;
+  /// 'connected' or 'not_connected' — which kind of call this outcome is for.
+  final String category;
+  /// The lead status a call with this outcome moves the lead to ('' = only
+  /// the minimum: Contacted if answered, Attempted if not).
+  final String leadStatus;
+  final bool setsDnd;
 
   const CallDisposition({
     required this.id, required this.name, required this.slug,
     this.isPositive = false, this.autoFollowupHours,
+    this.category = 'connected', this.leadStatus = '', this.setsDnd = false,
   });
 
-  factory CallDisposition.fromJson(Map<String, dynamic> j) => CallDisposition(
-    id: j['id'] as int,
-    name: j['name'] as String? ?? '',
-    slug: j['slug'] as String? ?? '',
-    isPositive: j['is_positive'] as bool? ?? false,
-    autoFollowupHours: j['auto_followup_hours'] as int?,
-  );
+  bool get isConnectedOutcome => category == 'connected';
+
+  /// "Lead → Interested · follow-up in 24 h", or null when it does neither.
+  String? get effectLine {
+    final parts = <String>[
+      if (leadStatus.isNotEmpty) 'Lead → ${Fmt.leadStatusLabels[leadStatus] ?? leadStatus}',
+      if ((autoFollowupHours ?? 0) > 0) 'follow-up in $autoFollowupHours h',
+      if (setsDnd) 'marks the lead Do Not Disturb',
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
+  factory CallDisposition.fromJson(Map<String, dynamic> j) {
+    // An older server sends marks_connected (true / false / null) instead.
+    final marks = j['marks_connected'];
+    final category = j['category'] as String? ?? (marks == false ? 'not_connected' : 'connected');
+    return CallDisposition(
+      id: j['id'] as int,
+      name: j['name'] as String? ?? '',
+      slug: j['slug'] as String? ?? '',
+      isPositive: j['is_positive'] as bool? ?? false,
+      autoFollowupHours: j['auto_followup_hours'] as int?,
+      category: category,
+      leadStatus: j['lead_status'] as String? ?? '',
+      setsDnd: j['sets_dnd'] as bool? ?? false,
+    );
+  }
 }
 
 class WhatsAppTemplate {

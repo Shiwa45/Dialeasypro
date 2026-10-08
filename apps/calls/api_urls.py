@@ -7,7 +7,7 @@ from apps.calls.views import (
     CallLogListCreateView, CallLogDetailView,
     ClickToCallView, CallDispositionListView, CallDispositionDetailView,
     CallProviderWebhookView, CallStatsView,
-    CallRecordingUploadView,
+    CallRecordingUploadView, CallOutcomeView,
 )
 
 urlpatterns = [
@@ -18,5 +18,6 @@ urlpatterns = [
     path("stats/", CallStatsView.as_view(), name="api_call_stats"),
     path("webhook/<str:provider>/", CallProviderWebhookView.as_view(), name="api_call_webhook"),
     path("<uuid:pk>/recording/", CallRecordingUploadView.as_view(), name="api_call_recording_upload"),
+    path("<uuid:pk>/outcome/", CallOutcomeView.as_view(), name="api_call_outcome"),
     path("<uuid:pk>/", CallLogDetailView.as_view(), name="api_call_detail"),
 ]

@@ -1,13 +1,19 @@
 """
 TeleCRM Backend — apps/calls/signals.py
 
-Signals for call lifecycle:
-- After a CallLog is created, log activity on the lead
-- After a CallLog is saved with disposition, auto-schedule follow-up
+A new call brings its lead up to date — status, call counters, activity and
+the automatic follow-up — through apps/calls/services/outcomes.py, whatever
+created the call (the app, the web, a provider, a script).
+
+Before, part of this lived here and part in the call view, and the outcome
+rules ran only on creation, so an outcome set on a call afterwards changed
+nothing. The outcome endpoint now calls the same service.
 """
 import logging
+
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+
 from apps.calls.models import CallLog
 
 logger = logging.getLogger(__name__)
@@ -15,79 +21,15 @@ logger = logging.getLogger(__name__)
 
 @receiver(post_save, sender=CallLog)
 def calllog_post_save(sender, instance, created, **kwargs):
-    """
-    Post-save handler for CallLog:
-    1. Mark the lead as worked & advance status new → attempted (safety net
-       for webhook-created calls and any code path that bypasses the view).
-    2. Auto-schedule follow-up when disposition has auto_followup_hours set.
-    """
-    if not created or not instance.lead:
+    if not created or not instance.lead_id:
         return
-
-    # ---- Safety net: mark worked & advance status ----
-    lead = instance.lead
-    changed = []
-    if not lead.has_been_worked:
-        lead.has_been_worked = True
-        changed.append("has_been_worked")
-    if lead.status == "new":
-        lead.status = "attempted"
-        changed.append("status")
-    if changed:
-        try:
-            lead.save(update_fields=changed)
-        except Exception as exc:
-            logger.warning(f"[Signal] Could not update lead {lead.pk}: {exc}")
-
-    # ---- Lead status from the call outcome ----
-    _apply_outcome_status(instance)
-
-    # ---- Auto follow-up from disposition ----
-    if not instance.disposition:
+    # Click-to-call saves the call before dialling and applies it only once
+    # the dial went out (a failed dial deletes the call again).
+    if getattr(instance, "_defer_outcome", False):
         return
-    if not instance.disposition.auto_followup_hours:
-        return
+    from apps.calls.services.outcomes import apply_call_outcome
+
     try:
-        from datetime import timedelta
-        from django.utils import timezone
-        from apps.leads.models import FollowUp
-        scheduled = timezone.now() + timedelta(hours=instance.disposition.auto_followup_hours)
-        # The lead's agent, not necessarily whoever made this call (a team
-        # lead calling an agent's lead) — see apps/leads/followup_rules.
-        FollowUp.objects.create(
-            lead=instance.lead,
-            assigned_to_id=instance.lead.assigned_to_id or instance.agent_id,
-            followup_type="call",
-            scheduled_at=scheduled,
-            notes=f"Auto-scheduled after call disposition: {instance.disposition.name}",
-            is_auto=True,
-        )
-        logger.debug(f"[Signal] Auto follow-up created for lead {instance.lead_id}")
-    except Exception as exc:
-        logger.warning(f"[Signal] Auto follow-up failed: {exc}")
-
-
-# A won deal or a duplicate is settled; a call outcome does not reopen it.
-_STATUS_LOCKED = {"converted", "duplicate"}
-
-
-def _apply_outcome_status(call):
-    """
-    Move the lead to the status its call outcome stands for.
-
-    An outcome used to stop at the call: an agent saved "Connected –
-    Interested" and the lead stayed at Attempted, so the Leads screen's
-    Interested filter — which reads the lead's status — showed none of them.
-    """
-    disposition = call.disposition
-    target = getattr(disposition, "lead_status", "") if disposition else ""
-    if not target:
-        return
-    lead = call.lead
-    lead.refresh_from_db(fields=["status", "has_been_worked"])
-    if lead.status == target or lead.status in _STATUS_LOCKED:
-        return
-    try:
-        lead.update_status(target, agent=call.agent, note=f"Call outcome: {disposition.name}")
-    except Exception as exc:
-        logger.warning(f"[Signal] Could not set lead {lead.pk} status from outcome: {exc}")
+        apply_call_outcome(instance, actor=getattr(instance, "_actor", None))
+    except Exception as exc:  # noqa: BLE001 — never lose the call itself
+        logger.warning(f"[Signal] Could not apply call {instance.pk} to its lead: {exc}", exc_info=True)

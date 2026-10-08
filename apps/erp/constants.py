@@ -30,7 +30,9 @@ class QuotationStatus:
         (DRAFT, "Draft"), (SENT, "Sent"), (ACCEPTED, "Accepted"),
         (REJECTED, "Rejected"), (EXPIRED, "Expired"), (CONVERTED, "Converted"),
     ]
-    EDITABLE = [DRAFT, SENT]
+    # Lines change only on a draft: once sent, the record must match what the
+    # customer received (revise = move it back to draft).
+    EDITABLE = [DRAFT]
 
 
 class SalesOrderStatus:
@@ -65,16 +67,32 @@ class InvoiceStatus:
 
 class UnitOfMeasure:
     NOS = "nos"
+    PCS = "pcs"
+    BOX = "box"
+    SET = "set"
+    PACK = "pack"
+    DOZEN = "dozen"
+    PAIR = "pair"
     HOUR = "hour"
     DAY = "day"
     MONTH = "month"
+    YEAR = "year"
+    JOB = "job"
     KG = "kg"
+    GRAM = "gram"
+    TON = "ton"
     LITRE = "litre"
+    ML = "ml"
     METER = "meter"
+    SQFT = "sqft"
+    SQM = "sqm"
 
     CHOICES = [
-        (NOS, "Nos"), (HOUR, "Hour"), (DAY, "Day"), (MONTH, "Month"),
-        (KG, "Kg"), (LITRE, "Litre"), (METER, "Meter"),
+        (NOS, "Nos"), (PCS, "Pieces"), (BOX, "Box"), (SET, "Set"), (PACK, "Pack"),
+        (DOZEN, "Dozen"), (PAIR, "Pair"),
+        (HOUR, "Hour"), (DAY, "Day"), (MONTH, "Month"), (YEAR, "Year"), (JOB, "Job"),
+        (KG, "Kg"), (GRAM, "Gram"), (TON, "Tonne"), (LITRE, "Litre"), (ML, "ml"),
+        (METER, "Meter"), (SQFT, "Sq. ft"), (SQM, "Sq. m"),
     ]
 
 

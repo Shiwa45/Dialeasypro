@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
+import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/call_log_service.dart';
@@ -7,6 +9,7 @@ import '../../core/services/phone_service.dart';
 import '../../core/services/call_recording_service.dart';
 import '../../core/services/presence_service.dart';
 import '../../data/services/services.dart';
+import '../../data/services/api_client.dart';
 import '../../data/models/models.dart';
 
 // ============================================================
@@ -53,13 +56,17 @@ class DialerCallRecord {
   // In-app mic recording captured during this call (universal fallback when
   // the device has no OEM call recorder). Set when the call ends.
   File? micRecording;
+  /// Sent with the save. A retry after a lost response returns the call the
+  /// server already has instead of saving it twice (the retry used to
+  /// double-count the call in every report).
+  final String clientCallId;
 
   DialerCallRecord({
     required this.leadId,
     required this.leadName,
     required this.phoneNumber,
     required this.startedAt,
-  });
+  }) : clientCallId = 'app-$leadId-${startedAt.microsecondsSinceEpoch}-${Random().nextInt(1 << 30)}';
 }
 
 class DialerState {
@@ -472,13 +479,21 @@ class DialerNotifier extends StateNotifier<DialerState> {
         'is_connected': call.wasConnected,
         'disposition': dispositionId,
         'notes': notes,
+        'client_call_id': call.clientCallId,
         if (recordingUrl != null) 'recording_url': recordingUrl,
     };
     try {
       CallLog created;
       try {
         created = await CallsService.instance.createCall(payload);
-      } catch (_) {
+      } on DioException catch (e) {
+        // The server refused the call itself (e.g. an outcome for answered
+        // calls on an unanswered one): retrying won't help — say why.
+        final code = e.response?.statusCode ?? 0;
+        if (code >= 400 && code < 500) {
+          state = state.copyWith(error: ApiClient.errorMessage(e));
+          return false;
+        }
         await Future.delayed(const Duration(seconds: 2));
         created = await CallsService.instance.createCall(payload);
       }

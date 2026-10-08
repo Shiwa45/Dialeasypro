@@ -165,6 +165,77 @@ class CompanyProfileAPIView(APIView):
             "primary_color": tenant.primary_color,
         })
 
+    def patch(self, request):
+        """
+        Admins edit the company's billing identity — name, GSTIN, address —
+        which every quotation, invoice and payslip prints. There was no screen
+        for it: invoices printed the workspace id ("crm") as the company name,
+        and a tax invoice went out with no supplier GSTIN.
+        """
+        from django.db import connection
+
+        from apps.core.capabilities import Cap, has_capability
+        from apps.core.constants import INDIAN_STATE_CODES, canonical_state_code
+        from apps.erp.gstin import gstin_problem, state_from_gstin
+        from apps.tenants.models import Tenant
+
+        if not has_capability(request.user, Cap.CRM_SETTINGS):
+            return Response({"error": "forbidden", "message": "Only an admin can change the company profile."},
+                            status=status.HTTP_403_FORBIDDEN)
+        tenant = Tenant.objects.filter(schema_name=connection.schema_name).first()
+        if tenant is None:
+            return Response({"error": "workspace_not_found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+        errors = {}
+        updates = {}
+        if "company_name" in data:
+            name = str(data.get("company_name") or "").strip()
+            if not name:
+                errors["company_name"] = ["The company name can't be empty."]
+            updates["company_name"] = name[:200]
+        if "gstin" in data:
+            gstin = str(data.get("gstin") or "").strip().upper()
+            if problem := gstin_problem(gstin):
+                errors["gstin"] = [problem]
+            updates["gstin"] = gstin
+        if "state" in data:
+            state = canonical_state_code(str(data.get("state") or ""))
+            if state and state not in INDIAN_STATE_CODES:
+                errors["state"] = ["Pick an Indian state or UT."]
+            updates["state"] = state
+        for field, limit in (("billing_address", 1000), ("city", 100), ("pincode", 6)):
+            if field in data:
+                updates[field] = str(data.get(field) or "").strip()[:limit]
+        if "pincode" in updates and updates["pincode"] and not (
+            updates["pincode"].isdigit() and len(updates["pincode"]) == 6
+        ):
+            errors["pincode"] = ["A pincode is 6 digits."]
+
+        gstin = updates.get("gstin", tenant.gstin)
+        state = updates.get("state", tenant.state)
+        if gstin and not errors.get("gstin"):
+            from_gstin = state_from_gstin(gstin)
+            if from_gstin and not state:
+                updates["state"] = from_gstin
+            elif from_gstin and state and canonical_state_code(state) != from_gstin:
+                errors["state"] = [f"Your GSTIN is registered in {from_gstin}, not {state}."]
+        if errors:
+            return Response({"error": "validation_error", "message": "Validation failed.", "detail": errors},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        for k, v in updates.items():
+            setattr(tenant, k, v)
+        if updates:
+            tenant.save(update_fields=list(updates))
+            AuditLog.log(
+                action=AuditAction.SETTINGS_CHANGE, actor_type="tenant_admin",
+                actor_id=request.user.pk, actor_email=request.user.email,
+                entity_type="Tenant", description=f"Company profile updated: {', '.join(sorted(updates))}",
+                request=request,
+            )
+        return self.get(request)
+
 
 class AgentLoginAPIView(APIView):
     """

@@ -1,120 +1,38 @@
 """
 TeleCRM Backend — apps/calls/management/commands/seed_dispositions.py
 
-Seeds standard call dispositions for a tenant schema.
-Called automatically during tenant creation (via post_schema_sync signal)
-and can also be run manually.
+Seeds (and upgrades) the default call outcomes for tenant schemas. Runs on
+tenant creation (tenants/signals.py) and from the calls 0007 migration for
+every existing tenant; this command is for running it again by hand.
+
+It used get_or_create, so an existing tenant never received a change to the
+defaults. It now upserts — see apps/calls/disposition_defaults.py.
 
 Usage:
-    # Seed dispositions for a specific tenant schema
     python manage.py seed_dispositions --schema=acme_realty
-
-    # Seed for all tenants (runs in each tenant schema)
     python manage.py seed_dispositions --all
 """
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
+from apps.calls.disposition_defaults import DEFAULTS, upgrade_dispositions
 
+# Kept for anything that imported the old name.
 DEFAULT_DISPOSITIONS = [
-    # Connected / positive
-    {
-        "name": "Connected – Interested",
-        "slug": "connected_interested",
-        "marks_connected": True,
-        "is_positive": True,
-        "sort_order": 1,
-        "auto_followup_hours": 24,
-        "lead_status": "interested",
-    },
-    {
-        "name": "Connected – Callback Requested",
-        "slug": "connected_callback",
-        "marks_connected": True,
-        "is_positive": True,
-        "sort_order": 2,
-        "auto_followup_hours": 4,
-        "lead_status": "follow_up",
-    },
-    {
-        "name": "Connected – Not Interested",
-        "slug": "connected_not_interested",
-        "marks_connected": True,
-        "is_positive": False,
-        "sort_order": 3,
-        "auto_followup_hours": None,
-        "lead_status": "not_interested",
-    },
-    {
-        "name": "Connected – Already Purchased",
-        "slug": "connected_purchased",
-        "marks_connected": True,
-        "is_positive": False,
-        "sort_order": 4,
-        "auto_followup_hours": None,
-    },
-    # Not connected
-    {
-        "name": "Not Reachable",
-        "slug": "not_reachable",
-        "marks_connected": False,
-        "is_positive": False,
-        "sort_order": 5,
-        "auto_followup_hours": 6,
-    },
-    {
-        "name": "Busy",
-        "slug": "busy",
-        "marks_connected": False,
-        "is_positive": False,
-        "sort_order": 6,
-        "auto_followup_hours": 2,
-    },
-    {
-        "name": "Switched Off",
-        "slug": "switched_off",
-        "marks_connected": False,
-        "is_positive": False,
-        "sort_order": 7,
-        "auto_followup_hours": 12,
-    },
-    {
-        "name": "Wrong Number",
-        "slug": "wrong_number",
-        "marks_connected": True,
-        "is_positive": False,
-        "sort_order": 8,
-        "auto_followup_hours": None,
-    },
-    {
-        "name": "Do Not Disturb",
-        "slug": "dnd",
-        "marks_connected": None,
-        "is_positive": False,
-        "sort_order": 9,
-        "auto_followup_hours": None,
-    },
-    {
-        "name": "Voicemail Left",
-        "slug": "voicemail",
-        "marks_connected": False,
-        "is_positive": False,
-        "sort_order": 10,
-        "auto_followup_hours": 24,
-    },
+    {"slug": r[0], "name": r[1], "category": r[2], "lead_status": r[3],
+     "auto_followup_hours": r[4], "is_positive": r[5], "sets_dnd": r[6], "sort_order": r[7]}
+    for r in DEFAULTS
 ]
 
 
 class Command(BaseCommand):
-    help = "Seed default call dispositions for a tenant schema."
+    help = "Seed or upgrade the default call outcomes for tenant schemas."
 
     def add_arguments(self, parser):
         parser.add_argument("--schema", type=str, default=None,
                             help="Tenant schema name (required unless --all is used)")
         parser.add_argument("--all", action="store_true",
                             help="Run for all active tenant schemas")
-        parser.add_argument("--clear", action="store_true",
-                            help="Remove existing dispositions before seeding")
 
     def handle(self, *args, **options):
         from apps.tenants.models import Tenant
@@ -127,53 +45,28 @@ class Command(BaseCommand):
             )
             self.stdout.write(f"Seeding dispositions for {len(schemas)} tenants...")
             for schema in schemas:
-                self._seed_for_schema(schema, options["clear"])
+                self._seed_for_schema(schema)
         else:
             schema = options.get("schema")
             if not schema:
                 raise CommandError("Provide --schema=<name> or use --all")
             if not Tenant.objects.filter(schema_name=schema).exists():
                 raise CommandError(f"Tenant schema '{schema}' not found")
-            self._seed_for_schema(schema, options["clear"])
+            self._seed_for_schema(schema)
 
         self.stdout.write(self.style.SUCCESS("\n✅ Dispositions seeded successfully"))
 
-    def _seed_for_schema(self, schema_name: str, clear: bool):
+    def _seed_for_schema(self, schema_name: str):
         previous = connection.schema_name
         try:
             connection.set_schema(schema_name)
             from apps.calls.models import CallDisposition
 
-            if clear:
-                CallDisposition.objects.all().delete()
-                self.stdout.write(f"  [{schema_name}] Cleared existing dispositions")
-
-            created_count = 0
-            for d in DEFAULT_DISPOSITIONS:
-                _, created = CallDisposition.objects.get_or_create(
-                    slug=d["slug"],
-                    defaults={
-                        "name": d["name"],
-                        "is_positive": d["is_positive"],
-                        "sort_order": d["sort_order"],
-                        "auto_followup_hours": d.get("auto_followup_hours"),
-                        # What the outcome makes of the lead (blank = leave it).
-                        "lead_status": d.get("lead_status", ""),
-                        # Whether the outcome means the call was answered.
-                        "marks_connected": d.get("marks_connected"),
-                        "is_active": True,
-                    },
-                )
-                if created:
-                    created_count += 1
-
+            result = upgrade_dispositions(CallDisposition)
             self.stdout.write(
-                f"  [{schema_name}] {created_count} new / "
-                f"{len(DEFAULT_DISPOSITIONS) - created_count} existing"
+                f"  [{schema_name}] {result['created']} created, {result['renamed']} renamed"
             )
         except Exception as exc:
-            self.stdout.write(
-                self.style.ERROR(f"  [{schema_name}] Error: {exc}")
-            )
+            self.stdout.write(self.style.ERROR(f"  [{schema_name}] Error: {exc}"))
         finally:
             connection.set_schema(previous)

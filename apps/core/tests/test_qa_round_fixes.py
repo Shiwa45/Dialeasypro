@@ -189,21 +189,24 @@ def test_campaign_recipients_list(admin):
 
 def _disposition(slug, marks):
     from apps.calls.models import CallDisposition
-    return CallDisposition.objects.create(name=slug.title(), slug=slug, marks_connected=marks)
+    category = "not_connected" if marks is False else "connected"
+    return CallDisposition.objects.create(name=slug.title(), slug=slug, category=category)
 
 
-def test_an_unanswered_outcome_makes_the_call_unconnected(asha):
+def test_an_outcome_no_longer_overwrites_the_call_status(asha):
+    """The call status is a fact from the phone; the outcome must match it
+    instead of overwriting it (see calls/services/outcomes.py)."""
     from apps.calls.models import CallLog
     call = CallLog.objects.create(agent=asha, phone_number="+919812300777", is_connected=True,
                                   disposition=_disposition("switched-off-x", False))
     call.refresh_from_db()
-    assert call.is_connected is False
+    assert call.is_connected is True
 
 
-def test_an_answered_outcome_makes_it_connected_and_duration_comes_from_timestamps(asha):
+def test_an_answered_call_takes_its_duration_from_timestamps(asha):
     from apps.calls.models import CallLog
     start = timezone.now() - timedelta(minutes=5)
-    call = CallLog.objects.create(agent=asha, phone_number="+919812300778", is_connected=False,
+    call = CallLog.objects.create(agent=asha, phone_number="+919812300778", is_connected=True,
                                   started_at=start, ended_at=start + timedelta(seconds=95),
                                   duration_seconds=0, disposition=_disposition("conn-int-x", True))
     call.refresh_from_db()

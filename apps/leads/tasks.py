@@ -685,7 +685,7 @@ def recalculate_lead_scores(self, schema_name: str):
     from apps.leads.models import Lead, FollowUp
     from apps.core.constants import LeadSource, LeadStatus
 
-    EXCLUDED_STATUSES = [LeadStatus.WON, LeadStatus.LOST, LeadStatus.NOT_INTERESTED]
+    EXCLUDED_STATUSES = [LeadStatus.WON, LeadStatus.LOST, LeadStatus.NOT_INTERESTED, LeadStatus.INVALID]
     SOURCE_SCORES = {
         LeadSource.INDIAMART: 20,
         LeadSource.META_FACEBOOK: 18,

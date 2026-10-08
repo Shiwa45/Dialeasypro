@@ -50,6 +50,7 @@ CLOSED_STATUSES = (
     LeadStatus.LOST,
     LeadStatus.DUPLICATE,
     LeadStatus.NOT_INTERESTED,
+    LeadStatus.INVALID,
 )
 
 OPEN_STATUSES = [s for s, _ in LeadStatus.CHOICES if s not in CLOSED_STATUSES]

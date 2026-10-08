@@ -120,13 +120,48 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> with Single
   }
 
   Future<void> _updateStatus(int id, String status) async {
+    // Lost / Invalid need a reason, and a sale a note (the server checks).
+    String? reason;
+    if (const ['lost', 'invalid', 'converted'].contains(status)) {
+      reason = await _askReason(status);
+      if (reason == null) return;
+    }
     try {
-      await LeadsService.instance.updateStatus(id, status);
+      await LeadsService.instance.updateStatus(id, status, reason: reason);
       ref.invalidate(_leadDetailProvider(id));
       if (mounted) AppToast.show(context, 'Status updated', isSuccess: true);
     } catch (e) {
       if (mounted) AppToast.show(context, ApiClient.errorMessage(e), isError: true);
     }
+  }
+
+  Future<String?> _askReason(String status) {
+    final ctrl = TextEditingController();
+    final label = Fmt.leadStatusLabels[status] ?? status;
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Move to $label'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 3,
+          decoration: InputDecoration(
+            hintText: status == 'converted' ? 'What was sold / order number' : 'Reason',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              if (status != 'converted' && ctrl.text.trim().isEmpty) return;
+              Navigator.pop(ctx, ctrl.text.trim());
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _addNote(int id) async {

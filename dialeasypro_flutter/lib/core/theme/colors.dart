@@ -123,6 +123,7 @@ class AppColors {
     'lost':           _StatusColor(lostBg,   lost,   lost),
     'not_interested': _StatusColor(lostBg,   lost,   lost),
     'duplicate':      _StatusColor(sunken,   line3,  text2),
+    'invalid':        _StatusColor(sunken,   line3,  text2),
   };
 
   // ---- Priority colours ------------------------------------

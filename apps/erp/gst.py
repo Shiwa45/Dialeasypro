@@ -44,6 +44,14 @@ def line_taxable_value(quantity: Decimal, unit_price: Decimal, discount_percent:
     return q2(gross - discount)
 
 
+def is_interstate(seller_state: str, buyer_state: str) -> bool:
+    """Inter-state when both places are known and differ (codes compared canonically)."""
+    from apps.core.constants import canonical_state_code
+
+    seller, buyer = canonical_state_code(seller_state), canonical_state_code(buyer_state)
+    return bool(seller and buyer) and seller != buyer
+
+
 def split_gst(
     taxable_value: Decimal,
     gst_rate: Decimal,
@@ -61,11 +69,7 @@ def split_gst(
     rate = Decimal(gst_rate)
     taxable = q2(taxable_value)
 
-    from apps.core.constants import canonical_state_code
-
-    interstate = bool(seller_state and buyer_state) and (
-        canonical_state_code(seller_state) != canonical_state_code(buyer_state)
-    )
+    interstate = is_interstate(seller_state, buyer_state)
 
     if interstate:
         igst = q2(taxable * rate / Decimal("100"))

@@ -196,10 +196,25 @@ class LeadListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         # Role-based visibility (agents see only their assigned leads).
-        qs = leads_visible_to(self.request.user).select_related("assigned_to", "batch")
+        qs = leads_visible_to(self.request.user).select_related("assigned_to", "batch", "last_disposition")
 
         # ---- Query param filters ----
         params = self.request.query_params
+
+        # Last call outcome: a disposition id, "none" (never given one) or a
+        # group (connected / not_connected).
+        if last_outcome := params.get("last_disposition"):
+            if last_outcome == "none":
+                qs = qs.filter(last_disposition__isnull=True)
+            elif last_outcome in ("connected", "not_connected"):
+                qs = qs.filter(last_disposition__category=last_outcome)
+            else:
+                qs = qs.filter(last_disposition_id=last_outcome)
+        # Dialled but never reached.
+        if params.get("never_connected") == "true":
+            qs = qs.filter(dial_attempts__gt=0, connected_calls=0)
+        if params.get("never_called") == "true":
+            qs = qs.filter(dial_attempts=0)
 
         if status_filter := params.get("status"):
             qs = qs.filter(status=status_filter)
@@ -337,6 +352,14 @@ class LeadDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
         old_status = serializer.instance.status
         old_owner = serializer.instance.assigned_to_id
+        reason = ""
+        if "status" in serializer.validated_data:
+            from apps.leads.status_rules import check_manual_status_change
+
+            reason = check_manual_status_change(
+                self.request.user, old_status, serializer.validated_data["status"],
+                self.request.data.get("status_reason") or self.request.data.get("reason"),
+            )
         lead = serializer.save()
         new_status = lead.status
 
@@ -349,7 +372,7 @@ class LeadDetailView(generics.RetrieveUpdateDestroyAPIView):
             LeadActivity.objects.create(
                 lead=lead,
                 activity_type="status_change",
-                description=f"Status changed: {old_status} → {new_status}",
+                description=f"Status changed: {old_status} → {new_status}" + (f". Reason: {reason}" if reason else ""),
                 performed_by=self.request.user,
                 meta={"old_status": old_status, "new_status": new_status},
             )
@@ -377,8 +400,12 @@ class LeadStatusUpdateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        lead.update_status(new_status, agent=request.user)
-        return Response({"id": lead.pk, "status": new_status})
+        from apps.leads.status_rules import check_manual_status_change
+
+        reason = check_manual_status_change(request.user, lead.status, new_status, request.data.get("reason"))
+        if new_status != lead.status:
+            lead.update_status(new_status, agent=request.user, note=f"Reason: {reason}" if reason else "")
+        return Response({"id": lead.pk, "status": new_status, "status_display": lead.get_status_display()})
 
 
 class LeadBulkAssignView(APIView):

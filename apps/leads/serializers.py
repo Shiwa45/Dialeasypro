@@ -177,14 +177,17 @@ class LeadListSerializer(serializers.ModelSerializer):
         return obj.batch.label if obj.batch_id and obj.batch else None
 
     def get_phone(self, obj):
-        """Mask phone number for non-admin agents."""
-        request = self.context.get("request")
-        if request and hasattr(request, "user"):
-            from apps.core.constants import AgentRole
-            if request.user.role in [AgentRole.ADMIN, AgentRole.MANAGER]:
-                return obj.phone
-        from apps.core.utils import mask_phone_number
-        return mask_phone_number(obj.phone)
+        """
+        The full number, for anyone who may see the lead at all.
+
+        It was masked (XXXXXX3210) for everyone but admins and managers, which
+        bought nothing: the list is already scoped to the caller's own leads
+        (leads_visible_to), the lead's detail screen showed the number in
+        full, and the agent dials it. The home screen and the Leads screen
+        just showed a number nobody could read. Logs and the Django admin
+        still mask it.
+        """
+        return obj.phone
 
 
 class LeadDetailSerializer(serializers.ModelSerializer):

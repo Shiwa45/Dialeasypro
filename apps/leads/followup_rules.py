@@ -126,3 +126,35 @@ def retire_notifications(followup_ids) -> None:
     Notification.objects.filter(followup_id_ref__in=list(followup_ids), is_read=False).update(
         is_read=True, read_at=timezone.now(),
     )
+
+
+# ============================================================
+# Overdue and due today — one definition for every count and list
+# ============================================================
+#
+# The app's home card counted follow-ups dated today (overdue ones from this
+# morning included, and twice for a lead with two), the Overdue count counted
+# leads, and the Follow-ups screen's "Due Today" tab sent a filter the API did
+# not have, so it listed every lead. Three numbers that could never agree.
+#
+# Both are by lead, on its next open follow-up (Lead.next_followup_at), and a
+# lead is in exactly one: overdue if that moment has passed, due today if it
+# is later today in the tenant's timezone.
+
+def _today_bounds():
+    from datetime import datetime, time, timedelta
+
+    now = timezone.now()
+    tomorrow = timezone.localdate() + timedelta(days=1)
+    end = timezone.make_aware(datetime.combine(tomorrow, time.min), timezone.get_current_timezone())
+    return now, end
+
+
+def overdue_leads(leads):
+    now, _ = _today_bounds()
+    return leads.filter(next_followup_at__isnull=False, next_followup_at__lt=now)
+
+
+def due_today_leads(leads):
+    now, end = _today_bounds()
+    return leads.filter(next_followup_at__gte=now, next_followup_at__lt=end)

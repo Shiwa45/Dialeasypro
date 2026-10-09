@@ -241,10 +241,15 @@ class LeadListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(lead_search_q(search))
 
         if params.get("overdue") == "true":
-            qs = qs.filter(
-                next_followup_at__lt=timezone.now(),
-                next_followup_at__isnull=False,
-            )
+            from apps.leads.followup_rules import overdue_leads
+
+            qs = overdue_leads(qs)
+        if params.get("followup_due_today") == "true":
+            # Asked for by the app's Follow-ups → Due Today tab, and ignored
+            # until now, so that tab listed every lead.
+            from apps.leads.followup_rules import due_today_leads
+
+            qs = due_today_leads(qs)
 
         if date_from := params.get("date_from"):
             qs = qs.filter(created_at__date__gte=date_from)
@@ -1144,15 +1149,13 @@ class LeadDashboardStatsView(APIView):
 
         # Today's stats
         today_new = base_qs.filter(created_at__date=today).count()
-        today_followups = FollowUp.objects.filter(
-            lead__in=base_qs,
-            scheduled_at__date=today,
-            is_completed=False,
-        ).count()
-        overdue_followups = base_qs.filter(
-            next_followup_at__lt=timezone.now(),
-            next_followup_at__isnull=False,
-        ).count()
+        # Leads, not follow-ups, and each in one bucket — the same rule as the
+        # Follow-ups screen's tabs (see followup_rules), so the home card and
+        # the list it opens show the same numbers.
+        from apps.leads.followup_rules import due_today_leads, overdue_leads
+
+        today_followups = due_today_leads(base_qs).count()
+        overdue_followups = overdue_leads(base_qs).count()
 
         # Status breakdown
         status_counts = dict(
@@ -1266,10 +1269,15 @@ class LeadExportView(APIView):
             from apps.leads.search import lead_search_q
             qs = qs.filter(lead_search_q(search))
         if params.get("overdue") == "true":
-            qs = qs.filter(
-                next_followup_at__lt=timezone.now(),
-                next_followup_at__isnull=False,
-            )
+            from apps.leads.followup_rules import overdue_leads
+
+            qs = overdue_leads(qs)
+        if params.get("followup_due_today") == "true":
+            # Asked for by the app's Follow-ups → Due Today tab, and ignored
+            # until now, so that tab listed every lead.
+            from apps.leads.followup_rules import due_today_leads
+
+            qs = due_today_leads(qs)
         if date_from := params.get("date_from"):
             qs = qs.filter(created_at__date__gte=date_from)
         if date_to := params.get("date_to"):

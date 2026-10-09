@@ -96,8 +96,10 @@ class DashboardScreen extends ConsumerWidget {
                       )),
                       const SizedBox(width: 10),
                       Expanded(child: CompactKpi(
+                        // Everything that needs action today: overdue plus
+                        // due later today (the Follow-ups screen's two tabs).
                         label: 'Follow-ups',
-                        value: '${stats.followupsDue}',
+                        value: '${stats.overdueFollowups + stats.followupsDue}',
                         color: stats.overdueFollowups > 0 ? AppColors.hot : AppColors.warning,
                         icon: Icons.notifications_rounded,
                       )),
@@ -143,7 +145,12 @@ class DashboardScreen extends ConsumerWidget {
                     if (stats.overdueFollowups == 0 && stats.followupsDue == 0) {
                       return const SizedBox.shrink();
                     }
-                    return _TasksCard(stats: stats).animate().fadeIn(delay: 380.ms);
+                    return _TasksCard(
+                      stats: stats,
+                      // Back from the Follow-ups screen, where some may have
+                      // been done: the counts here must not stay stale.
+                      onReturn: () => ref.invalidate(_statsProvider),
+                    ).animate().fadeIn(delay: 380.ms);
                   },
                 ),
 
@@ -471,7 +478,20 @@ class _RecentLeadTile extends StatelessWidget {
 // ─── Tasks / Follow-ups Card ────────────────────────────────
 class _TasksCard extends StatelessWidget {
   final LeadStats stats;
-  const _TasksCard({required this.stats});
+  final VoidCallback onReturn;
+  const _TasksCard({required this.stats, required this.onReturn});
+
+  /// "2 overdue · 3 due later today". The counts are leads, each in one
+  /// bucket — the same rule as the Follow-ups screen's two tabs, so the card
+  /// and the list it opens agree. It used to show only the overdue number
+  /// when there was one, hiding the rest of the day.
+  static String summary(int overdue, int dueToday) {
+    final parts = [
+      if (overdue > 0) '$overdue overdue',
+      if (dueToday > 0) '$dueToday due later today',
+    ];
+    return parts.isEmpty ? 'Nothing due today' : parts.join(' · ');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -480,7 +500,10 @@ class _TasksCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       color: hasOverdue ? AppColors.errorBg : AppColors.warningBg,
       borderColor: hasOverdue ? AppColors.error : AppColors.warning,
-      onTap: () => context.push('/followups'),
+      onTap: () async {
+        await context.push('/followups');
+        onReturn();
+      },
       child: Row(children: [
         Container(
           padding: const EdgeInsets.all(10),
@@ -496,7 +519,7 @@ class _TasksCard extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(
-            hasOverdue ? '${stats.overdueFollowups} OVERDUE!' : "TODAY'S TASKS",
+            "TODAY'S TASKS",
             style: const TextStyle(
               fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700,
               fontSize: 11, color: AppColors.black, letterSpacing: 0.5,
@@ -504,10 +527,11 @@ class _TasksCard extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           Text(
-            hasOverdue
-              ? 'View & call ${stats.overdueFollowups} overdue lead${stats.overdueFollowups == 1 ? '' : 's'}'
-              : '${stats.followupsDue} follow-up${stats.followupsDue == 1 ? '' : 's'} scheduled',
-            style: AppTextStyles.bodyMedium,
+            summary(stats.overdueFollowups, stats.followupsDue),
+            style: AppTextStyles.bodyMedium.copyWith(
+              color: hasOverdue ? AppColors.error : AppColors.text,
+              fontWeight: hasOverdue ? FontWeight.w700 : FontWeight.w500,
+            ),
           ),
         ])),
         const Icon(Icons.chevron_right, color: AppColors.black, size: 20),

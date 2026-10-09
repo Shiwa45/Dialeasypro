@@ -92,7 +92,13 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
             "start_date", "end_date", "days", "reason", "status",
             "decided_by", "decided_at", "decision_note", "created_at",
         ]
-        read_only_fields = ["id", "status", "decided_by", "decided_at", "decision_note", "created_at"]
+        # `employee` is the requester's own record, set by the view
+        # (_require_employee). Writable, it was REQUIRED here, so every leave
+        # request from the app — which rightly does not send it — was refused
+        # with "employee: This field is required" before the view ran.
+        read_only_fields = [
+            "id", "employee", "status", "decided_by", "decided_at", "decision_note", "created_at",
+        ]
 
     def validate(self, data):
         start, end = data.get("start_date"), data.get("end_date")
@@ -119,8 +125,10 @@ class ExpenseClaimSerializer(serializers.ModelSerializer):
             "description", "receipt", "status", "decided_by", "decided_at",
             "decision_note", "reimbursed_in", "created_at",
         ]
+        # `employee` is the claimant's own record, set by the view — see
+        # LeaveRequestSerializer. Required here, it refused every claim.
         read_only_fields = [
-            "id", "status", "decided_by", "decided_at", "decision_note",
+            "id", "employee", "status", "decided_by", "decided_at", "decision_note",
             "reimbursed_in", "created_at",
         ]
 

@@ -75,10 +75,6 @@ class DashboardScreen extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
               sliver: SliverList(delegate: SliverChildListDelegate([
 
-                // BIG Auto-Dialer CTA
-                _AutoDialerCTA().animate().slideY(begin: 0.1, end: 0, duration: 350.ms, delay: 80.ms).fadeIn(delay: 80.ms),
-                const SizedBox(height: 16),
-
                 // KPI Cards (colorful)
                 statsAsync.when(
                   loading: () => GridView.count(
@@ -239,44 +235,6 @@ class _Greeting extends StatelessWidget {
         // The illustration is decorative; on a narrow phone it shrinks
         // rather than pushing the greeting onto three lines.
         const Flexible(child: HeroArt(height: 104)),
-      ]),
-    );
-  }
-}
-
-// ─── Auto-Dialer CTA (the big one) ──────────────────────────
-class _AutoDialerCTA extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return BrutalCard(
-      padding: EdgeInsets.zero,
-      color: AppColors.yellow,
-      shadowOffset: 6,
-      onTap: () => context.push('/dialer/queue'),
-      child: Stack(children: [
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: const BoxDecoration(gradient: AppColors.yellowGradient),
-          child: Row(children: [
-            Container(
-              width: 56, height: 56,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.flash_on, color: AppColors.brand, size: 30),
-            ),
-            const SizedBox(width: 14),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-              Text('Auto-Dialer Queue',
-                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.white)),
-              SizedBox(height: 2),
-              Text('Dial leads one-by-one. No tap needed.',
-                  style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 12, color: Color(0xCCFFFFFF))),
-            ])),
-            const Icon(Icons.arrow_forward, color: AppColors.white),
-          ]),
-        ),
       ]),
     );
   }

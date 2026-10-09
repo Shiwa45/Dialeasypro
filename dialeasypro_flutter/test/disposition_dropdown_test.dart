@@ -68,7 +68,7 @@ void main() {
 
   testWidgets('outcomes are one dropdown, not a chip each', (tester) async {
     await pumpOutcomeScreen(tester);
-    await tester.tap(find.text('✓ Answered'));
+    await tester.tap(find.text('Answered'));
     await tester.pumpAndSettle();
 
     expect(find.byType(DropdownButtonFormField<int>), findsOneWidget);
@@ -79,7 +79,7 @@ void main() {
 
   testWidgets('an answered call is offered only answered-call outcomes', (tester) async {
     await pumpOutcomeScreen(tester);
-    await tester.tap(find.text('✓ Answered'));
+    await tester.tap(find.text('Answered'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(DropdownButtonFormField<int>));
@@ -92,7 +92,7 @@ void main() {
 
   testWidgets('an unanswered call is offered only unanswered-call outcomes', (tester) async {
     await pumpOutcomeScreen(tester);
-    await tester.tap(find.text('✕ Not answered'));
+    await tester.tap(find.text('Not answered'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(DropdownButtonFormField<int>));
@@ -104,7 +104,7 @@ void main() {
 
   testWidgets('picking an outcome selects it and says what it does', (tester) async {
     await pumpOutcomeScreen(tester);
-    await tester.tap(find.text('✓ Answered'));
+    await tester.tap(find.text('Answered'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(DropdownButtonFormField<int>));

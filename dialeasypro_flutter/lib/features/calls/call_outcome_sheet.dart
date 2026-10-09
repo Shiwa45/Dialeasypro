@@ -6,6 +6,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
+import 'answered_toggle.dart';
 
 // ============================================================
 // DialSathi — Set the outcome of a call saved without one
@@ -110,21 +111,7 @@ class _CallOutcomeBodyState extends State<_CallOutcomeBody> {
           const SizedBox(height: 14),
           const Text('Was the call answered? *', style: AppTextStyles.bodyMedium),
           const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: ChoiceChip(
-              label: const Center(child: Text('✓ Answered')),
-              selected: _answered == true,
-              onSelected: (_) => _setAnswered(true),
-              selectedColor: AppColors.successBg,
-            )),
-            const SizedBox(width: 8),
-            Expanded(child: ChoiceChip(
-              label: const Center(child: Text('✕ Not answered')),
-              selected: _answered == false,
-              onSelected: (_) => _setAnswered(false),
-              selectedColor: AppColors.greyLight,
-            )),
-          ]),
+          AnsweredToggle(value: _answered, onChanged: _setAnswered),
           const SizedBox(height: 14),
           if (_answered != null)
             FutureBuilder<List<CallDisposition>>(

@@ -15,6 +15,7 @@ import '../leads/lead_custom_fields.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/services.dart';
 import '../work/work_session.dart';
+import '../calls/answered_toggle.dart';
 import 'dialer_state.dart';
 import 'lead_basics_card.dart';
 
@@ -724,21 +725,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
               const Text('Could not read this from the phone — please choose.',
                   style: AppTextStyles.caption),
             const SizedBox(height: 8),
-            Row(children: [
-              Expanded(child: ChoiceChip(
-                label: const Center(child: Text('✓ Answered')),
-                selected: _wasConnected == true,
-                onSelected: (_) => _setConnected(true),
-                selectedColor: AppColors.successBg,
-              )),
-              const SizedBox(width: 8),
-              Expanded(child: ChoiceChip(
-                label: const Center(child: Text('✕ Not answered')),
-                selected: _wasConnected == false,
-                onSelected: (_) => _setConnected(false),
-                selectedColor: AppColors.greyLight,
-              )),
-            ]),
+            AnsweredToggle(value: _wasConnected, onChanged: _setConnected),
           ]),
         ),
 

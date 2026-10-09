@@ -453,12 +453,17 @@ class DialerNotifier extends StateNotifier<DialerState> {
   /// Returns false when the call could not be saved; the dialer then stays on
   /// this call so the agent can retry. It used to carry on regardless — the
   /// call was missing from every report and the lead stayed locked.
+  ///
+  /// [holdNext] saves the call but does not move on to the next one: the
+  /// queue is left paused on the next lead ("Save & break"). Resuming — or
+  /// ending the break with "End break & resume" — dials it.
   Future<bool> dispose_({
     required int dispositionId,
     required String dispositionName,
     String notes = '',
     bool wasConnected = true,
     String? recordingUrl,
+    bool holdNext = false,
   }) async {
     final call = state.currentCall;
     if (call == null) return false;
@@ -548,6 +553,15 @@ class DialerNotifier extends StateNotifier<DialerState> {
     // Server-backed queue — the saved CallLog already marked the lead worked
     // and released its lock on the backend. Pull the next eligible lead.
     if (_serverQueueId != null) {
+      if (holdNext) {
+        // Nothing pulled now: a pulled lead is locked to this agent for the
+        // whole break. resume() pulls when the agent comes back.
+        _needsPull = true;
+        state = state.copyWith(
+          phase: DialerPhase.paused, completedCalls: newCompleted, clearCurrentCall: true,
+        );
+        return true;
+      }
       state = state.copyWith(completedCalls: newCompleted, clearCurrentCall: true);
       unawaited(_pullAndDialNext());
       return true;
@@ -564,15 +578,15 @@ class DialerNotifier extends StateNotifier<DialerState> {
       return true;
     }
 
-    // Brief delay before auto-dialing next
+    // Brief delay before auto-dialing next — or, held, wait on it paused.
     state = state.copyWith(
-      phase: DialerPhase.preCall,
+      phase: holdNext ? DialerPhase.paused : DialerPhase.preCall,
       currentIndex: nextIndex,
       completedCalls: newCompleted,
       clearCurrentCall: true,
     );
 
-    if (_manualList) return true; // the agent taps Call Now
+    if (holdNext || _manualList) return true; // nothing dials by itself
 
     _autoNextTimer?.cancel();
     _autoNextTimer = Timer(const Duration(seconds: 2), () {
@@ -694,7 +708,11 @@ class DialerNotifier extends StateNotifier<DialerState> {
         state.phase == DialerPhase.postCall) return;
     if (!_sessionActive) return;
     _autoNextTimer?.cancel();
-    state = state.copyWith(phase: DialerPhase.paused, onBreak: true);
+    // A finished queue stays finished: pausing it would leave "Resume" with
+    // no lead to dial.
+    state = state.phase == DialerPhase.completed
+        ? state.copyWith(onBreak: true)
+        : state.copyWith(phase: DialerPhase.paused, onBreak: true);
     await PresenceService.instance.report(AgentStatus.breakStatus, breakReason: reason);
   }
 

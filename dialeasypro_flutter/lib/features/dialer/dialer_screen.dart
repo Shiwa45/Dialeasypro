@@ -596,15 +596,54 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
     super.dispose();
   }
 
-  Future<void> _save() async {
+  bool _ready() {
     if (_wasConnected == null) {
       AppToast.show(context, 'Say whether the call was answered', isError: true);
-      return;
+      return false;
     }
     if (_selected == null) {
       AppToast.show(context, 'Select a disposition', isError: true);
-      return;
+      return false;
     }
+    return true;
+  }
+
+  /// "Save & break": save this call, hold the queue on the next lead instead
+  /// of dialling it, and go on break. There was no way to take a break in a
+  /// queue except between calls — and between calls the next one was already
+  /// being dialled — so an agent had to finish the whole queue first.
+  Future<void> _saveAndBreak() async {
+    if (!_ready()) return;
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Text('Save & take a break', style: AppTextStyles.h4),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text('This call is saved and the queue waits. The next number is dialled when you end the break.',
+                style: AppTextStyles.caption),
+          ),
+          for (final r in breakReasons)
+            ListTile(
+              leading: const Icon(Icons.free_breakfast_outlined),
+              title: Text(r),
+              onTap: () => Navigator.of(ctx).pop(r),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (reason == null || !mounted) return; // changed their mind: nothing saved
+    await _save(breakReason: reason);
+  }
+
+  Future<void> _save({String? breakReason}) async {
+    if (!_ready()) return;
+    final takingBreak = breakReason != null;
     setState(() => _saving = true);
 
     // Save disposition + call to backend. Stay here if it did not save.
@@ -614,6 +653,7 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
       dispositionName: _selected!.name,
       notes: _notesCtrl.text,
       wasConnected: _wasConnected!,
+      holdNext: takingBreak,
     );
     if (!saved) {
       if (mounted) {
@@ -642,6 +682,24 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
     }
     // Either way this lead now has a follow-up the phone should ring for.
     unawaited(NotificationService.instance.syncFollowupReminders());
+
+    if (takingBreak) {
+      // The call is saved and the queue is paused on the next lead; now the
+      // break itself (reported on Live Agents and the Login Report).
+      final onBreak = await ref.read(workSessionProvider.notifier).takeBreak(reason: breakReason);
+      if (mounted) {
+        setState(() => _saving = false);
+        AppToast.show(
+          context,
+          onBreak
+              ? 'Call saved. You are on break — the queue is paused.'
+              : 'Call saved and the queue paused, but the break could not start. Try Break again.',
+          isSuccess: onBreak,
+          isError: !onBreak,
+        );
+      }
+      return;
+    }
 
     if (mounted) {
       setState(() => _saving = false);
@@ -899,16 +957,43 @@ class _DispositionViewState extends ConsumerState<_DispositionView> {
 
         const SizedBox(height: 20),
 
-        BrutalButton(
-          label: widget.state.mode == DialerMode.queue ? 'SAVE & NEXT →' : 'SAVE DISPOSITION',
-          iconData: Icons.check,
-          backgroundColor: AppColors.black,
-          textColor: AppColors.white,
-          isFullWidth: true,
-          shadowOffset: 5,
-          isLoading: _saving,
-          onPressed: _saving ? null : _save,
-        ),
+        // In an auto-dial queue the agent can stop after this call. Not for a
+        // single call (nothing comes next), nor for a list being called by
+        // hand on a break (already on one).
+        if (widget.state.mode == DialerMode.queue && !ref.watch(workSessionProvider).onBreak)
+          Row(children: [
+            Expanded(child: BrutalButton(
+              label: 'SAVE & BREAK',
+              iconData: Icons.free_breakfast,
+              backgroundColor: AppColors.warningBg,
+              textColor: AppColors.warning,
+              isFullWidth: true,
+              shadowOffset: 5,
+              onPressed: _saving ? null : _saveAndBreak,
+            )),
+            const SizedBox(width: 10),
+            Expanded(child: BrutalButton(
+              label: 'SAVE & NEXT →',
+              iconData: Icons.check,
+              backgroundColor: AppColors.black,
+              textColor: AppColors.white,
+              isFullWidth: true,
+              shadowOffset: 5,
+              isLoading: _saving,
+              onPressed: _saving ? null : () => _save(),
+            )),
+          ])
+        else
+          BrutalButton(
+            label: widget.state.mode == DialerMode.queue ? 'SAVE & NEXT →' : 'SAVE DISPOSITION',
+            iconData: Icons.check,
+            backgroundColor: AppColors.black,
+            textColor: AppColors.white,
+            isFullWidth: true,
+            shadowOffset: 5,
+            isLoading: _saving,
+            onPressed: _saving ? null : () => _save(),
+          ),
       ]),
     );
   }

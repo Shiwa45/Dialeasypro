@@ -235,7 +235,19 @@ class DialerNotifier extends StateNotifier<DialerState> {
       Map<String, dynamic> res;
       try {
         res = await QueueService.instance.pullNext(qid);
-      } catch (_) {
+      } on DioException catch (e) {
+        // The server answered: the queue was switched off or deleted, or
+        // this agent was taken off it. Retrying can't help, and "check your
+        // connection" was the wrong thing to say — end with the reason.
+        if (_isQueueGone(e)) {
+          _serverQueueId = null;
+          state = state.copyWith(
+            phase: DialerPhase.completed,
+            clearCurrentCall: true,
+            error: ApiClient.errorMessage(e),
+          );
+          return;
+        }
         await Future.delayed(const Duration(seconds: 2));
         res = await QueueService.instance.pullNext(qid);
       }
@@ -256,7 +268,16 @@ class DialerNotifier extends StateNotifier<DialerState> {
       if (state.phase == DialerPhase.preCall) {
         await dialCurrent();
       }
-    } catch (_) {
+    } catch (e) {
+      if (e is DioException && _isQueueGone(e)) {
+        _serverQueueId = null;
+        state = state.copyWith(
+          phase: DialerPhase.completed,
+          clearCurrentCall: true,
+          error: ApiClient.errorMessage(e),
+        );
+        return;
+      }
       // Still failing: pause rather than end, so the agent can resume once
       // the connection is back instead of losing the session.
       _needsPull = true;
@@ -266,6 +287,12 @@ class DialerNotifier extends StateNotifier<DialerState> {
         error: 'Could not reach the queue. Check your connection and resume.',
       );
     }
+  }
+
+  /// 403 (taken off the queue) or 404 (queue switched off or deleted).
+  static bool _isQueueGone(DioException e) {
+    final code = e.response?.statusCode;
+    return code == 403 || code == 404;
   }
 
   /// Single-call mode (one lead, then return to lead detail)
@@ -602,8 +629,8 @@ class DialerNotifier extends StateNotifier<DialerState> {
     final current = state.currentLead;
     if (current == null) return;
 
-    // Server-backed queue — release the lock (not marked dialed) so the lead
-    // returns to the pool after its TTL, then pull the next one.
+    // Server-backed queue — skip: the lead stays out of this agent's queue
+    // until its lock time runs out, so the next pull is a different lead.
     if (_serverQueueId != null) {
       try {
         await QueueService.instance.release(current.id, markDialed: false);
@@ -678,7 +705,10 @@ class DialerNotifier extends StateNotifier<DialerState> {
     // Release any lead still locked to this agent on the server.
     final current = state.currentLead;
     if (_serverQueueId != null && current != null && state.phase != DialerPhase.completed) {
-      QueueService.instance.release(current.id, markDialed: false).catchError((_) {});
+      // Leaving the queue: the lead goes straight back for the next session.
+      QueueService.instance
+          .release(current.id, markDialed: false, returnToQueue: true)
+          .catchError((_) {});
     }
     _serverQueueId = null;
     _needsPull = false;

@@ -554,6 +554,13 @@ class CallQueueSerializer(serializers.ModelSerializer):
     )
     agents = serializers.SerializerMethodField(read_only=True)
     created_by_name = serializers.CharField(source="created_by.name", read_only=True)
+    # Live load for the admin screen (see CallQueue.load).
+    waiting = serializers.SerializerMethodField(read_only=True)
+    checked_out = serializers.SerializerMethodField(read_only=True)
+    # A lock of 0 minutes let the same lead be served twice; a cooldown of
+    # 100,000 hours retired a queue's leads for 11 years.
+    lock_ttl_minutes = serializers.IntegerField(min_value=1, max_value=480, required=False)
+    redial_cooldown_hours = serializers.IntegerField(min_value=0, max_value=720, required=False)
 
     class Meta:
         model = CallQueue
@@ -563,8 +570,104 @@ class CallQueueSerializer(serializers.ModelSerializer):
             "only_unworked", "only_followup_due", "exclude_dnd",
             "order_by", "mode", "redial_cooldown_hours", "lock_ttl_minutes",
             "agent_ids", "agents", "created_by_name", "created_at",
+            "waiting", "checked_out",
         ]
         read_only_fields = ["id", "created_at", "created_by_name"]
+
+    def _load(self, obj):
+        cache = self.__dict__.setdefault("_load_cache", {})
+        if obj.pk not in cache:
+            cache[obj.pk] = obj.load()
+        return cache[obj.pk]
+
+    def get_waiting(self, obj) -> int:
+        return self._load(obj)["waiting"]
+
+    def get_checked_out(self, obj) -> int:
+        return self._load(obj)["checked_out"]
+
+    # ---- Validation -------------------------------------------------
+    # Every filter value used to be accepted as typed, so a queue could
+    # filter on a closed status (never served), a priority or source that
+    # doesn't exist, or a non-text tag — and silently serve nothing.
+
+    @staticmethod
+    def _choices(values, allowed, field, label):
+        if not isinstance(values, list):
+            raise serializers.ValidationError({field: "Send a list."})
+        cleaned = []
+        for v in values:
+            key = str(v).strip().lower()
+            if key not in allowed:
+                raise serializers.ValidationError({field: f"Unknown {label}: {v}."})
+            if key not in cleaned:
+                cleaned.append(key)
+        return cleaned
+
+    def validate_name(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Give the queue a name.")
+        clash = CallQueue.objects.filter(name__iexact=value)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError(f"There is already a queue called '{value}'.")
+        return value
+
+    def validate_filter_statuses(self, value):
+        from apps.core.constants import LeadStatus
+
+        cleaned = self._choices(value, {c for c, _ in LeadStatus.CHOICES}, "filter_statuses", "status")
+        closed = [s for s in cleaned if s in LeadStatus.FINAL_STATUSES]
+        if closed:
+            labels = dict(LeadStatus.CHOICES)
+            raise serializers.ValidationError(
+                f"A queue never serves closed leads ({', '.join(labels[s] for s in closed)}). "
+                f"Pick open statuses."
+            )
+        return cleaned
+
+    def validate_filter_priorities(self, value):
+        from apps.core.constants import LeadPriority
+
+        return self._choices(value, {c for c, _ in LeadPriority.CHOICES}, "filter_priorities", "priority")
+
+    def validate_filter_sources(self, value):
+        from apps.core.constants import LeadSource
+
+        return self._choices(value, {c for c, _ in LeadSource.CHOICES}, "filter_sources", "source")
+
+    def validate_filter_tags(self, value):
+        if not isinstance(value, list) or any(not isinstance(t, str) for t in value):
+            raise serializers.ValidationError("Tags must be a list of words.")
+        return [t.strip() for t in value if t.strip()]
+
+    def validate_agent_ids(self, value):
+        from apps.authentication.models import Agent
+        from apps.core.constants import AgentRole
+
+        ids = list(dict.fromkeys(value))
+        if not ids:
+            raise serializers.ValidationError("Assign at least one agent.")
+        found = {a.pk: a for a in Agent.objects.filter(pk__in=ids)}
+        missing = [i for i in ids if i not in found]
+        if missing:
+            raise serializers.ValidationError(f"No such agent: {', '.join(map(str, missing))}.")
+        inactive = [a.name for a in found.values() if not a.is_active]
+        if inactive:
+            raise serializers.ValidationError(f"Deactivated: {', '.join(inactive)}.")
+        viewers = [a.name for a in found.values() if a.role == AgentRole.READONLY]
+        if viewers:
+            raise serializers.ValidationError(
+                f"Read-only users can't dial from a queue: {', '.join(viewers)}."
+            )
+        return ids
+
+    def validate(self, data):
+        if self.instance is None and "agent_ids" not in data:
+            raise serializers.ValidationError({"agent_ids": "Assign at least one agent."})
+        return data
 
     def get_agents(self, obj):
         return [

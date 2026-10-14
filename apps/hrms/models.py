@@ -179,6 +179,14 @@ class LeaveRequest(TimeStampedModel):
         validators=[MinValueValidator(Decimal("0.5"))],
     )
     reason = models.CharField(max_length=300, blank=True, default="")
+    # A half day (start == end). The days are counted by the server from the
+    # employee's working days, holidays and week-offs — they used to be typed
+    # in freely, so a six-day leave could be charged as half a day.
+    half_day = models.BooleanField(default=False)
+    # {"2026": "2.0", "2027": "2.0"} — what approval took from each year's
+    # balance, so a leave across New Year is charged to both years and a
+    # cancellation refunds exactly that.
+    charged_days = models.JSONField(default=dict, blank=True)
 
     status = models.CharField(
         max_length=15, choices=ApprovalStatus.CHOICES, default=ApprovalStatus.PENDING, db_index=True
@@ -381,3 +389,43 @@ class Payslip(TimeStampedModel):
         self.status = PayslipStatus.FINALIZED
         self.finalized_at = timezone.now()
         self.save(update_fields=["status", "finalized_at"])
+
+
+class HrmsPolicy(TimeStampedModel):
+    """
+    Company-wide HRMS settings (one row per tenant).
+
+    The present / half-day thresholds were fixed in code at 6 h / 3 h, and
+    nothing limited what an expense claim could be.
+    """
+
+    full_day_hours = models.DecimalField(
+        max_digits=4, decimal_places=2, default=Decimal("6.00"),
+        validators=[MinValueValidator(Decimal("0.5"))],
+        help_text="Worked hours that count as a full present day.",
+    )
+    half_day_hours = models.DecimalField(
+        max_digits=4, decimal_places=2, default=Decimal("3.00"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Worked hours that count as a half day.",
+    )
+    expense_max_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("100000.00"),
+        help_text="Largest single expense claim allowed.",
+    )
+    expense_receipt_above = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Claims above this amount need a receipt. Empty = never required.",
+    )
+
+    class Meta:
+        verbose_name = "HRMS policy"
+        verbose_name_plural = "HRMS policy"
+
+    @classmethod
+    def current(cls) -> "HrmsPolicy":
+        policy = cls.objects.order_by("pk").first()
+        return policy or cls.objects.create()
+
+    def __str__(self):
+        return "HRMS policy"

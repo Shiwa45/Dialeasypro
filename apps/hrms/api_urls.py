@@ -18,6 +18,7 @@ from apps.hrms.views import (
     HolidayDetailView,
     HolidayListCreateView,
     HRMSDashboardView,
+    HrmsPolicyView,
     IncentiveComputeView,
     IncentiveEarningListView,
     IncentiveRuleDetailView,
@@ -34,12 +35,15 @@ from apps.hrms.views import (
     PayslipFinalizeView,
     PayslipListView,
     PayslipMarkPaidView,
+    PayslipReopenView,
+    SalaryStructureDetailView,
     SalaryStructureListCreateView,
 )
 
 urlpatterns = [
     # Dashboard
     path("dashboard/", HRMSDashboardView.as_view(), name="api_hrms_dashboard"),
+    path("policy/", HrmsPolicyView.as_view(), name="api_hrms_policy"),
 
     # Employees
     path("me/", MyEmployeeView.as_view(), name="api_hrms_me"),
@@ -83,9 +87,12 @@ urlpatterns = [
 
     # Payroll
     path("salary-structures/", SalaryStructureListCreateView.as_view(), name="api_hrms_salary_structures"),
+    path("salary-structures/<int:pk>/", SalaryStructureDetailView.as_view(),
+         name="api_hrms_salary_structure_detail"),
     path("payslips/", PayslipListView.as_view(), name="api_hrms_payslips"),
     path("payslips/<int:pk>/", PayslipDetailView.as_view(), name="api_hrms_payslip_detail"),
     path("payslips/<int:pk>/finalize/", PayslipFinalizeView.as_view(), name="api_hrms_payslip_finalize"),
+    path("payslips/<int:pk>/reopen/", PayslipReopenView.as_view(), name="api_hrms_payslip_reopen"),
     path("payslips/<int:pk>/mark-paid/", PayslipMarkPaidView.as_view(), name="api_hrms_payslip_mark_paid"),
     path("payroll/run/", PayrollRunView.as_view(), name="api_hrms_payroll_run"),
 ]

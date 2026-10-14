@@ -10,9 +10,11 @@ org. Payroll is admin-only.
 import logging
 from datetime import date, datetime
 
+from decimal import Decimal
+
 from django.utils import timezone
 from rest_framework import generics, status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -27,6 +29,7 @@ from apps.hrms.models import (
     Employee,
     ExpenseClaim,
     Holiday,
+    HrmsPolicy,
     IncentiveEarning,
     IncentiveRule,
     LeaveBalance,
@@ -36,13 +39,14 @@ from apps.hrms.models import (
     SalaryStructure,
 )
 from apps.hrms.permissions import (
-    employee_for, is_hr_manager, is_self_approval, scope_to_visible,
+    can_manage, employee_for, is_hr_manager, is_self_approval, scope_to_visible,
 )
 from apps.hrms.serializers import (
     AttendanceSerializer,
     EmployeeSerializer,
     ExpenseClaimSerializer,
     HolidaySerializer,
+    HrmsPolicySerializer,
     IncentiveEarningSerializer,
     IncentiveRuleSerializer,
     LeaveBalanceSerializer,
@@ -68,11 +72,42 @@ def _parse_month(value, default=None) -> date:
     raise ValueError(f"Invalid month '{value}'. Use YYYY-MM.")
 
 
+class Refused(APIException):
+    """A 400 with a plain message and an error code, e.g. Refused("...", code="in_use")."""
+
+    status_code = 400
+    default_code = "invalid_request"
+
+
+class NotEnrolled(APIException):
+    status_code = 400
+    default_code = "not_enrolled"
+    default_detail = "You are not enrolled in HRMS. Ask your admin to add an employee record."
+
+
 def _require_employee(request) -> Employee:
+    """The caller's own Employee row. Raises a 400 (it used to be a 500) when there is none."""
     employee = employee_for(request.user)
     if employee is None:
-        raise ValueError("You are not enrolled in HRMS. Ask your admin to add an employee record.")
+        raise NotEnrolled()
     return employee
+
+
+def _target_employee(request) -> Employee:
+    """
+    Who a new leave request or claim is for: `employee` in the body when the
+    caller manages HRMS (HR filing on someone's behalf), else the caller.
+    """
+    raw = request.data.get("employee")
+    # Anyone else's `employee` is ignored: their request is always their own.
+    if raw not in (None, "") and can_manage(request.user):
+        employee = Employee.objects.filter(pk=raw).select_related("agent").first()
+        if employee is None:
+            raise ValidationError({"employee": "No such employee."})
+        if not employee.is_active:
+            raise ValidationError({"employee": f"{employee.agent.name} has left."})
+        return employee
+    return _require_employee(request)
 
 
 # ============================================================
@@ -140,12 +175,20 @@ class MyEmployeeView(APIView):
 # Attendance
 # ============================================================
 
-class AttendanceListView(generics.ListAPIView):
+class AttendanceListView(generics.ListCreateAPIView):
+    """GET the attendance list; POST adds a missing day (HR)."""
+
     serializer_class = AttendanceSerializer
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_ATTENDANCE
     required_capability = Cap.HRMS_VIEW
+    capability_by_method = {"POST": Cap.HRMS_MANAGE}
     pagination_class = StandardResultsSetPagination
+
+    def perform_create(self, serializer):
+        from apps.hrms.constants import AttendanceSource
+
+        serializer.save(source=AttendanceSource.ADMIN)
 
     def get_queryset(self):
         qs = Attendance.objects.select_related("employee__agent")
@@ -172,10 +215,7 @@ class CheckInView(APIView):
     def post(self, request):
         from apps.hrms.services.attendance import mark_check_in
 
-        try:
-            employee = _require_employee(request)
-        except ValueError as exc:
-            return Response({"error": "not_enrolled", "message": str(exc)}, status=400)
+        employee = _require_employee(request)
         return Response(AttendanceSerializer(mark_check_in(employee)).data)
 
 
@@ -189,10 +229,7 @@ class CheckOutView(APIView):
     def post(self, request):
         from apps.hrms.services.attendance import mark_check_out
 
-        try:
-            employee = _require_employee(request)
-        except ValueError as exc:
-            return Response({"error": "not_enrolled", "message": str(exc)}, status=400)
+        employee = _require_employee(request)
         return Response(AttendanceSerializer(mark_check_out(employee)).data)
 
 
@@ -214,9 +251,26 @@ class AttendanceSyncView(APIView):
             day = datetime.strptime(raw, "%Y-%m-%d").date() if raw else timezone.localdate()
         except ValueError:
             return Response({"error": "invalid_date", "message": "Use YYYY-MM-DD."}, status=400)
+        if day > timezone.localdate():
+            return Response({"error": "invalid_date", "message": "Can't sync a future date."}, status=400)
 
-        written = sync_attendance_for_date(day)
-        return Response({"date": day.isoformat(), "rows_written": written})
+        stats = {}
+        written = sync_attendance_for_date(day, stats)
+        # rows_written counts only rows rebuilt from the dialer; rows kept
+        # (corrected by hand, checked in, on leave) are reported separately.
+        return Response({"date": day.isoformat(), "rows_written": written, "kept": stats.get("kept", 0)})
+
+
+def _resync_holiday(*days):
+    """
+    A holiday added, moved or removed changes that day's attendance. The
+    rows derived from the dialer are rebuilt now; they used to stay ABSENT
+    (and docked) until someone synced the date by hand.
+    """
+    from apps.hrms.services.attendance import resync_auto_rows
+
+    for day in {d for d in days if d}:
+        resync_auto_rows(day)
 
 
 class HolidayListCreateView(generics.ListCreateAPIView):
@@ -228,6 +282,10 @@ class HolidayListCreateView(generics.ListCreateAPIView):
     required_capability = Cap.HRMS_VIEW
     capability_by_method = {"POST": Cap.HRMS_MANAGE}
 
+    def perform_create(self, serializer):
+        holiday = serializer.save()
+        _resync_holiday(holiday.date)
+
 
 class HolidayDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = HolidaySerializer
@@ -236,19 +294,40 @@ class HolidayDetailView(generics.RetrieveUpdateDestroyAPIView):
     required_feature = FeatureKey.HRMS_ATTENDANCE
     required_capability = Cap.HRMS_MANAGE
 
+    def perform_update(self, serializer):
+        old = serializer.instance.date
+        holiday = serializer.save()
+        _resync_holiday(old, holiday.date)
+
+    def perform_destroy(self, instance):
+        day = instance.date
+        instance.delete()
+        _resync_holiday(day)
+
 
 # ============================================================
 # Leave
 # ============================================================
 
 class LeaveTypeListCreateView(generics.ListCreateAPIView):
+    """
+    Active types; `?include_inactive=1` adds switched-off ones for HR, so a
+    type removed by mistake can be switched back on.
+    """
+
     serializer_class = LeaveTypeSerializer
-    queryset = LeaveType.objects.filter(is_active=True)
     pagination_class = None
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_LEAVE
     required_capability = Cap.HRMS_VIEW
     capability_by_method = {"POST": Cap.HRMS_MANAGE}
+
+    def get_queryset(self):
+        qs = LeaveType.objects.all()
+        if not (self.request.query_params.get("include_inactive") in ("1", "true")
+                and can_manage(self.request.user)):
+            qs = qs.filter(is_active=True)
+        return qs
 
 
 class LeaveTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -280,8 +359,14 @@ class LeaveBalanceListView(generics.ListAPIView):
     def get_queryset(self):
         qs = LeaveBalance.objects.select_related("leave_type", "employee__agent")
         qs = scope_to_visible(qs, self.request.user)
-        year = self.request.query_params.get("year") or timezone.localdate().year
-        return qs.filter(year=year)
+        p = self.request.query_params
+        year = p.get("year") or timezone.localdate().year
+        qs = qs.filter(year=year)
+        if employee_id := p.get("employee"):
+            qs = qs.filter(employee_id=employee_id)
+        if p.get("mine") in ("1", "true"):
+            qs = qs.filter(employee__agent=self.request.user)
+        return qs.order_by("employee__employee_code", "leave_type__name")
 
 
 class LeaveRequestListCreateView(generics.ListCreateAPIView):
@@ -299,22 +384,17 @@ class LeaveRequestListCreateView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        employee = _require_employee(self.request)
-        leave_type = serializer.validated_data["leave_type"]
-        days = serializer.validated_data["days"]
-        start = serializer.validated_data["start_date"]
-        end = serializer.validated_data["end_date"]
-
-        if leave_svc.overlapping_requests(employee, start, end).exists():
-            raise ValidationError(
-                {"start_date": "You already have a pending or approved leave overlapping these dates."}
+        employee = _target_employee(self.request)
+        data = serializer.validated_data
+        half_day = bool(data.get("half_day"))
+        try:
+            per_year = leave_svc.validate_request(
+                employee, data["leave_type"], data["start_date"], data["end_date"], half_day,
             )
-        if not leave_svc.has_sufficient_balance(employee, leave_type, start.year, days):
-            balance = leave_svc.balance_for(employee, leave_type, start.year)
-            raise ValidationError(
-                {"days": f"Insufficient balance: {balance.remaining_days} day(s) remaining."}
-            )
-        serializer.save(employee=employee)
+        except leave_svc.LeaveError as exc:
+            raise ValidationError({exc.field: str(exc)})
+        serializer.save(employee=employee, half_day=half_day,
+                        days=sum(per_year.values(), Decimal("0")))
 
 
 # Rejecting your own request is allowed — it is the same as withdrawing it.
@@ -393,7 +473,11 @@ class ExpenseClaimListCreateView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(employee=_require_employee(self.request))
+        employee = _target_employee(self.request)
+        day = serializer.validated_data["date"]
+        if day < employee.date_of_joining:
+            raise ValidationError({"date": "That's before the employee joined."})
+        serializer.save(employee=employee)
 
 
 class ExpenseDecisionView(APIView):
@@ -455,9 +539,21 @@ class IncentiveRuleDetailView(generics.RetrieveUpdateDestroyAPIView):
     required_feature = FeatureKey.INCENTIVE_ENGINE
     required_capability = Cap.HRMS_INCENTIVES
 
+    def perform_update(self, serializer):
+        from apps.hrms.services.incentives import discard_unpaid_earnings
+
+        rule = serializer.save()
+        if not rule.is_active:
+            discard_unpaid_earnings(rule)
+
     def perform_destroy(self, instance):
+        from apps.hrms.services.incentives import discard_unpaid_earnings
+
         instance.is_active = False
         instance.save(update_fields=["is_active"])
+        # Earnings a switched-off rule had computed are dropped unless a
+        # finalized payslip already paid them; they used to be paid anyway.
+        discard_unpaid_earnings(instance)
 
 
 class IncentiveEarningListView(generics.ListAPIView):
@@ -513,6 +609,51 @@ class SalaryStructureListCreateView(generics.ListCreateAPIView):
         return qs
 
 
+def _structure_in_use(structure) -> Payslip | None:
+    """A finalized or paid payslip built from this structure, if any."""
+    from apps.hrms.constants import PayslipStatus
+
+    for slip in Payslip.objects.filter(employee=structure.employee).exclude(status=PayslipStatus.DRAFT):
+        b = slip.breakdown or {}
+        if structure.pk in (b.get("structure_ids") or [b.get("structure_id")]):
+            return slip
+    return None
+
+
+class SalaryStructureDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE /api/v1/hrms/salary-structures/{id}/
+
+    A structure a finalized payslip was built from can't be changed (add a
+    new one from a later date instead); any other can be fixed or removed.
+    """
+
+    serializer_class = SalaryStructureSerializer
+    queryset = SalaryStructure.objects.select_related("employee__agent")
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_PAYROLL
+    required_capability = Cap.HRMS_PAYROLL
+
+    def _refuse_if_used(self, structure):
+        slip = _structure_in_use(structure)
+        if slip is not None:
+            raise Refused(
+                f"The {slip.period_month:%B %Y} payslip ({slip.status}) was built from this "
+                f"structure. Add a new structure from a later date instead.", code="in_use",
+            )
+
+    def perform_update(self, serializer):
+        if "employee" in serializer.validated_data and \
+                serializer.validated_data["employee"] != serializer.instance.employee:
+            raise ValidationError({"employee": "Can't be changed."})
+        self._refuse_if_used(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._refuse_if_used(instance)
+        instance.delete()
+
+
 class PayslipListView(generics.ListAPIView):
     serializer_class = PayslipSerializer
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
@@ -561,10 +702,49 @@ class PayslipFinalizeView(APIView):
     required_capability = Cap.HRMS_PAYROLL
 
     def post(self, request, pk):
+        from apps.hrms.services.payroll import finalize_blockers
+
         slip = Payslip.objects.filter(pk=pk).first()
         if slip is None:
             return Response({"error": "not_found"}, status=404)
-        slip.finalize()
+        reason = finalize_blockers(slip)
+        if reason:
+            return Response({"error": "cannot_finalize", "message": reason}, status=400)
+        # Conditional update: a double click can't finalize twice.
+        from apps.hrms.constants import PayslipStatus
+
+        Payslip.objects.filter(pk=slip.pk, status=PayslipStatus.DRAFT).update(
+            status=PayslipStatus.FINALIZED, finalized_at=timezone.now(), updated_at=timezone.now(),
+        )
+        slip.refresh_from_db()
+        return Response(PayslipSerializer(slip).data)
+
+
+class PayslipReopenView(APIView):
+    """
+    POST /api/v1/hrms/payslips/{id}/reopen/ — finalized → draft, to correct it.
+
+    A paid slip can't be reopened: money has left.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_PAYROLL
+    required_capability = Cap.HRMS_PAYROLL
+
+    def post(self, request, pk):
+        from apps.hrms.constants import PayslipStatus
+
+        slip = Payslip.objects.filter(pk=pk).first()
+        if slip is None:
+            return Response({"error": "not_found"}, status=404)
+        reopened = Payslip.objects.filter(pk=slip.pk, status=PayslipStatus.FINALIZED).update(
+            status=PayslipStatus.DRAFT, finalized_at=None, updated_at=timezone.now(),
+        )
+        slip.refresh_from_db()
+        if not reopened:
+            msg = ("This payslip is marked paid and can't be reopened."
+                   if slip.status == PayslipStatus.PAID else "This payslip is already a draft.")
+            return Response({"error": "invalid_transition", "message": msg}, status=400)
         return Response(PayslipSerializer(slip).data)
 
 
@@ -599,9 +779,11 @@ class PayslipMarkPaidView(APIView):
         return Response(PayslipSerializer(slip).data)
 
 
-class PayslipDetailView(generics.RetrieveAPIView):
+class PayslipDetailView(generics.RetrieveDestroyAPIView):
     """
     GET /api/v1/hrms/payslips/{id}/ — one slip including its `breakdown` JSON.
+    DELETE removes a DRAFT slip (payroll admins); its incentives and claims
+    are released for the next run.
 
     Scoped like the list: an employee may open their own slip, never a peer's.
     """
@@ -610,6 +792,15 @@ class PayslipDetailView(generics.RetrieveAPIView):
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
     required_feature = FeatureKey.HRMS_PAYROLL
     required_capability = Cap.HRMS_VIEW
+    capability_by_method = {"DELETE": Cap.HRMS_PAYROLL}
+
+    def perform_destroy(self, instance):
+        from apps.hrms.constants import PayslipStatus
+
+        if instance.status != PayslipStatus.DRAFT:
+            raise Refused("Only a draft payslip can be deleted. Reopen it first.",
+                          code="invalid_transition")
+        instance.delete()  # FKs on earnings and claims are SET_NULL
 
     def get_queryset(self):
         qs = Payslip.objects.select_related("employee__agent")
@@ -676,11 +867,19 @@ class LeaveBalanceManageView(APIView):
         serializer = LeaveBalanceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        allocated = data.get("allocated_days", Decimal("0"))
+        existing = LeaveBalance.objects.filter(
+            employee=data["employee"], leave_type=data["leave_type"], year=data["year"],
+        ).first()
+        if existing and allocated < existing.used_days:
+            raise ValidationError({
+                "allocated_days": f"{existing.used_days} day(s) are already used; allocate at least that.",
+            })
         obj, _created = LeaveBalance.objects.update_or_create(
             employee=data["employee"],
             leave_type=data["leave_type"],
             year=data["year"],
-            defaults={"allocated_days": data.get("allocated_days", 0)},
+            defaults={"allocated_days": allocated},
         )
         return Response(LeaveBalanceSerializer(obj).data, status=201)
 
@@ -694,8 +893,15 @@ class LeaveBalanceManageView(APIView):
         return Response(serializer.data)
 
     def delete(self, request, pk):
-        deleted, _ = LeaveBalance.objects.filter(pk=pk).delete()
-        return Response(status=204 if deleted else 404)
+        obj = LeaveBalance.objects.filter(pk=pk).first()
+        if obj is None:
+            return Response(status=404)
+        if obj.used_days > 0:
+            return Response({"error": "in_use",
+                             "message": "Leave has been taken against this balance; it can't be deleted."},
+                            status=400)
+        obj.delete()
+        return Response(status=204)
 
 
 class BulkAllocateLeaveView(APIView):
@@ -715,22 +921,38 @@ class BulkAllocateLeaveView(APIView):
     required_capability = Cap.HRMS_MANAGE
 
     def post(self, request):
-        year = int(request.data.get("year") or timezone.localdate().year)
+        try:
+            year = int(request.data.get("year") or timezone.localdate().year)
+        except (TypeError, ValueError):
+            return Response({"error": "invalid_year", "message": "Enter a year."}, status=400)
+        if not 2000 <= year <= 2100:
+            return Response({"error": "invalid_year", "message": "Enter a year between 2000 and 2100."},
+                            status=400)
         employees = Employee.objects.filter(is_active=True)
         types = LeaveType.objects.filter(is_active=True)
 
-        created = updated = 0
+        created = updated = carried = 0
         for employee in employees:
             for leave_type in types:
+                target = _yearly_entitlement(employee, leave_type, year)
+                carry = Decimal("0")
+                if leave_type.carry_forward:
+                    prev = LeaveBalance.objects.filter(
+                        employee=employee, leave_type=leave_type, year=year - 1
+                    ).first()
+                    if prev and prev.remaining_days > 0:
+                        carry = prev.remaining_days
+                        carried += 1
+                target += carry
                 obj, was_created = LeaveBalance.objects.get_or_create(
                     employee=employee, leave_type=leave_type, year=year,
-                    defaults={"allocated_days": leave_type.annual_quota_days},
+                    defaults={"allocated_days": target},
                 )
                 if was_created:
                     created += 1
-                elif obj.allocated_days < leave_type.annual_quota_days:
-                    obj.allocated_days = leave_type.annual_quota_days
-                    obj.save(update_fields=["allocated_days"])
+                elif obj.allocated_days < target:
+                    obj.allocated_days = target
+                    obj.save(update_fields=["allocated_days", "updated_at"])
                     updated += 1
 
         return Response({
@@ -739,7 +961,25 @@ class BulkAllocateLeaveView(APIView):
             "leave_types": types.count(),
             "created": created,
             "topped_up": updated,
+            "carried_forward": carried,
         })
+
+
+def _yearly_entitlement(employee, leave_type, year: int) -> Decimal:
+    """
+    The year's quota, pro-rated by whole months for someone who joined during
+    it (rounded to the nearest half day). Someone joining in October used to
+    get the full year's leave.
+    """
+    quota = leave_type.annual_quota_days
+    joined = employee.date_of_joining
+    if joined.year < year:
+        return quota
+    if joined.year > year:
+        return Decimal("0")
+    months = 12 - joined.month + 1
+    share = quota * Decimal(months) / Decimal(12)
+    return (share * 2).quantize(Decimal("1")) / 2
 
 
 # ============================================================
@@ -773,17 +1013,29 @@ class HRMSDashboardView(APIView):
         employees = Employee.objects.filter(is_active=True)
         headcount = employees.count()
 
-        today_rows = Attendance.objects.filter(date=today)
+        # Only people still employed: an exited employee's row used to count.
+        today_rows = Attendance.objects.filter(date=today, employee__is_active=True)
         by_status = dict(
-            today_rows.values_list("status").annotate(n=Count("id")).values_list("status", "n")
+            today_rows.order_by().values_list("status").annotate(n=Count("id")).values_list("status", "n")
         )
 
         payroll = Payslip.objects.filter(period_month=month).aggregate(
             gross=Sum("gross_earnings"),
             net=Sum("net_pay"),
             incentives=Sum("incentives_amount"),
+            reimbursements=Sum("reimbursements_amount"),
+            deductions=Sum("total_deductions"),
             n=Count("id"),
         )
+
+        # "Awaiting you": what this person can actually decide — not their
+        # own requests, which they can't approve.
+        pending_leave = LeaveRequest.objects.filter(status=ApprovalStatus.PENDING)
+        pending_expenses = ExpenseClaim.objects.filter(status=ApprovalStatus.PENDING)
+        own = employee_for(request.user)
+        if own is not None and is_self_approval(request.user, own):
+            pending_leave = pending_leave.exclude(employee=own)
+            pending_expenses = pending_expenses.exclude(employee=own)
 
         return Response({
             "month": month.isoformat(),
@@ -798,14 +1050,43 @@ class HRMSDashboardView(APIView):
                 "not_marked": max(0, headcount - today_rows.count()),
             },
             "pending": {
-                "leave": LeaveRequest.objects.filter(status=ApprovalStatus.PENDING).count(),
-                "expenses": ExpenseClaim.objects.filter(status=ApprovalStatus.PENDING).count(),
+                "leave": pending_leave.count(),
+                "expenses": pending_expenses.count(),
             },
             "payroll": {
                 "payslips": payroll["n"] or 0,
                 "gross": str(payroll["gross"] or 0),
                 "net": str(payroll["net"] or 0),
                 "incentives": str(payroll["incentives"] or 0),
+                "reimbursements": str(payroll["reimbursements"] or 0),
+                "deductions": str(payroll["deductions"] or 0),
             },
             "birthdays_this_month": [],  # reserved: Agent has no DOB field yet
         })
+
+
+# ============================================================
+# Policy
+# ============================================================
+
+class HrmsPolicyView(APIView):
+    """
+    GET/PATCH /api/v1/hrms/policy/
+
+    Company-wide thresholds: hours for a present / half day, the largest
+    expense claim, and above what amount a receipt is required.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, HasCapability]
+    required_feature = FeatureKey.HRMS_ATTENDANCE
+    required_capability = Cap.HRMS_VIEW
+    capability_by_method = {"PATCH": Cap.HRMS_MANAGE}
+
+    def get(self, request):
+        return Response(HrmsPolicySerializer(HrmsPolicy.current()).data)
+
+    def patch(self, request):
+        serializer = HrmsPolicySerializer(HrmsPolicy.current(), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)

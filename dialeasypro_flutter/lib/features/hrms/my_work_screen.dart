@@ -342,10 +342,17 @@ class _ApplyLeaveFormState extends State<_ApplyLeaveForm> {
   DateTime _end = DateTime.now();
   final _reason = TextEditingController();
   bool _saving = false;
+  bool _halfDay = false;
 
-  /// The backend rejects `days` greater than the span of the range, so derive
-  /// it rather than letting the agent type a number that will be refused.
-  String get _days => '${_end.difference(_start).inDays + 1}.0';
+  bool get _singleDay =>
+      _start.year == _end.year && _start.month == _end.month && _start.day == _end.day;
+
+  /// Calendar days in the range. The server charges only the working days
+  /// among them (holidays and week-offs are left out) and says how many.
+  int get _span => DateTime(_end.year, _end.month, _end.day)
+          .difference(DateTime(_start.year, _start.month, _start.day))
+          .inDays +
+      1;
 
   @override
   void dispose() {
@@ -369,6 +376,7 @@ class _ApplyLeaveFormState extends State<_ApplyLeaveForm> {
       } else {
         _end = picked.isBefore(_start) ? _start : picked;
       }
+      if (!_singleDay) _halfDay = false;
     });
   }
 
@@ -379,17 +387,21 @@ class _ApplyLeaveFormState extends State<_ApplyLeaveForm> {
     }
     setState(() => _saving = true);
     try {
-      await HrmsService.instance.applyLeave(
+      final days = await HrmsService.instance.applyLeave(
         leaveType: _type,
         startDate: _start,
         endDate: _end,
-        days: _days,
+        halfDay: _singleDay && _halfDay,
         reason: _reason.text.trim(),
       );
       widget.onDone();
       if (mounted) {
         Navigator.pop(context);
-        AppToast.show(context, 'Leave requested', isSuccess: true);
+        AppToast.show(
+          context,
+          days == null ? 'Leave requested' : 'Leave requested · $days working day(s)',
+          isSuccess: true,
+        );
       }
     } catch (e) {
       if (mounted) AppToast.show(context, ApiClient.errorMessage(e), isError: true);
@@ -423,8 +435,22 @@ class _ApplyLeaveFormState extends State<_ApplyLeaveForm> {
           const SizedBox(width: 10),
           Expanded(child: _DateField(label: 'To', value: _end, onTap: () => _pick(false))),
         ]),
+        if (_singleDay)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('Half day'),
+            value: _halfDay,
+            onChanged: (v) => setState(() => _halfDay = v),
+          ),
         const SizedBox(height: 6),
-        Text('$_days day(s)', style: AppTextStyles.mono),
+        Text(
+          _singleDay && _halfDay
+              ? 'Half a day is taken from your balance.'
+              : '$_span calendar day(s) · only working days are charged; '
+                  'holidays and week-offs are left out.',
+          style: AppTextStyles.mono,
+        ),
         const SizedBox(height: 12),
         BrutalTextField(controller: _reason, label: 'Reason', maxLines: 3),
         const SizedBox(height: 18),

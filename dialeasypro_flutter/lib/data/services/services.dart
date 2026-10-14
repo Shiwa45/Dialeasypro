@@ -247,17 +247,25 @@ class QueueService {
   }
 
   /// Atomically check out the next lead from a queue.
-  /// Returns {lead, lock_expires_at, queue} or {empty: true}.
+  /// Returns {lead, lock_expires_at, queue, resumed} or {empty: true}.
+  /// `resumed` is true when the lead is one this agent already had checked
+  /// out from the queue (the app was restarted mid-call).
   Future<Map<String, dynamic>> pullNext(int queueId) async {
     final res = await _dio.post('/leads/queues/$queueId/pull/');
     return (res.data as Map).cast<String, dynamic>();
   }
 
-  /// Release a checked-out lead (skip / end session). mark_dialed=true if it was dialed.
-  Future<void> release(int leadId, {bool markDialed = false}) async {
+  /// Release a checked-out lead.
+  ///
+  /// By default it is a skip: the lead stays out of this agent's queue until
+  /// its lock time runs out, so the next pull moves on to another lead (it
+  /// used to serve the same one again). `returnToQueue` (leaving the queue)
+  /// puts it back at once. `markDialed` if it was dialled.
+  Future<void> release(int leadId, {bool markDialed = false, bool returnToQueue = false}) async {
     await _dio.post('/leads/queues/release/', data: {
       'lead_id': leadId,
       'mark_dialed': markDialed,
+      'return_to_queue': returnToQueue,
     });
   }
 }

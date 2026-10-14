@@ -53,6 +53,7 @@ def test_an_expense_claim_from_the_app_is_accepted(asha):
 def test_a_leave_request_from_the_app_is_accepted(asha):
     unpaid = LeaveType.objects.create(name="Unpaid", annual_quota_days=Decimal("0"), is_paid=False)
     start = timezone.localdate() + timedelta(days=7)
+    start += timedelta(days=(7 - start.weekday()) % 7)  # a Monday: a working day
 
     # Exactly what the app sends (HrmsService.applyLeave).
     r = _post(LeaveRequestListCreateView, asha, {

@@ -525,8 +525,9 @@ class CallQueue(TimeStampedModel):
           * only leads ASSIGNED to this agent (no cross-agent leakage),
           * not soft-deleted,
           * matching the queue's status/priority/source/tag filters,
-          * not currently locked by ANOTHER agent (or lock expired),
-          * past the redial cooldown,
+          * not currently checked out by this agent (or lock expired),
+          * past the redial cooldown — unless a follow-up booked after the
+            last dial is due,
           * (optionally) only unworked leads,
           * (optionally) only follow-up-due leads,
           * (optionally) excluding DND numbers,
@@ -564,21 +565,51 @@ class CallQueue(TimeStampedModel):
 
         now = timezone.now()
 
-        # Exclude every lead that is currently locked (lock not yet expired),
-        # regardless of who holds it. This guarantees "pull next" always returns
-        # a fresh, distinct lead and the same lead is never handed out twice —
-        # neither to another agent nor repeatedly to the same agent.
-        qs = qs.exclude(locked_by__isnull=False, lock_expires_at__gt=now)
+        # Exclude leads this agent has checked out (or skipped) and whose
+        # lock hasn't expired, so "pull next" always returns a distinct lead.
+        # Only the agent's own locks count: the queue serves nothing but the
+        # agent's own leads, so a lock held by anyone else is left over from
+        # before the lead was reassigned — it used to hide the lead from its
+        # new owner until the lock ran out.
+        qs = qs.exclude(locked_by=agent, lock_expires_at__gt=now)
 
-        # Redial cooldown.
+        # Redial cooldown. A follow-up booked AFTER the last dial and now due
+        # overrides it: "Busy — call back in 1 hour" used to wait out the
+        # whole 24-hour cooldown.
         if self.redial_cooldown_hours:
             from datetime import timedelta
+            from django.db.models import F
             cutoff = now - timedelta(hours=self.redial_cooldown_hours)
             qs = qs.filter(
-                Q(last_dialed_at__isnull=True) | Q(last_dialed_at__lt=cutoff)
+                Q(last_dialed_at__isnull=True)
+                | Q(last_dialed_at__lt=cutoff)
+                | Q(next_followup_at__lte=now, next_followup_at__gt=F("last_dialed_at"))
             )
 
         return self._apply_ordering(qs)
+
+    def release_locks(self) -> int:
+        """Hand back every lead checked out from this queue (deleted or switched off)."""
+        return Lead.objects.filter(locked_queue=self).update(
+            locked_by=None, locked_at=None, lock_expires_at=None, locked_queue=None,
+        )
+
+    def load(self) -> dict:
+        """
+        What is in the queue right now, for the admin screen: leads waiting
+        for the queue's active members, and leads checked out from it.
+        """
+        from apps.core.constants import AgentRole
+
+        members = [
+            m.agent for m in self.memberships.select_related("agent")
+            if m.agent.is_active and m.agent.role != AgentRole.READONLY
+        ]
+        waiting = sum(self.eligible_leads(a).count() for a in members) if self.is_active else 0
+        checked_out = Lead.objects.filter(
+            locked_queue=self, lock_expires_at__gt=timezone.now()
+        ).count()
+        return {"waiting": waiting, "checked_out": checked_out}
 
     def _apply_ordering(self, qs):
         if self.order_by == self.ORDER_OLDEST:

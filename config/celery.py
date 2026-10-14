@@ -49,17 +49,20 @@ app.conf.beat_schedule = {
     },
 
     # ---- HRMS (no-op for tenants without the module) -------
-    # Derive yesterday's attendance from dialer session logs, 00:30 IST
-    # (19:00 UTC prev day) — after all of the day's intervals have closed.
+    # Derive yesterday's attendance from dialer session logs at 00:30 —
+    # after all of the day's intervals have closed. CELERY_TIMEZONE is
+    # Asia/Kolkata, so these hours are IST. They were written as UTC
+    # (19:00 / 20:00), which ran the "after midnight" sync at 7 PM IST the
+    # next day.
     "hrms-sync-attendance": {
         "task": "apps.hrms.tasks.sync_attendance_all_tenants",
-        "schedule": crontab(hour=19, minute=0),
+        "schedule": crontab(hour=0, minute=30),
         "options": {"queue": "default"},
     },
     # Refresh the running month's incentive earnings nightly, 1:30 AM IST.
     "hrms-recompute-incentives": {
         "task": "apps.hrms.tasks.recompute_incentives_all_tenants",
-        "schedule": crontab(hour=20, minute=0),
+        "schedule": crontab(hour=1, minute=30),
         "options": {"queue": "default"},
     },
 

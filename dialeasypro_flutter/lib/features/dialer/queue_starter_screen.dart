@@ -98,6 +98,9 @@ class QueueStarterScreen extends ConsumerWidget {
                     final i = entry.key;
                     final q = entry.value;
                     final count = (q['pending_count'] as num?)?.toInt() ?? 0;
+                    // Leads already checked out to this agent in the queue
+                    // (the app was closed mid-call): opening it resumes them.
+                    final held = (q['held_count'] as num?)?.toInt() ?? 0;
                     final description = (q['description'] as String?)?.trim() ?? '';
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
@@ -106,10 +109,11 @@ class QueueStarterScreen extends ConsumerWidget {
                         description: description,
                         order: _orderLabels[q['order_by']],
                         count: count,
+                        held: held,
                         isAuto: q['mode'] == 'auto',
                         onBreak: onBreak,
                         // Greyed out on a break; tapping still explains why.
-                        onTap: count == 0 ? null : () => _startQueue(context, ref, q['id'] as int),
+                        onTap: count == 0 && held == 0 ? null : () => _startQueue(context, ref, q['id'] as int),
                       ).animate().fadeIn(delay: (60 + i * 50).ms).slideY(begin: 0.06, end: 0),
                     );
                   }),
@@ -132,7 +136,12 @@ class QueueStarterScreen extends ConsumerWidget {
       return;
     }
     ref.read(dialerProvider.notifier).startServerQueue(queueId);
-    if (context.mounted) context.push('/dialer');
+    if (context.mounted) {
+      await context.push('/dialer');
+      // Back from the dialer: the counts changed (they used to stay as they
+      // were until the agent pulled down to refresh).
+      if (context.mounted) ref.invalidate(availableQueuesProvider);
+    }
   }
 }
 
@@ -140,6 +149,7 @@ class _QueueCard extends StatelessWidget {
   final String title, description;
   final String? order;
   final int count;
+  final int held;
   final bool isAuto;
   final bool onBreak;
   final VoidCallback? onTap;
@@ -148,6 +158,7 @@ class _QueueCard extends StatelessWidget {
     required this.description,
     required this.order,
     required this.count,
+    this.held = 0,
     required this.isAuto,
     required this.onBreak,
     this.onTap,
@@ -155,7 +166,7 @@ class _QueueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final empty = count == 0;
+    final empty = count == 0 && held == 0;
     final ready = !empty && !onBreak;
 
     // The shadow sits on an outer box and the white card is the Material on
@@ -227,6 +238,13 @@ class _QueueCard extends StatelessWidget {
                       color: AppColors.text2,
                       background: AppColors.sunken,
                     ),
+                  if (held > 0)
+                    _Chip(
+                      icon: Icons.lock_clock_outlined,
+                      label: held == 1 ? '1 lead open' : '$held leads open',
+                      color: AppColors.brass,
+                      background: AppColors.brass50,
+                    ),
                 ]),
               ])),
               const SizedBox(width: 12),
@@ -264,7 +282,9 @@ class _QueueCard extends StatelessWidget {
                       ? 'Empty'
                       : onBreak
                           ? 'On break'
-                          : 'Start',
+                          : held > 0
+                              ? 'Resume'
+                              : 'Start',
                   style:
                       AppTextStyles.label.copyWith(fontSize: 9.5, color: ready ? AppColors.brandInk : AppColors.text3),
                 ),
@@ -345,7 +365,9 @@ class _HowItWorks extends StatelessWidget {
           SizedBox(height: 12),
           _Tip(Icons.lock_outline, 'Each lead is locked to you while you call it'),
           _Tip(Icons.block, 'A dialled lead never comes back as a new lead'),
-          _Tip(Icons.schedule, 'Skipped leads return to the pool after a short hold'),
+          _Tip(Icons.skip_next, 'A skipped lead comes back after the queue\'s lock time (30 min by default)'),
+          _Tip(Icons.event_available, 'A follow-up that is due is served even if you called the lead recently'),
+          _Tip(Icons.play_circle_outline, 'Closed the app mid-call? Open the queue again to resume that lead'),
           _Tip(Icons.refresh, 'Pull down to refresh the counts'),
         ]),
       );

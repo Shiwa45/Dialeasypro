@@ -1093,6 +1093,14 @@ class _CompletedView extends ConsumerWidget {
           ]),
         ).animate().scale(begin: const Offset(0.7, 0.7), curve: Curves.easeOutBack),
 
+        // Why it ended early: the queue was switched off or deleted, or the
+        // agent was taken off it.
+        if (state.error != null) ...[
+          const SizedBox(height: 16),
+          Text(state.error!, textAlign: TextAlign.center,
+              style: const TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 13, color: AppColors.error)),
+        ],
+
         const SizedBox(height: 24),
         // Summary stats
         Row(children: [

@@ -1353,6 +1353,17 @@ class CallQueueDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         return CallQueue.objects.prefetch_related("memberships__agent")
 
+    def perform_update(self, serializer):
+        queue = serializer.save()
+        if not queue.is_active:
+            # Switched off: its checked-out leads go back to their owners.
+            queue.release_locks()
+
+    def perform_destroy(self, instance):
+        # Deleting used to leave its leads locked until the lock ran out.
+        instance.release_locks()
+        instance.delete()
+
 
 class AvailableQueuesView(APIView):
     """
@@ -1403,12 +1414,27 @@ class QueuePullNextView(APIView):
 
         now = timezone.now()
         with transaction.atomic():
-            # Lock the row at the DB level; skip rows another txn is locking.
+            # A lead this agent already has checked out from this queue comes
+            # back first. Pulling again (the app restarted, the queue was
+            # re-opened) used to check out a SECOND lead and leave the first
+            # locked, unworked, for the whole lock time.
             lead = (
-                queue.eligible_leads(agent)
-                .select_for_update(skip_locked=True)
+                Lead.objects.select_for_update()
+                .filter(
+                    locked_by=agent, locked_queue=queue, lock_expires_at__gt=now,
+                    assigned_to=agent, is_deleted=False,
+                )
+                .order_by("locked_at")
                 .first()
             )
+            resumed = lead is not None
+            if lead is None:
+                # Lock the row at the DB level; skip rows another txn is locking.
+                lead = (
+                    queue.eligible_leads(agent)
+                    .select_for_update(skip_locked=True)
+                    .first()
+                )
             if lead is None:
                 return Response(
                     {"empty": True, "message": "No leads available in this queue right now."},
@@ -1428,6 +1454,7 @@ class QueuePullNextView(APIView):
                 "lead": LeadDetailSerializer(lead, context={"request": request}).data,
                 "lock_expires_at": lead.lock_expires_at.isoformat(),
                 "queue": {"id": queue.pk, "name": queue.name, "mode": queue.mode},
+                "resumed": resumed,
             },
             status=status.HTTP_200_OK,
         )
@@ -1436,8 +1463,14 @@ class QueuePullNextView(APIView):
 class QueueReleaseView(APIView):
     """
     POST /api/v1/leads/queues/release/
-    Release a lead the agent had checked out (e.g. on skip or session end).
-    Body: { "lead_id": <id>, "mark_dialed": false }
+    Release a lead the agent had checked out.
+    Body: { "lead_id": <id>, "mark_dialed": false, "return_to_queue": false }
+
+    By default the lead is SKIPPED: it stays out of this agent's queue until
+    its lock time runs out. Releasing it outright put it straight back at the
+    top of the queue, so the next pull served the very same lead and Skip
+    could never move on. `return_to_queue: true` (leaving the queue) puts it
+    back at once.
     """
 
     permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
@@ -1455,11 +1488,20 @@ class QueueReleaseView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        return_to_queue = str(request.data.get("return_to_queue", "")).lower() in ("1", "true")
+
         if mark_dialed:
             lead.mark_worked(dialed=True)
-        lead.release_lock()
+        if return_to_queue or mark_dialed:
+            lead.release_lock()
+            return Response({"released": True, "lead_id": lead.pk})
 
-        return Response({"released": True, "lead_id": lead.pk})
+        ttl = lead.locked_queue.lock_ttl_minutes if lead.locked_queue_id else 30
+        until = timezone.now() + timedelta(minutes=ttl)
+        Lead.objects.filter(pk=lead.pk).update(
+            locked_queue=None, lock_expires_at=until,
+        )
+        return Response({"released": True, "lead_id": lead.pk, "skipped_until": until.isoformat()})
 
 
 # ============================================================

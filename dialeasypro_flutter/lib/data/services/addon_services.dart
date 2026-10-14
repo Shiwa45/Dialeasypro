@@ -77,20 +77,27 @@ class HrmsService {
         LeaveRequest.fromJson,
       );
 
-  Future<void> applyLeave({
+  /// Applies for leave and returns the number of days the server charged.
+  ///
+  /// The server counts the days itself — working days only, so holidays and
+  /// week-offs inside the range are not charged. `halfDay` is for a single
+  /// date only.
+  Future<String?> applyLeave({
     required int leaveType,
     required DateTime startDate,
     required DateTime endDate,
-    required String days,
+    bool halfDay = false,
     required String reason,
   }) async {
-    await _dio.post('/hrms/leave/', data: {
+    final res = await _dio.post('/hrms/leave/', data: {
       'leave_type': leaveType,
       'start_date': _date(startDate),
       'end_date': _date(endDate),
-      'days': days,
+      'half_day': halfDay,
       'reason': reason,
     });
+    final data = res.data;
+    return data is Map ? data['days']?.toString() : null;
   }
 
   /// An agent may cancel their own pending request; approve/reject are the

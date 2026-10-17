@@ -105,7 +105,9 @@ class CallTranscribeView(_CallScopedView):
                 {"error": "no_recording", "message": "This call has no recording."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        transcribe_call.delay(connection.schema_name, str(call.pk))
+        # force: the task skips a recording that is already transcribed, so
+        # "Re-transcribe" used to do nothing for exactly the calls it is for.
+        transcribe_call.delay(connection.schema_name, str(call.pk), force=True)
         return Response({"queued": True}, status=status.HTTP_202_ACCEPTED)
 
 
@@ -255,7 +257,18 @@ class AIUsageView(APIView):
             calls_transcribed=Count("call_id"),
             audio_seconds=Sum("duration_seconds"),
         )
+        from apps.ai.services.gemini import is_enabled
+
+        waiting = CallRecording.objects.exclude(cloud_url="", file="").exclude(
+            transcript_status="done"
+        )
         return Response({
+            # Whether the server has GEMINI_API_KEY. Without it nothing is
+            # ever transcribed and the screen had no way of saying so.
+            "gemini_configured": is_enabled(),
+            # Recordings not yet transcribed (waiting, running or failed).
+            "recordings_waiting": waiting.count(),
+            "transcripts_failed": waiting.filter(transcript_status="failed").count(),
             "calls_analysed": totals["calls_analysed"] or 0,
             "input_tokens": totals["input_tokens"] or 0,
             "output_tokens": totals["output_tokens"] or 0,

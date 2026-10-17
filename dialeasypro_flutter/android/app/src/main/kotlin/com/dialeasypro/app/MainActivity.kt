@@ -42,6 +42,15 @@ class MainActivity : FlutterActivity() {
                         val since = call.argument<Number>("sinceMillis")?.toLong() ?: 0L
                         result.success(CallLogReader.findOutgoing(applicationContext, number, since))
                     }
+                    // Length of an audio file in ms (null if unreadable). Run
+                    // off the main thread: reading a header can touch storage.
+                    "audioDurationMs" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        Thread {
+                            val ms = AudioProbe.durationMs(path)
+                            runOnUiThread { result.success(ms) }
+                        }.start()
+                    }
                     else -> result.notImplemented()
                 }
             }

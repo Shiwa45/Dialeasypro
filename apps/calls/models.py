@@ -305,7 +305,9 @@ class CallRecording(models.Model):
         max_length=20, blank=True, default="",
         choices=[
             ("filename_number", "Phone number in filename"),
+            ("filename_name", "Lead's name in filename"),
             ("timestamp", "Timestamp + duration window"),
+            ("mic_fallback", "App microphone (fallback)"),
             ("manual", "Manual upload"),
         ],
         help_text="How the device file was matched to this call.",

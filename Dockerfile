@@ -6,7 +6,9 @@
 # ---- Base Stage (shared) -----------------------------------
 FROM python:3.12-slim AS base
 
-# System dependencies for psycopg2, Pillow, lxml, etc.
+# System dependencies for psycopg2, Pillow, lxml, etc. ffmpeg converts phone
+# call recordings (.amr, .3gp, .m4a) to MP3 for the AI call summary when
+# Cloudinary can't (see apps/ai/services/audio.py).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
@@ -23,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gettext \
     postgresql-client \
     redis-tools \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables

@@ -544,12 +544,18 @@ class DialerNotifier extends StateNotifier<DialerState> {
         // Nobody answered: the mic only heard ringing. It used to be
         // uploaded as the call's "recording" anyway.
         CallRecordingService.instance.discard(mic);
-      } else if (mic != null || call.durationSec > 0) {
+      } else {
         CallRecordingService.instance.captureForCall(
           callId: created.id,
           phoneNumber: call.phoneNumber,
           startedAt: call.startedAt,
           durationSec: call.durationSec,
+          // The real end of the call: matching anchored on start + talk
+          // time, early by the whole ringing time.
+          endedAt: call.endedAt,
+          // A recorder names the file after the contact when the number is
+          // saved in the phone.
+          leadName: call.leadName,
           fallbackFile: mic,
         ).catchError((_) {});
       }

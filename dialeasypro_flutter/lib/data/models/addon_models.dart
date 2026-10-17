@@ -50,12 +50,15 @@ class Mod {
 // ─── AI ─────────────────────────────────────────────────────
 class CallTranscript {
   final String transcript, status, language;
+  /// Why transcription failed (no speech, unreadable file, ...).
+  final String error;
   final DateTime? transcribedAt;
 
   const CallTranscript({
     required this.transcript,
     required this.status,
     required this.language,
+    this.error = '',
     this.transcribedAt,
   });
 
@@ -63,6 +66,7 @@ class CallTranscript {
     transcript: j['transcript'] as String? ?? '',
     status: j['transcript_status'] as String? ?? 'pending',
     language: j['transcript_language'] as String? ?? '',
+    error: j['transcript_error'] as String? ?? '',
     transcribedAt: DateTime.tryParse(j['transcribed_at'] as String? ?? ''),
   );
 
@@ -71,6 +75,9 @@ class CallTranscript {
 
 class CallInsight {
   final String status, summary, sentiment, nextAction, coachingNotes;
+  /// Why there is no summary yet or at all (waiting for the server's AI key,
+  /// no speech in the recording, ...).
+  final String error;
   final double? sentimentScore;
   final List<String> keyPoints, objections;
   final String? suggestedDispositionName;
@@ -84,6 +91,7 @@ class CallInsight {
     required this.coachingNotes,
     required this.keyPoints,
     required this.objections,
+    this.error = '',
     this.sentimentScore,
     this.suggestedDispositionName,
     this.generatedAt,
@@ -94,6 +102,7 @@ class CallInsight {
 
   factory CallInsight.fromJson(Map<String, dynamic> j) => CallInsight(
     status: j['status'] as String? ?? 'pending',
+    error: j['error'] as String? ?? '',
     summary: j['summary'] as String? ?? '',
     sentiment: j['sentiment'] as String? ?? '',
     sentimentScore: (j['sentiment_score'] as num?)?.toDouble(),

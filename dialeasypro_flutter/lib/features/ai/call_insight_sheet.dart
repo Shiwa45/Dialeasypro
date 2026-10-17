@@ -83,7 +83,7 @@ class _CallInsightBody extends ConsumerWidget {
           data: (data) {
             final (insight, transcript) = data;
             if (insight == null || !insight.isReady) {
-              return _pending(transcript);
+              return _pending(transcript, insight);
             }
             return _insight(context, insight, transcript);
           },
@@ -94,7 +94,21 @@ class _CallInsightBody extends ConsumerWidget {
 
   /// The pipeline runs after upload, so "not ready" is the common case for a
   /// call that just ended. Say which stage it's at rather than "no data".
-  Widget _pending(CallTranscript? transcript) {
+  Widget _pending(CallTranscript? transcript, [CallInsight? insight]) {
+    // The server says why there is no summary: no speech in the recording,
+    // a file it could not read, or the AI key not set up yet.
+    if (insight != null && insight.error.isNotEmpty &&
+        (insight.status == 'failed' || insight.status == 'skipped' || insight.status == 'pending')) {
+      return EmptyStateView(
+        icon: insight.status == 'pending' ? Icons.hourglass_empty : Icons.error_outline,
+        title: switch (insight.status) {
+          'skipped' => 'Nothing to summarise',
+          'failed' => 'Summary failed',
+          _ => 'Waiting',
+        },
+        message: insight.error,
+      );
+    }
     if (transcript == null) {
       return const EmptyStateView(
         icon: Icons.mic_off,
@@ -106,9 +120,9 @@ class _CallInsightBody extends ConsumerWidget {
       'failed' => EmptyStateView(
           icon: Icons.error_outline,
           title: 'Transcription failed',
-          message: transcript.transcript.isEmpty
-              ? 'The recording could not be transcribed. Ask your manager to retry it.'
-              : transcript.transcript,
+          message: transcript.error.isNotEmpty
+              ? transcript.error
+              : 'The recording could not be transcribed. Ask your manager to retry it.',
         ),
       'done' => const EmptyStateView(
           icon: Icons.hourglass_empty,

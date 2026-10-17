@@ -9,29 +9,20 @@ at this stage would destroy the phrasing the insights step needs to read tone
 and objections.
 """
 import logging
-import os
-
-import requests
 
 from apps.ai.constants import MAX_RECORDING_SECONDS
+from apps.ai.services import audio
 from apps.ai.services.gemini import (
     INLINE_AUDIO_LIMIT,
     GeminiError,
     GeminiUnavailable,
     get_client,
     is_enabled,
-    mime_for,
     raise_if_blocked,
     transcribe_model_name,
 )
 
 logger = logging.getLogger(__name__)
-
-FETCH_TIMEOUT = 60
-
-# Gemini's own hard cap is far higher, but a call recording past this is not a
-# call recording.
-MAX_AUDIO_BYTES = 100 * 1024 * 1024
 
 PROMPT = """\
 Transcribe this recording of a sales phone call between an agent and a lead.
@@ -48,38 +39,23 @@ English, transliterate the Hindi into Latin script as spoken.
 TranscriptionError = GeminiError
 TranscriptionUnavailable = GeminiUnavailable
 
+
+class NoSpeech(GeminiError):
+    """The recording holds no intelligible speech. Retrying won't change that."""
+
+
+# Failures that are about the recording itself, not about Gemini being busy:
+# retrying only burns audio tokens.
+PERMANENT_ERRORS = (NoSpeech, audio.AudioError)
+
 __all__ = [
+    "NoSpeech",
+    "PERMANENT_ERRORS",
     "TranscriptionError",
     "TranscriptionUnavailable",
     "is_enabled",
     "transcribe",
 ]
-
-
-def _audio_bytes(recording) -> bytes:
-    """
-    Pull the recording's audio into memory.
-
-    Recordings live in one of three places depending on tenant setup:
-    Cloudinary (the norm), a local media volume (Cloudinary unconfigured), or a
-    Django storage backend. Try them in that order.
-    """
-    if recording.cloud_url:
-        resp = requests.get(recording.cloud_url, timeout=FETCH_TIMEOUT)
-        if resp.status_code != 200:
-            raise GeminiError(f"Could not fetch recording audio: HTTP {resp.status_code}")
-        data = resp.content
-    elif recording.file:
-        with recording.file.open("rb") as fh:
-            data = fh.read()
-    else:
-        raise GeminiError("Recording has no audio file.")
-
-    if not data:
-        raise GeminiError("Recording audio is empty.")
-    if len(data) > MAX_AUDIO_BYTES:
-        raise GeminiError(f"Recording is {len(data) // (1024 * 1024)} MB; refusing to transcribe.")
-    return data
 
 
 def _audio_part(client, data: bytes, mime: str):
@@ -108,31 +84,33 @@ def transcribe(recording) -> dict:
     Transcribe one `calls.CallRecording`.
 
     Returns {"text": str, "language": str, "provider": str}.
-    Raises TranscriptionUnavailable when unconfigured, TranscriptionError
-    otherwise.
+    Raises TranscriptionUnavailable when unconfigured, NoSpeech / AudioError
+    for a recording that can't be transcribed, TranscriptionError otherwise.
     """
     if not is_enabled():
         raise GeminiUnavailable("GEMINI_API_KEY is not set.")
 
     if recording.duration_seconds and recording.duration_seconds > MAX_RECORDING_SECONDS:
-        raise GeminiError(
+        raise audio.AudioError(
             f"Recording is {recording.duration_seconds}s; refusing to transcribe "
             f"anything over {MAX_RECORDING_SECONDS}s."
         )
 
-    # Prefer the stored format; fall back to the URL's extension.
-    fmt = recording.format
-    if not fmt and recording.cloud_url:
-        fmt = os.path.splitext(recording.cloud_url.split("?", 1)[0])[1]
-    mime = mime_for(fmt)
+    # Converted to MP3 first when the phone wrote a format Gemini can't read
+    # (.amr, .3gp, .m4a) — see services/audio.py.
+    data, mime = audio.prepare(recording)
 
     client = get_client()
-    data = _audio_bytes(recording)
     part, uploaded = _audio_part(client, data, mime)
 
     model = transcribe_model_name()
     try:
-        response = client.models.generate_content(model=model, contents=[part, PROMPT])
+        try:
+            response = client.models.generate_content(model=model, contents=[part, PROMPT])
+        except GeminiError:
+            raise
+        except Exception as exc:  # SDK / transport errors — retryable
+            raise GeminiError(f"Gemini request failed: {exc}") from exc
         raise_if_blocked(response)
         text = (response.text or "").strip()
     finally:
@@ -143,7 +121,7 @@ def transcribe(recording) -> dict:
             except Exception as exc:  # noqa: BLE001 — cleanup must not mask the real error
                 logger.warning("Could not delete uploaded audio %s: %s", uploaded.name, exc)
 
-    if not text or text == "NO_SPEECH":
-        raise GeminiError("The recording contains no intelligible speech.")
+    if not text or text.strip(" .`'\"").upper() == "NO_SPEECH":
+        raise NoSpeech("The recording contains no intelligible speech.")
 
     return {"text": text, "language": "", "provider": model[:60]}

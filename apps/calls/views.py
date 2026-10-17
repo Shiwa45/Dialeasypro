@@ -192,7 +192,42 @@ class CallLogDetailView(generics.RetrieveAPIView):
         return calls_visible_to(agent, qs)
 
 
-def _queue_ai_pipeline(call) -> None:
+# How much each way of finding a recording can be trusted. A better match
+# replaces a worse one: the app's microphone fallback is uploaded when the
+# phone's own recording can't be found right away, and the phone's file — the
+# real two-way audio — used to be refused when it turned up later, because
+# the call "already had a recording".
+MATCH_RANK = {
+    "mic_fallback": 0,
+    "timestamp": 1,
+    "filename_name": 2,
+    "filename_number": 3,
+    "manual": 3,
+}
+
+
+def _match_rank(matched_by: str) -> int:
+    return MATCH_RANK.get((matched_by or "").strip(), 1)
+
+
+def _reset_ai_for_new_audio(rec) -> None:
+    """New audio for the call: the old transcript and summary describe the old file."""
+    from apps.ai.models import CallInsight
+
+    rec.transcript = ""
+    rec.transcript_status = "pending"
+    rec.transcript_error = ""
+    rec.transcript_language = ""
+    rec.transcript_provider = ""
+    rec.transcribed_at = None
+    rec.save(update_fields=[
+        "transcript", "transcript_status", "transcript_error",
+        "transcript_language", "transcript_provider", "transcribed_at",
+    ])
+    CallInsight.objects.filter(call_id=rec.call_id).delete()
+
+
+def _queue_ai_pipeline(call, force: bool = False) -> None:
     """
     Kick off transcription (which chains into insights) for a freshly uploaded
     recording. The task no-ops for tenants without the AI Suite module, so
@@ -204,7 +239,7 @@ def _queue_ai_pipeline(call) -> None:
     from apps.ai.tasks import transcribe_call
 
     try:
-        transcribe_call.delay(connection.schema_name, str(call.pk))
+        transcribe_call.delay(connection.schema_name, str(call.pk), force=force)
     except Exception as exc:  # noqa: BLE001 — broker unreachable, etc.
         logger.warning("Could not queue AI pipeline for call %s: %s", call.pk, exc)
 
@@ -228,7 +263,12 @@ class CallRecordingUploadView(APIView):
       file            — the audio file (required)
       duration_seconds (optional)
       source_filename  (optional) original device filename
-      matched_by       (optional) filename_number | timestamp | manual
+      matched_by       (optional) filename_number | filename_name | timestamp |
+                       mic_fallback | manual
+
+    A call keeps one recording. A new upload replaces it only when it was
+    matched more reliably (MATCH_RANK) — the phone's own recording replaces
+    the microphone fallback; anything else is answered "already uploaded".
     """
 
     permission_classes = [IsAuthenticatedAgent, HasFeatureAccess, IsNotReadOnly]
@@ -266,7 +306,10 @@ class CallRecordingUploadView(APIView):
             )
         if client_cloud_url:
             existing = CallRecording.objects.filter(call=call).first()
-            if existing and existing.cloud_url:
+            if existing and existing.cloud_url and (
+                _match_rank(request.data.get("matched_by") or "filename_number")
+                <= _match_rank(existing.matched_by)
+            ):
                 return Response(
                     {"id": existing.pk, "already_uploaded": True, "playback_url": existing.cloud_url},
                     status=status.HTTP_200_OK,
@@ -315,9 +358,13 @@ class CallRecordingUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Idempotency: if this call already has a recording, don't re-upload.
+        matched_by = (request.data.get("matched_by") or "manual")[:20]
+
+        # Idempotency: a call keeps its recording unless this one was matched
+        # more reliably (the phone's own file replacing the mic fallback).
         existing = CallRecording.objects.filter(call=call).first()
-        if existing and existing.cloud_url:
+        replacing = bool(existing and (existing.cloud_url or existing.file))
+        if replacing and _match_rank(matched_by) <= _match_rank(existing.matched_by):
             return Response(
                 {
                     "id": existing.pk,
@@ -349,10 +396,30 @@ class CallRecordingUploadView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        # The measured length of the stored audio wins over what the phone
+        # said; the phone's figure is the fallback (local storage measures
+        # nothing).
+        exact = result.get("duration_exact")
         try:
-            duration = int(request.data.get("duration_seconds") or result.get("duration") or 0)
+            duration = int(round(exact)) if exact else int(
+                request.data.get("duration_seconds") or result.get("duration") or 0
+            )
         except (TypeError, ValueError):
             duration = result.get("duration") or 0
+
+        # A microphone recording that captured a fraction of a second is the
+        # phone muting the mic during the call, not a recording. Kept, it
+        # stood in for the real recording and gave the AI nothing to read.
+        if matched_by == "mic_fallback" and exact is not None and exact < 2:
+            from apps.core.cloudinary_utils import delete_call_recording
+
+            if not replacing:
+                delete_call_recording(result.get("public_id", ""))
+            return Response(
+                {"error": "recording_empty",
+                 "message": "The microphone recording is empty (the phone muted it during the call)."},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
 
         rec, _ = CallRecording.objects.update_or_create(
             call=call,
@@ -363,12 +430,14 @@ class CallRecordingUploadView(APIView):
                 "duration_seconds": duration,
                 "format": (result.get("format") or ext or "m4a")[:10],
                 "source_filename": (request.data.get("source_filename") or upload.name)[:400],
-                "matched_by": (request.data.get("matched_by") or "manual")[:20],
+                "matched_by": matched_by,
                 "uploaded_at": timezone.now(),
             },
         )
+        if replacing:
+            _reset_ai_for_new_audio(rec)
         _fill_duration_from_recording(call, rec)
-        _queue_ai_pipeline(call)
+        _queue_ai_pipeline(call, force=replacing)
 
         return Response(
             {

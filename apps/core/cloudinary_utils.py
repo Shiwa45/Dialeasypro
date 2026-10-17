@@ -66,16 +66,37 @@ def upload_call_recording(file_obj, *, tenant_schema: str, public_id: str) -> di
             unique_filename=False,
             use_filename=False,
         )
+        raw_duration = result.get("duration")
         return {
             "url": result.get("secure_url"),
             "public_id": result.get("public_id"),
             "bytes": result.get("bytes", 0),
-            "duration": int(result.get("duration") or 0),
+            "duration": int(round(float(raw_duration or 0))),
+            # Cloudinary's measured length, unrounded (None when it reported
+            # none) — a 0.2 s "recording" must be told apart from unknown.
+            "duration_exact": float(raw_duration) if raw_duration is not None else None,
             "format": result.get("format", ""),
         }
     except Exception as exc:
         logger.error(f"[Cloudinary] Upload failed for {public_id}: {exc}")
         return None
+
+
+def delete_call_recording(public_id: str) -> bool:
+    """Remove a recording from Cloudinary. False when it could not be deleted."""
+    if not public_id or public_id.startswith("local:"):
+        return False
+    cloudinary = _configure()
+    if cloudinary is None:
+        return False
+    try:
+        import cloudinary.uploader
+
+        cloudinary.uploader.destroy(public_id, resource_type="video", invalidate=True)
+        return True
+    except Exception as exc:
+        logger.warning(f"[Cloudinary] Could not delete {public_id}: {exc}")
+        return False
 
 
 def upload_image(file_obj, *, tenant_schema: str, folder: str = "template_media") -> dict | None:

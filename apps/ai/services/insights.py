@@ -71,6 +71,10 @@ class InsightUnavailable(GeminiUnavailable):
     """No Gemini API key configured — not the tenant's fault."""
 
 
+class InsightRequestFailed(InsightError):
+    """Gemini could not be reached or answered with nothing usable. Worth retrying."""
+
+
 class TranscriptTooShort(InsightError):
     """Nothing to analyse. Mark skipped, never retry."""
 
@@ -144,10 +148,10 @@ def analyse(transcript: str, *, disposition_slugs: list[str], meta: dict) -> dic
     except GeminiError:
         raise
     except Exception as exc:  # SDK/transport errors
-        raise InsightError(f"Gemini request failed: {exc}") from exc
+        raise InsightRequestFailed(f"Gemini request failed: {exc}") from exc
 
     if parsed is None:
-        raise InsightError("Gemini returned no structured output.")
+        raise InsightRequestFailed("Gemini returned no structured output.")
 
     sentiment = parsed.sentiment.strip().lower()
     if sentiment not in Sentiment.ALL:

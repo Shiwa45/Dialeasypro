@@ -27,6 +27,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _allFiles = true;
   int _pendingRecordings = 0;
   bool _scanning = false;
+  String _micMode = 'auto';
 
   /// Force the deferred recording sync now.
   ///
@@ -67,7 +68,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final recEnabled = await CallRecordingService.instance.isEnabled();
     final pending = await CallRecordingService.instance.pendingCount();
     final allFiles = await SetupService.instance.hasAllFilesAccessOption();
+    final micMode = await CallRecordingService.instance.micMode();
     if (mounted) setState(() {
+      _micMode = micMode;
       _allFiles = allFiles;
       _waMode = m;
       _callRecEnabled = recEnabled;
@@ -243,6 +246,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 10),
+              // The app's own microphone recording. On a phone with a call
+              // recorder it must stay off: holding the microphone stops the
+              // phone recording the call.
+              Row(children: [
+                const Expanded(child: Text('App microphone recording', style: AppTextStyles.caption)),
+                DropdownButton<String>(
+                  value: _micMode,
+                  underline: const SizedBox.shrink(),
+                  items: const [
+                    DropdownMenuItem(value: 'auto', child: Text('Auto')),
+                    DropdownMenuItem(value: 'never', child: Text('Off')),
+                    DropdownMenuItem(value: 'always', child: Text('Always')),
+                  ],
+                  onChanged: (v) async {
+                    if (v == null) return;
+                    await CallRecordingService.instance.setMicMode(v);
+                    if (mounted) setState(() => _micMode = v);
+                  },
+                ),
+              ]),
+              Text(
+                _micMode == 'auto'
+                    ? 'Only on phones without their own call recorder.'
+                    : _micMode == 'never'
+                        ? "Only your phone's call recorder is used."
+                        : 'Records every call — on most phones this stops the '
+                            "phone's own recorder from working.",
+                style: AppTextStyles.caption.copyWith(fontSize: 11),
+              ),
+              const SizedBox(height: 6),
               // Manual trigger for the deferred sync. The automatic sweep runs
               // whenever the app resumes, but an agent chasing a specific
               // missing recording should not have to guess when that happened.

@@ -9,7 +9,7 @@ analysis). There is no separate speech-to-text vendor.
 
 Config (settings / .env):
     GEMINI_API_KEY              required; the module is dormant without it
-    GEMINI_MODEL               default "gemini-2.5-flash"
+    GEMINI_MODEL               default DEFAULT_MODEL (below)
     GEMINI_TRANSCRIBE_MODEL    default = GEMINI_MODEL
 """
 import logging
@@ -17,6 +17,11 @@ import logging
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+# Google no longer serves the 2.5 models to new projects ("model is
+# deprecated" for anyone who hadn't used them). Its current recommendation for
+# new work is 3.8 Flash. Override with GEMINI_MODEL when Google moves on again.
+DEFAULT_MODEL = "gemini-3.8-flash"
 
 # The Gemini file API is required past this size; below it, audio rides inline
 # in the request. Gemini's own inline ceiling is 20 MB for the whole request,
@@ -64,7 +69,7 @@ def get_client():
 
 
 def model_name() -> str:
-    return getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
+    return getattr(settings, "GEMINI_MODEL", DEFAULT_MODEL)
 
 
 def transcribe_model_name() -> str:

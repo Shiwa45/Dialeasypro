@@ -559,7 +559,7 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 # empty and the whole module stays dormant — recordings sit at "pending" and
 # nothing is billed.
 GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
-GEMINI_MODEL = config("GEMINI_MODEL", default="gemini-2.5-flash")
+GEMINI_MODEL = config("GEMINI_MODEL", default="gemini-3.8-flash")
 # Transcription is the expensive half (audio tokens). Point it at a cheaper or
 # stronger model independently if you need to; defaults to GEMINI_MODEL.
 GEMINI_TRANSCRIBE_MODEL = config("GEMINI_TRANSCRIBE_MODEL", default="")

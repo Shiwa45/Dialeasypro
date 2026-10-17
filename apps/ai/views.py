@@ -154,13 +154,19 @@ class CallAnalyseView(_CallScopedView):
         if call is None:
             return self.not_found()
         recording = CallRecording.objects.filter(call=call).first()
-        if recording is None or not recording.transcript:
+        if recording is None:
             return Response(
-                {
-                    "error": "no_transcript",
-                    "message": "Transcribe this call before analysing it.",
-                },
+                {"error": "no_recording", "message": "This call has no recording to analyse."},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not recording.transcript:
+            # The transcript failed or never ran (e.g. the Gemini model was
+            # retired). Refusing here left "Re-analyse" stuck on a 400 with no
+            # way out on the website, so transcribe again: the transcription
+            # task queues the analysis itself when it finishes.
+            transcribe_call.delay(connection.schema_name, str(call.pk), force=True)
+            return Response(
+                {"queued": True, "transcribing": True}, status=status.HTTP_202_ACCEPTED,
             )
         analyse_call.delay(connection.schema_name, str(call.pk))
         return Response({"queued": True}, status=status.HTTP_202_ACCEPTED)

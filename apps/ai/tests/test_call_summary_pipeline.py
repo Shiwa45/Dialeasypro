@@ -199,3 +199,25 @@ def test_usage_says_whether_gemini_is_configured(admin, rec):
     r = _call(ai_views.AIUsageView, "get", admin)
     assert r.status_code == 200, r.data
     assert r.data["gemini_configured"] is False and r.data["recordings_waiting"] == 1
+
+
+def test_reanalyse_without_a_transcript_transcribes_first(admin, rec):
+    # A transcript that failed (retired model) used to leave Re-analyse stuck
+    # on a 400 — the website has no Transcribe button to get past it.
+    with patch("apps.ai.views.transcribe_call.delay") as transcribe, \
+         patch("apps.ai.views.analyse_call.delay") as analyse:
+        r = _call(ai_views.CallAnalyseView, "post", admin, pk=rec.call_id)
+    assert r.status_code == 202, r.data
+    assert transcribe.call_args.kwargs.get("force") is True
+    analyse.assert_not_called()  # the transcription task queues it when done
+
+
+def test_reanalyse_with_a_transcript_analyses_straight_away(admin, rec):
+    rec.transcript = "Agent: Hello. Customer: Hi."
+    rec.save(update_fields=["transcript"])
+    with patch("apps.ai.views.transcribe_call.delay") as transcribe, \
+         patch("apps.ai.views.analyse_call.delay") as analyse:
+        r = _call(ai_views.CallAnalyseView, "post", admin, pk=rec.call_id)
+    assert r.status_code == 202, r.data
+    analyse.assert_called_once()
+    transcribe.assert_not_called()

@@ -22,7 +22,9 @@ from apps.leads.views import (
     LeadBatchListView,
     LeadBatchStatsView,
     LeadBatchStatusView,
+    LeadBatchUnassignView,
     LeadBulkAssignView,
+    LeadBulkDeleteView,
     LeadDistributeView,
     LeadFlushView,
     LeadDashboardStatsView,
@@ -54,6 +56,7 @@ urlpatterns = [
     path("batches/distribute/", LeadBatchDistributeView.as_view(), name="api_lead_batch_distribute"),
     path("batches/<int:pk>/", LeadBatchDetailView.as_view(), name="api_lead_batch_detail"),
     path("batches/<int:pk>/status/", LeadBatchStatusView.as_view(), name="api_lead_batch_status"),
+    path("batches/<int:pk>/unassign/", LeadBatchUnassignView.as_view(), name="api_lead_batch_unassign"),
     path("batches/<int:pk>/stats/", LeadBatchStatsView.as_view(), name="api_lead_batch_stats"),
 
     # ---- Lead CRUD -----------------------------------------
@@ -63,6 +66,7 @@ urlpatterns = [
 
     # ---- Bulk operations -----------------------------------
     path("bulk-assign/", LeadBulkAssignView.as_view(), name="api_lead_bulk_assign"),
+    path("bulk-delete/", LeadBulkDeleteView.as_view(), name="api_lead_bulk_delete"),
     path("distribute/", LeadDistributeView.as_view(), name="api_lead_distribute"),
     path("flush/", LeadFlushView.as_view(), name="api_lead_flush"),
     path("unassign-by-agent/", LeadUnassignByAgentView.as_view(), name="api_lead_unassign_by_agent"),

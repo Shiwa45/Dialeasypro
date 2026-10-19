@@ -153,6 +153,11 @@ class LeadListSerializer(serializers.ModelSerializer):
     last_disposition_category = serializers.CharField(
         source="last_disposition.category", read_only=True, default=None,
     )
+    # The lead's most recent note (a note on the lead, or the notes saved
+    # with a call's outcome) — the list's Notes column. Filled from the
+    # annotations of views.with_latest_note; absent elsewhere.
+    latest_note = serializers.SerializerMethodField()
+    latest_note_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Lead
@@ -170,7 +175,25 @@ class LeadListSerializer(serializers.ModelSerializer):
             "last_disposition", "last_disposition_name", "last_disposition_category",
             "last_call_connected", "last_dialed_at", "last_connected_at",
             "dial_attempts", "connected_calls",
+            "latest_note", "latest_note_at",
         ]
+
+    @staticmethod
+    def _latest_note(obj):
+        note = (getattr(obj, "_note_text", None), getattr(obj, "_note_at", None))
+        call = (getattr(obj, "_call_note_text", None), getattr(obj, "_call_note_at", None))
+        candidates = [c for c in (note, call) if c[0]]
+        if not candidates:
+            return None, None
+        return max(candidates, key=lambda c: c[1] or timezone.now().replace(year=1970))
+
+    def get_latest_note(self, obj) -> str | None:
+        text, _ = self._latest_note(obj)
+        return text.strip()[:300] if text else None
+
+    def get_latest_note_at(self, obj):
+        _, at = self._latest_note(obj)
+        return at.isoformat() if at else None
 
     def get_batch_label(self, obj) -> str | None:
         # `label` is a property, so it cannot be reached with a source path.
@@ -713,11 +736,15 @@ class CallQueueSummarySerializer(serializers.ModelSerializer):
     """Lightweight serializer for the agent's available-queues list."""
 
     pending_count = serializers.SerializerMethodField()
+    # Leads this agent already has checked out from the queue. Pulling gives
+    # them back first, so a queue with nothing new to serve can still be
+    # opened to finish them (the app greyed it out as "Empty").
+    held_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CallQueue
         fields = [
-            "id", "name", "description", "mode", "order_by", "pending_count",
+            "id", "name", "description", "mode", "order_by", "pending_count", "held_count",
         ]
 
     def get_pending_count(self, obj):
@@ -725,6 +752,15 @@ class CallQueueSummarySerializer(serializers.ModelSerializer):
         if not agent:
             return 0
         return obj.eligible_leads(agent).count()
+
+    def get_held_count(self, obj):
+        agent = self.context.get("agent")
+        if not agent:
+            return 0
+        return Lead.objects.filter(
+            locked_by=agent, locked_queue=obj, lock_expires_at__gt=timezone.now(),
+            assigned_to=agent, is_deleted=False,
+        ).count()
 
 
 # ============================================================

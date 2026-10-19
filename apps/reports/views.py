@@ -107,7 +107,7 @@ class AgentPerformanceReportView(APIView):
         date_to = params.get("date_to", timezone.localdate().isoformat())
         agent_id = params.get("agent_id")
 
-        cache_key = _report_key("agent_perf", date_from, date_to, agent_id or "all")
+        cache_key = _report_key("agent_perf_v2", date_from, date_to, agent_id or "all")
 
         def compute():
             # Active agents, plus anyone deactivated since who made calls in
@@ -143,13 +143,18 @@ class AgentPerformanceReportView(APIView):
                 )
                 total = leads.count()
                 won = leads.filter(status=LeadStatus.CONVERTED).count()
+                owned_count = owned.count()
                 report.append({
                     "agent_id": agent.pk,
                     "agent_name": agent.name,
                     "agent_role": agent.role,
                     "leads": {
                         "total": total,
-                        "owned": owned.count(),
+                        # Everything assigned to them right now, and how
+                        # much of it they have never dialled.
+                        "owned": owned_count,
+                        "assigned": owned_count,
+                        "not_called": owned.filter(dial_attempts=0).count(),
                         "new": leads.filter(status=LeadStatus.NEW).count(),
                         "interested": leads.filter(status=LeadStatus.INTERESTED).count(),
                         "converted": won,

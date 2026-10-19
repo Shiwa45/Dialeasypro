@@ -156,6 +156,30 @@ def assert_lead_visible(agent, lead_id):
 # Lead CRUD
 # ============================================================
 
+def with_latest_note(qs):
+    """
+    Annotate each lead with its most recent note, for the Notes column:
+    the newest of a note written on the lead and the notes typed with a
+    call's outcome (where most agents write theirs).
+    """
+    from django.db.models import OuterRef, Subquery
+
+    from apps.calls.models import CallLog
+    from apps.leads.models import LeadNote
+
+    note = LeadNote.objects.filter(lead=OuterRef("pk")).order_by("-created_at")
+    call = (
+        CallLog.objects.filter(lead=OuterRef("pk")).exclude(notes="")
+        .order_by("-started_at")
+    )
+    return qs.annotate(
+        _note_text=Subquery(note.values("content")[:1]),
+        _note_at=Subquery(note.values("created_at")[:1]),
+        _call_note_text=Subquery(call.values("notes")[:1]),
+        _call_note_at=Subquery(call.values("started_at")[:1]),
+    )
+
+
 class LeadListCreateView(generics.ListCreateAPIView):
     """
     GET  /api/v1/leads/     → Paginated lead list with filters
@@ -226,7 +250,11 @@ class LeadListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(source=source)
 
         if assigned_to := params.get("assigned_to"):
-            qs = qs.filter(assigned_to_id=assigned_to)
+            # "unassigned" lists the leads nobody owns yet (admin filter).
+            if assigned_to == "unassigned":
+                qs = qs.filter(assigned_to__isnull=True)
+            else:
+                qs = qs.filter(assigned_to_id=assigned_to)
         if batch := params.get("batch"):
             qs = qs.filter(batch_id=batch)
 
@@ -267,7 +295,7 @@ class LeadListCreateView(generics.ListCreateAPIView):
         if order_by in allowed_orderings:
             qs = qs.order_by(order_by)
 
-        return qs
+        return with_latest_note(qs)
 
     def perform_create(self, serializer):
         agent = self.request.user
@@ -441,6 +469,65 @@ class LeadBulkAssignView(APIView):
             {"updated": updated, "assigned_to": agent.name},
             status=status.HTTP_200_OK,
         )
+
+
+class LeadBulkDeleteView(APIView):
+    """
+    POST /api/v1/leads/bulk-delete/   {"lead_ids": [1, 2, 3]}
+
+    Delete the leads an admin ticked in the list — the same soft delete as
+    deleting one lead (history kept, hidden everywhere), so a cleanup no
+    longer means opening each lead in turn. Managers and admins, like a
+    single delete; at most 1000 at a time.
+    """
+
+    permission_classes = [IsManagerOrAdmin]
+    MAX_IDS = 1000
+
+    def post(self, request):
+        raw = request.data.get("lead_ids")
+        if not isinstance(raw, list) or not raw:
+            return Response(
+                {"error": "lead_ids_required", "message": "Select the leads to delete."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ids = sorted({int(x) for x in raw})
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "invalid_ids", "message": "lead_ids must be numbers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(ids) > self.MAX_IDS:
+            return Response(
+                {"error": "too_many", "message": f"Delete at most {self.MAX_IDS} leads at a time."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        visible = list(
+            leads_visible_to(request.user).filter(pk__in=ids, is_deleted=False)
+            .values_list("pk", "batch_id")
+        )
+        leads = Lead.objects.filter(pk__in=[pk for pk, _ in visible])
+        batch_ids = {b for _, b in visible}
+        deleted = leads.update(
+            is_deleted=True,
+            # A deleted lead must not stay checked out in a calling queue.
+            locked_by=None, locked_at=None, lock_expires_at=None, locked_queue=None,
+        )
+        LeadBatch.recount_ids(batch_ids)
+
+        AuditLog.log(
+            action=AuditAction.BULK_ACTION,
+            actor_type="agent",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            entity_type="Lead",
+            description=f"Deleted {deleted} lead(s): {', '.join(map(str, ids[:50]))}"
+                        + (" …" if len(ids) > 50 else ""),
+            request=request,
+        )
+        return Response({"deleted": deleted}, status=status.HTTP_200_OK)
 
 
 class LeadUnassignByAgentView(APIView):
@@ -1260,7 +1347,10 @@ class LeadExportView(APIView):
         if source := params.get("source"):
             qs = qs.filter(source=source)
         if assigned_to := params.get("assigned_to"):
-            qs = qs.filter(assigned_to_id=assigned_to)
+            if assigned_to == "unassigned":
+                qs = qs.filter(assigned_to__isnull=True)
+            else:
+                qs = qs.filter(assigned_to_id=assigned_to)
         if batch := params.get("batch"):
             qs = qs.filter(batch_id=batch)
         if city := params.get("city"):
@@ -1590,6 +1680,65 @@ class LeadBatchStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(LeadBatchSerializer(batch).data)
+
+
+class LeadBatchUnassignView(APIView):
+    """
+    POST /api/v1/leads/batches/{id}/unassign/   {"only_uncalled": false}
+
+    Take a batch's leads back from every agent they were given to, so the
+    batch can be assigned again (to other agents). The leads keep their
+    status, notes, calls and history; only the owner is cleared.
+
+    only_uncalled: just the leads nobody has dialled yet — the worked ones
+    stay with the agent who has been working them.
+
+    Admin only, like unassign-by-agent: one click can move hundreds of leads.
+    """
+
+    permission_classes = [IsTenantAdmin]
+
+    def post(self, request, pk):
+        from apps.leads.models import LeadBatch
+
+        batch = LeadBatch.objects.filter(pk=pk).first()
+        if batch is None:
+            return Response({"error": "not_found", "message": "Batch not found."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        only_uncalled = str(request.data.get("only_uncalled", "")).lower() in ("1", "true")
+        leads = Lead.objects.filter(batch=batch, is_deleted=False, assigned_to__isnull=False)
+        if only_uncalled:
+            leads = leads.filter(dial_attempts=0)
+
+        per_agent = dict(
+            leads.values("assigned_to__name").annotate(n=Count("id"))
+            .values_list("assigned_to__name", "n")
+        )
+        count = leads.update(
+            assigned_to=None, assigned_at=None,
+            # Out of every agent's calling queue too.
+            locked_by=None, locked_at=None, lock_expires_at=None, locked_queue=None,
+        )
+
+        AuditLog.log(
+            action=AuditAction.BULK_ACTION,
+            actor_type="tenant_admin",
+            actor_id=request.user.pk,
+            actor_email=request.user.email,
+            entity_type="LeadBatch",
+            entity_id=batch.pk,
+            entity_repr=batch.label,
+            description=f"Unassigned {count} lead(s) of batch #{batch.number}"
+                        + (" (not yet called)" if only_uncalled else ""),
+            request=request,
+        )
+        batch.refresh_from_db()
+        return Response({
+            "unassigned": count,
+            "per_agent": per_agent,
+            "batch": LeadBatchSerializer(batch).data,
+        })
 
 
 class LeadBatchDistributeView(APIView):

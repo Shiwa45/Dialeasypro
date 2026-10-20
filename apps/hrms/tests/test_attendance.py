@@ -78,10 +78,13 @@ def test_a_manual_row_is_not_reverted_by_the_auto_sync(employee):
 
 
 def test_checking_in_twice_keeps_the_first_time(employee):
-    first = mark_check_in(employee)
+    # 10 am, not "now": run after 10 pm, two hours later is tomorrow — a new
+    # day, rightly a new row — and the test failed for that hour every night.
+    morning = timezone.localtime().replace(hour=10, minute=0, second=0, microsecond=0)
+    first = mark_check_in(employee, at=morning)
     original = first.check_in
 
-    again = mark_check_in(employee, at=timezone.now() + timedelta(hours=2))
+    again = mark_check_in(employee, at=morning + timedelta(hours=2))
 
     assert again.check_in == original
     assert again.status == AttendanceStatus.PRESENT

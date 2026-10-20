@@ -66,3 +66,11 @@ def test_a_dropdown_field_gets_its_options(tenant):
     with schema_context(tenant.schema_name):
         field = CustomField.objects.get(name="Property Type")
     assert field.options == ["1BHK", "2BHK", "3BHK"]
+
+
+def test_the_add_tenant_page_does_not_crash_on_the_fields_link(tenant):
+    # On "Add tenant" there is no tenant yet: reversing the link with pk=None
+    # raised NoReverseMatch and the page was a 500.
+    admin = TenantAdmin(Tenant, site)
+    assert admin.import_fields_link(Tenant()) == "Save the tenant first"
+    assert f"/{tenant.pk}/import-fields/" in str(admin.import_fields_link(tenant))

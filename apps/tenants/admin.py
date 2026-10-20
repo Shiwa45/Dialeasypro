@@ -94,6 +94,10 @@ class TenantAdmin(ModelAdmin):
     def import_fields_link(self, obj):
         from django.urls import reverse
 
+        # The add form has no tenant yet, and reversing with pk=None crashed
+        # it with a 500. The fields can be edited once the tenant is saved.
+        if obj is None or obj.pk is None:
+            return "Save the tenant first"
         url = reverse("admin:tenants_tenant_import_fields", args=[obj.pk])
         return format_html('<a class="button" href="{}">Edit fields</a>', url)
 

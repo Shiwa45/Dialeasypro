@@ -101,11 +101,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // Offline on the Live Agents board while the token still works — the
     // status call needs it. (The work session's own state resets with the app.)
     PresenceService.instance.endSession();
-    try {
-      await NotificationService.instance.cancelAll();
-      await NotificationService.instance.clearAnnounced();
-      await NotificationsService.instance.registerDevice('');
-    } catch (_) {}
+    // Each step on its own: they shared one try, so when clearing the local
+    // reminders failed the phone was never unregistered from pushes. And none
+    // may hold the sign-out up — waiting out Dio's timeouts on a weak
+    // connection left Sign Out doing nothing visible for a minute or more.
+    await Future.wait([
+      _quietly(NotificationService.instance.cancelAll()),
+      _quietly(NotificationService.instance.clearAnnounced()),
+      _quietly(NotificationsService.instance.registerDevice('')),
+    ]);
     await ApiClient.instance.clearTokens();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kAgentKey);
@@ -114,6 +118,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     await prefs.remove('work_break_reason');
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
+
+  /// The longest a sign-out clean-up step may take before it is let go.
+  static const logoutGrace = Duration(seconds: 4);
+
+  static Future<void> _quietly(Future<void> step) =>
+      step.timeout(logoutGrace).catchError((_) {});
 
   Future<void> refreshProfile() async {
     try {

@@ -27,6 +27,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _allFiles = true;
   int _pendingRecordings = 0;
   bool _scanning = false;
+  bool _signingOut = false;
   String _micMode = 'auto';
 
   /// Force the deferred recording sync now.
@@ -348,13 +349,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           BrutalButton.danger(
             label: '⏻  Sign Out',
             isFullWidth: true,
-            onPressed: () async {
+            isLoading: _signingOut,
+            onPressed: _signingOut ? null : () async {
               final ok = await showBrutalConfirm(
                 context: context, title: 'Sign Out?',
                 message: 'You will be logged out and need to sign in again.',
                 confirmLabel: 'Sign Out', danger: true,
               );
               if (ok == true && context.mounted) {
+                setState(() => _signingOut = true);
                 // While the token still works: close any queue so its locked
                 // lead is released on the server, not held until it times out.
                 ref.read(dialerProvider.notifier).stop();

@@ -39,6 +39,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         TenantConfig.instance.customBaseUrl!.isNotEmpty) {
       _showAdvanced = true;
     }
+    // Sent here because the company's plan expired / it was suspended.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final auth = ref.read(authProvider);
+      if (auth.planExpired) _showPlanExpired(auth.error);
+    });
+  }
+
+  void _showPlanExpired(String? message) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.lock_outline, color: AppColors.error),
+        title: const Text('Plan expired'),
+        content: Text(message ?? 'Your plan has expired. Please contact support to renew your account.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
+        ],
+      ),
+    );
   }
 
   @override

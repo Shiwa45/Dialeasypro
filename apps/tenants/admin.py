@@ -74,6 +74,21 @@ class TenantAdmin(ModelAdmin):
             # schema_name must not change after creation (would break PG schema)
             base.append("schema_name")
         return base
+
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        form = super().get_form(request, obj, change=change, **kwargs)
+        field = form.base_fields.get("plan")
+        if field is not None:
+            # Retired plans ("Inactive plans cannot be selected") were still
+            # offered here. A tenant already on one keeps it in the list, so
+            # its page still saves.
+            from apps.plans.models import Plan
+
+            keep = Q(is_active=True)
+            if obj is not None and obj.plan_id:
+                keep |= Q(pk=obj.plan_id)
+            field.queryset = Plan.objects.filter(keep).order_by("sort_order")
+        return form
     ordering = ["-created_at"]
     inlines = [DomainInline]
     actions = ["suspend_tenants", "activate_tenants", "reset_trial", "sync_subscriptions", "send_welcome_emails"]
@@ -198,33 +213,82 @@ class TenantAdmin(ModelAdmin):
         })
 
     def save_model(self, request, obj, form, change):
-        """When saving from admin, ensure the Subscription row matches the tenant's plan."""
+        """
+        Save the tenant, then make access, subscription and plan agree.
+
+        Turning a tenant off from this form (unticking "Is active", or setting
+        the status to Suspended / Cancelled / Past due / Paused) used to change
+        that one field only. The middleware then found the subscription still
+        "active" and let everyone in, and saving the plan re-saved that active
+        subscription, whose signal flipped the tenant back to "active".
+        """
+        before = (
+            Tenant.objects.filter(pk=obj.pk).values("is_active", "subscription_status").first()
+            if change else None
+        )
         super().save_model(request, obj, form, change)
-        
-        if obj.plan:
-            from apps.plans.models import Subscription
-            # Find the active subscription and update it, or create one
-            sub = Subscription.objects.filter(
-                tenant=obj, 
-                status__in=SubscriptionStatus.ACTIVE_STATUSES
-            ).first()
-            
-            if sub:
-                if sub.plan != obj.plan:
-                    sub.plan = obj.plan
-                    sub.save(update_fields=["plan"])
-            else:
-                # No active subscription? Create one to match the tenant status
-                Subscription.objects.create(
-                    tenant=obj,
-                    plan=obj.plan,
-                    status=obj.subscription_status,
-                    trial_end=obj.trial_ends_at
+        if obj.schema_name == "public":
+            return
+
+        from apps.plans.models import Subscription
+
+        active = SubscriptionStatus.ACTIVE_STATUSES
+        blocked = (not obj.is_active) or obj.subscription_status not in active
+        was_blocked = bool(before) and (
+            not before["is_active"] or before["subscription_status"] not in active
+        )
+
+        if blocked:
+            fields = []
+            if obj.is_active:
+                obj.is_active = False
+                fields.append("is_active")
+            if obj.subscription_status in active:
+                obj.subscription_status = SubscriptionStatus.SUSPENDED
+                fields.append("subscription_status")
+            if not obj.suspension_kind:
+                obj.suspension_kind = Tenant.SUSPENDED_ADMIN
+                fields.append("suspension_kind")
+            if not was_blocked:
+                obj.internal_notes += (
+                    f"\n[SUSPENDED {timezone.now().date()}] From the tenant form by {request.user.email}"
                 )
-            
-            # Invalidate cache
-            from apps.core.middleware import TenantFeatureFlagMiddleware
-            TenantFeatureFlagMiddleware.invalidate_cache(obj.schema_name)
+                fields.append("internal_notes")
+            if fields:
+                Tenant.objects.filter(pk=obj.pk).update(**{f: getattr(obj, f) for f in fields})
+            obj._sync_subscriptions()
+        elif was_blocked:
+            # Switched back on from the form: same as the Activate action,
+            # keeping the status chosen here (Trial or Active).
+            Tenant.objects.filter(pk=obj.pk).update(suspension_kind="")
+            obj.suspension_kind = ""
+            obj._sync_subscriptions(obj.subscription_status)
+
+        if obj.plan:
+            # Plan changes go onto the latest subscription with update(), so
+            # the subscription→tenant signal can't overwrite the status.
+            latest = Subscription.objects.filter(tenant=obj).order_by("-pk").first()
+            if latest is None:
+                Subscription.objects.create(
+                    tenant=obj, plan=obj.plan, status=obj.subscription_status,
+                    trial_end=obj.trial_ends_at,
+                )
+            elif latest.plan_id != obj.plan_id:
+                Subscription.objects.filter(pk=latest.pk).update(plan=obj.plan)
+
+        obj.invalidate_access_cache()
+
+    def delete_model(self, request, obj):
+        """Delete one tenant — and drop its schema (Tenant.delete)."""
+        obj.delete()
+
+    def delete_queryset(self, request, queryset):
+        """
+        "Delete selected tenants" called QuerySet.delete(), which skips
+        Tenant.delete() — so the schema was never dropped. One at a time.
+        """
+        for tenant in queryset.exclude(schema_name="public"):
+            tenant.delete()
 
     @action(description="Sync Plan to Subscription table")
     def sync_subscriptions(self, request, queryset):
@@ -243,9 +307,11 @@ class TenantAdmin(ModelAdmin):
             ).first()
             
             if sub:
-                sub.plan = tenant.plan
-                sub.save(update_fields=["plan"])
-            else:
+                # update(): saving it re-ran the signal that copies the
+                # subscription's status onto the tenant.
+                Subscription.objects.filter(pk=sub.pk).update(plan=tenant.plan)
+            elif tenant.can_use_platform:
+                # A suspended tenant gets no new usable subscription here.
                 Subscription.objects.create(
                     tenant=tenant,
                     plan=tenant.plan,
@@ -287,11 +353,15 @@ class TenantAdmin(ModelAdmin):
                 if not admin_agent:
                     # Admin doesn't exist, create it
                     _create_default_tenant_admin(tenant)
-                else:
-                    # Reset to standard default password and force change
+                elif admin_agent.must_change_password:
+                    # Still on the first-login password: re-issue it.
                     admin_agent.set_password(temp_password)
-                    admin_agent.must_change_password = True
-                    admin_agent.save(update_fields=["password", "must_change_password"])
+                    admin_agent.save(update_fields=["password"])
+                else:
+                    # They have set their own password. Resending used to
+                    # reset it to the default — locking a working admin out
+                    # and putting a well-known password on the account.
+                    temp_password = ""
 
                 # Queue the email
                 send_tenant_welcome_email.apply_async(

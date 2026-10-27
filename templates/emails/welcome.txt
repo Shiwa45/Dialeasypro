@@ -5,7 +5,7 @@ Your DialSathi CRM workspace has been successfully created and is ready to use.
 --- LOGIN CREDENTIALS ---
 Workspace Name: {{ tenant.schema_name }}
 Username: {{ tenant.primary_contact_email }}
-Default Password: {{ temp_password|default:"Admin@123456" }}
+{% if temp_password %}Default Password: {{ temp_password }}{% else %}Password: the one you already use ("Forgot password?" resets it){% endif %}
 
 ⚠️ IMPORTANT: Please change your password immediately after your first login!
 

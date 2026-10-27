@@ -41,6 +41,10 @@ class Tenant(TenantMixin, TimeStampedModel):
     """
 
     auto_create_schema = True
+    # Deleting a tenant drops its PostgreSQL schema — every lead, call, agent
+    # and setting in it. It used to leave the schema behind, so a "deleted"
+    # tenant's data stayed in the database for good. See delete().
+    auto_drop_schema = True
 
     # ---- Company Info --------------------------------------
     company_name = models.CharField(max_length=200, db_index=True)
@@ -298,9 +302,54 @@ class Tenant(TenantMixin, TimeStampedModel):
             }
         return out
 
+    # ---- Access ------------------------------------------------
+
+    @property
+    def can_use_platform(self) -> bool:
+        """
+        Whether this tenant's people may sign in and use anything at all.
+
+        Every signal must agree: the master switch, a usable subscription
+        status, and — for a trial — a trial that has not run out (the nightly
+        job that suspends expired trials may not have run yet).
+        """
+        if not self.is_active:
+            return False
+        if self.subscription_status not in SubscriptionStatus.ACTIVE_STATUSES:
+            return False
+        if self.is_trial_expired:
+            return False
+        return True
+
+    def _sync_subscriptions(self, to_status: str | None = None, **extra) -> None:
+        """
+        Bring the Subscription rows in line with the tenant.
+
+        Uses update() so the subscription→tenant sync signal does not fire:
+        that signal is what used to flip a suspended tenant back to "active"
+        the next time anything touched its (still active) subscription.
+        """
+        from apps.plans.models import Subscription
+
+        subs = Subscription.objects.filter(tenant=self)
+        if to_status is None:  # suspending: nothing stays usable
+            subs.filter(status__in=SubscriptionStatus.ACTIVE_STATUSES).update(
+                status=SubscriptionStatus.SUSPENDED,
+            )
+            return
+        latest = subs.order_by("-pk").first()
+        if latest is not None:
+            Subscription.objects.filter(pk=latest.pk).update(status=to_status, **extra)
+
+    def invalidate_access_cache(self) -> None:
+        from apps.core.middleware import TenantFeatureFlagMiddleware
+
+        TenantFeatureFlagMiddleware.invalidate_cache(self.schema_name)
+
     def suspend(self, reason: str = "", kind: str = SUSPENDED_ADMIN):
         """
-        Suspend the tenant account.
+        Suspend the tenant account: every sign-in and every API call is then
+        answered "plan expired" until it is activated again.
 
         `kind` is ADMIN unless billing is the reason: only a BILLING
         suspension is lifted by the tenant paying.
@@ -311,6 +360,11 @@ class Tenant(TenantMixin, TimeStampedModel):
         if reason:
             self.internal_notes += f"\n[SUSPENDED {timezone.now().date()}] {reason}"
         self.save(update_fields=["subscription_status", "is_active", "suspension_kind", "internal_notes"])
+        # The subscription went on saying "active", and feature checks read
+        # it: plan features stayed on for a suspended tenant.
+        self._sync_subscriptions()
+        # Effective at once, not when the cached "active" answer runs out.
+        self.invalidate_access_cache()
         logger.info(f"[Tenant] Suspended: {self.schema_name} — {reason}")
 
     def activate(self):
@@ -319,7 +373,30 @@ class Tenant(TenantMixin, TimeStampedModel):
         self.is_active = True
         self.suspension_kind = ""
         self.save(update_fields=["subscription_status", "is_active", "suspension_kind"])
+        self._sync_subscriptions(SubscriptionStatus.ACTIVE)
+        self.invalidate_access_cache()
         logger.info(f"[Tenant] Activated: {self.schema_name}")
+
+    def delete(self, force_drop=False, *args, **kwargs):
+        """
+        Delete the tenant and DROP its schema (auto_drop_schema), in one
+        transaction: if the row can't be deleted, the schema stays too.
+        """
+        from django.db import transaction
+
+        schema = self.schema_name
+        if schema == "public":
+            raise ValueError("The public schema is never deleted.")
+        with transaction.atomic():
+            result = super().delete(force_drop, *args, **kwargs)
+        try:
+            from apps.core.middleware import TenantFeatureFlagMiddleware
+
+            TenantFeatureFlagMiddleware.invalidate_cache(schema)
+        except Exception:  # noqa: BLE001 — cache only
+            pass
+        logger.warning(f"[Tenant] Deleted with its schema: {schema}")
+        return result
 
     def set_trial(self, days: int = 14):
         """Set or reset the trial period."""
@@ -327,7 +404,11 @@ class Tenant(TenantMixin, TimeStampedModel):
         self.subscription_status = SubscriptionStatus.TRIAL
         self.trial_ends_at = timezone.now() + timedelta(days=days)
         self.is_active = True
-        self.save(update_fields=["subscription_status", "trial_ends_at", "is_active"])
+        self.suspension_kind = ""
+        self.save(update_fields=["subscription_status", "trial_ends_at", "is_active", "suspension_kind"])
+        if self.pk:
+            self._sync_subscriptions(SubscriptionStatus.TRIAL, trial_end=self.trial_ends_at)
+            self.invalidate_access_cache()
 
     def has_feature(self, feature_key: str) -> bool:
         """

@@ -70,7 +70,7 @@ class TenantBillingAPIView(APIView):
             "plan": self._plan(plan),
             "subscription": self._subscription(subscription, tenant),
             "usage": self._usage(plan),
-            "features": self._features(plan),
+            "features": self._features(plan, getattr(request, "tenant_features", None)),
             "invoices": InvoiceSerializer(
                 Invoice.objects.filter(tenant=tenant).order_by("-invoice_date", "-created_at")[:INVOICE_LIMIT],
                 many=True,
@@ -155,17 +155,24 @@ class TenantBillingAPIView(APIView):
             for key in limits
         }
 
-    def _features(self, plan):
-        """What the plan includes, labelled for a human."""
-        if plan is None:
-            return []
+    def _features(self, plan, effective=None):
+        """
+        What the tenant can use, labelled for a human: the plan's features
+        with add-ons bought on top (and anything revoked) applied.
+
+        This listed the plan alone, so a customer who bought the HRMS add-on
+        saw "HRMS — Payroll" marked as not included on their own Billing tab.
+        """
+        rows = {f.feature_key: f.is_enabled for f in plan.features.all()} if plan else {}
+        if effective:
+            rows.update(effective)
         return [
             {
-                "key": f.feature_key,
-                "label": FeatureKey.LABELS.get(f.feature_key, f.feature_key),
-                "enabled": f.is_enabled,
+                "key": key,
+                "label": FeatureKey.LABELS.get(key, key),
+                "enabled": bool(enabled),
             }
-            for f in plan.features.all().order_by("feature_key")
+            for key, enabled in sorted(rows.items())
         ]
 
     def _support(self):

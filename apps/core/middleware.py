@@ -36,6 +36,13 @@ from apps.core.constants import CacheTimeout, SubscriptionStatus
 
 logger = logging.getLogger(__name__)
 
+# What every API call of a suspended or expired tenant gets back. The web
+# and mobile apps key their "plan expired" screen on `error`.
+PLAN_EXPIRED_RESPONSE = {
+    "error": "plan_expired",
+    "message": "Your plan has expired. Please contact support to renew your account.",
+}
+
 
 class TenantSchemaFromTokenMiddleware(MiddlewareMixin):
     """
@@ -274,17 +281,13 @@ class TenantFeatureFlagMiddleware(MiddlewareMixin):
 
         request.has_feature = has_feature
 
-        # Check if tenant is active (not suspended/cancelled)
+        # Check if tenant is active (not suspended/cancelled/expired)
         if not self._is_tenant_active(tenant):
-            # For API requests, return JSON error
-            if request.path.startswith("/api/"):
-                return JsonResponse(
-                    {
-                        "error": "account_suspended",
-                        "message": "Your account is suspended. Please contact support.",
-                    },
-                    status=403,
-                )
+            # For API requests, return JSON error. Every endpoint, sign-in
+            # included: the web and mobile apps show their "plan expired"
+            # screen on this code.
+            if request.path.startswith("/api/") and request.path not in self.ALWAYS_OPEN:
+                return JsonResponse(PLAN_EXPIRED_RESPONSE, status=403)
             # For web requests, redirect to suspended page
             # (let views handle this; just set a flag)
             request.tenant_suspended = True
@@ -385,44 +388,24 @@ class TenantFeatureFlagMiddleware(MiddlewareMixin):
             )
             return features
 
+    # Reachable for a suspended tenant: only the health checks.
+    ALWAYS_OPEN = ("/api/v1/health/",)
+
     def _is_tenant_active(self, tenant) -> bool:
         """
-        Check if tenant's subscription allows platform access.
+        Whether the tenant may use the platform — read straight off the tenant
+        row, which django-tenants loads fresh for every request.
 
-        Uses the denormalized subscription_status field on the Tenant model as
-        the primary signal — this is always set by set_trial() / activate() /
-        suspend(), including for tenants whose Subscription row hasn't been
-        created yet (e.g. when create_tenant ran before setup_initial_data).
-        Falls back to querying the Subscription table only when the tenant
-        status itself indicates the account is not in an active state.
+        This used to answer from a 60-second cache and, when the tenant's own
+        status said "suspended", fall back to the Subscription table — which
+        still said "active", because suspending never touched it. So a tenant
+        suspended from the panel (its status set to Suspended, or "Active"
+        unticked) carried on working: its admin signed in and everything ran.
         """
-        # The super admin's kill switch wins over everything below: a
-        # subscription that is active (the tenant kept paying) must not reopen
-        # an account suspended for abuse.
-        if not tenant.is_active and tenant.suspension_kind == tenant.SUSPENDED_ADMIN:
-            return False
-
-        cache_key = f"tenant_active:{tenant.schema_name}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # Fast path: trust the denormalized status kept in sync by
-        # the sync_subscription_to_tenant signal and the tenant lifecycle methods.
-        if tenant.subscription_status in SubscriptionStatus.ACTIVE_STATUSES:
-            cache.set(cache_key, True, timeout=60)
-            return True
-
-        # Slow path: status says inactive — double-check the Subscription table
-        # in case the denormalized field is stale (e.g. direct DB edits).
-        from apps.plans.models import Subscription
-        is_active = Subscription.objects.filter(
-            tenant=tenant,
-            status__in=SubscriptionStatus.ACTIVE_STATUSES,
-        ).exists()
-
-        cache.set(cache_key, is_active, timeout=60)
-        return is_active
+        try:
+            return bool(tenant.can_use_platform)
+        except AttributeError:  # a tenant-like object without the property
+            return bool(getattr(tenant, "is_active", True))
 
     @staticmethod
     def invalidate_cache(schema_name: str):

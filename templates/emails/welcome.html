@@ -151,8 +151,13 @@
                             <span class="credential-value">{{ tenant.primary_contact_email }}</span>
                         </div>
                         <div class="credential-row">
+                            {% if temp_password %}
                             <span class="credential-label">Default Password:</span>
-                            <span class="credential-value">{{ temp_password|default:"Admin@123456" }}</span>
+                            <span class="credential-value">{{ temp_password }}</span>
+                            {% else %}
+                            <span class="credential-label">Password:</span>
+                            <span class="credential-value">the one you already use (&ldquo;Forgot password?&rdquo; resets it)</span>
+                            {% endif %}
                         </div>
                     </div>
                     

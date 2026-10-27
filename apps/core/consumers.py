@@ -70,6 +70,13 @@ async def authenticate_socket(token: str) -> dict | None:
             if not schema or schema == "public" or not agent_id:
                 return None
 
+            # A suspended or expired tenant gets no live connection either.
+            from apps.tenants.models import Tenant
+
+            tenant = Tenant.objects.filter(schema_name=schema).first()
+            if tenant is None or not tenant.can_use_platform:
+                return None
+
             from apps.authentication.models import Agent
 
             with schema_context(schema):

@@ -4,11 +4,13 @@ TeleCRM Backend — apps/plans/admin.py
 Django Admin (Unfold) for Plans, Subscriptions, and Invoices.
 """
 from django.contrib import admin
+from django.db.models import Count, Q
 from django.utils.html import format_html
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action, display
 
 from apps.core.constants import FeatureKey, SubscriptionStatus
+from apps.tenants.models import Tenant
 from apps.plans.models import (
     Invoice,
     Plan,
@@ -40,9 +42,49 @@ class TenantEntitlementAdmin(ModelAdmin):
         super().delete_model(request, obj)
         TenantEntitlement._invalidate(tenant)
 
+    def delete_queryset(self, request, queryset):
+        # "Delete selected" skips delete_model: without this a revoked add-on
+        # kept working for up to five minutes (the feature cache's lifetime).
+        tenants = {e.tenant for e in queryset.select_related("tenant")}
+        super().delete_queryset(request, queryset)
+        for tenant in tenants:
+            TenantEntitlement._invalidate(tenant)
+
+
+
+
+def _invalidate_plan_tenants(plan) -> None:
+    """
+    Drop the cached feature map of every tenant on this plan. Editing a
+    plan's features in the panel used to take up to five minutes to reach
+    its tenants (the cache's lifetime).
+    """
+    from apps.core.middleware import TenantFeatureFlagMiddleware
+    from apps.plans.models import Subscription
+    from apps.tenants.models import Tenant
+
+    schemas = set(Subscription.objects.filter(plan=plan).values_list("tenant__schema_name", flat=True))
+    schemas |= set(Tenant.objects.filter(plan=plan).values_list("schema_name", flat=True))
+    for schema in schemas:
+        TenantFeatureFlagMiddleware.invalidate_cache(schema)
+
+def _missing_feature_keys(plan) -> list[str]:
+    """Features this plan has no row for (a missing row means "off")."""
+    have = set(plan.features.values_list("feature_key", flat=True)) if plan and plan.pk else set()
+    return [key for key in FeatureKey.ALL if key not in have]
+
 
 class PlanFeatureInline(TabularInline):
-    """Edit plan features inline within Plan detail."""
+    """
+    Every feature on the plan page, one row each.
+
+    Only features that already had a row were listed, so a feature added to
+    the product later (Recruitment, Agent Web Panel...) could not be switched
+    on from the plan page at all, and a new plan opened with 64 blank rows
+    whose feature had to be picked by hand. The missing ones are now listed
+    pre-filled and switched off; ticking one saves it, leaving it unticked
+    saves nothing.
+    """
 
     model = PlanFeature
     extra = 0
@@ -50,8 +92,7 @@ class PlanFeatureInline(TabularInline):
     ordering = ("feature_key",)
 
     def get_extra(self, request, obj=None, **kwargs):
-        # Show all features as rows for a new plan
-        return 0 if obj else len(FeatureKey.ALL)
+        return len(_missing_feature_keys(obj))
 
 
 @admin.register(Plan)
@@ -76,6 +117,19 @@ class PlanAdmin(ModelAdmin):
     search_fields = ["name", "slug"]
     ordering = ["sort_order"]
     inlines = [PlanFeatureInline]
+
+    def get_formset_kwargs(self, request, obj, inline, prefix):
+        kwargs = super().get_formset_kwargs(request, obj, inline, prefix)
+        if isinstance(inline, PlanFeatureInline):
+            kwargs["initial"] = [
+                {"feature_key": key, "is_enabled": False} for key in _missing_feature_keys(obj)
+            ]
+        return kwargs
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            _features_on=Count("features", filter=Q(features__is_enabled=True)),
+        )
 
     fieldsets = (
         (
@@ -141,10 +195,14 @@ class PlanAdmin(ModelAdmin):
 
     @display(description="Features")
     def feature_count(self, obj):
-        count = obj.features.filter(is_enabled=True).count()
-        total = obj.features.count()
+        # Out of every feature the product has, not out of the rows this plan
+        # happens to have: Starter read "9/10" — nearly everything — while it
+        # has 9 of 64.
+        count = getattr(obj, "_features_on", None)
+        if count is None:
+            count = obj.features.filter(is_enabled=True).count()
         return format_html(
-            '<span style="color:#6B7280">{}/{}</span>', count, total
+            '<span style="color:#6B7280">{}/{}</span>', count, len(FeatureKey.ALL)
         )
 
     @display(description="Active", boolean=True)
@@ -152,6 +210,10 @@ class PlanAdmin(ModelAdmin):
         return obj.is_active
 
     actions = ["sync_all_features"]
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        _invalidate_plan_tenants(form.instance)
 
     @action(description="Sync all available features to selected plans (disabled by default)")
     def sync_all_features(self, request, queryset):
@@ -184,10 +246,7 @@ class PlanAdmin(ModelAdmin):
                 plans_updated += 1
                 
             # Clear feature cache for any tenants on this plan
-            from apps.core.middleware import TenantFeatureFlagMiddleware
-            from apps.plans.models import Subscription
-            for sub in Subscription.objects.filter(plan=plan):
-                TenantFeatureFlagMiddleware.invalidate_cache(sub.tenant.schema_name)
+            _invalidate_plan_tenants(plan)
 
         self.message_user(
             request,
@@ -209,6 +268,23 @@ class PlanFeatureAdmin(ModelAdmin):
     @display(description="Feature")
     def feature_label(self, obj):
         return FeatureKey.LABELS.get(obj.feature_key, obj.feature_key)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        _invalidate_plan_tenants(obj.plan)
+
+    def delete_model(self, request, obj):
+        plan = obj.plan
+        super().delete_model(request, obj)
+        _invalidate_plan_tenants(plan)
+
+    def delete_queryset(self, request, queryset):
+        # "Delete selected" skips delete_model, so tenants kept the deleted
+        # features for up to five minutes.
+        plans = {pf.plan for pf in queryset.select_related("plan")}
+        super().delete_queryset(request, queryset)
+        for plan in plans:
+            _invalidate_plan_tenants(plan)
 
 
 @admin.register(Subscription)
@@ -240,6 +316,22 @@ class SubscriptionAdmin(ModelAdmin):
     ]
     raw_id_fields = ["tenant"]
     ordering = ["-created_at"]
+
+    def save_model(self, request, obj, form, change):
+        """
+        Keep the tenant's plan in step and make the change take effect now.
+        The sync signal only ran on a status change, so moving a subscription
+        to another plan left the tenant on the old one for up to five minutes
+        (and Tenant.plan wrong for good). A subscription made usable here does
+        not lift a super-admin suspension: Tenant.is_active stays off.
+        """
+        super().save_model(request, obj, form, change)
+        tenant = obj.tenant
+        if obj.status in SubscriptionStatus.ACTIVE_STATUSES and tenant.plan_id != obj.plan_id:
+            Tenant.objects.filter(pk=tenant.pk).update(plan=obj.plan)
+        from apps.core.middleware import TenantFeatureFlagMiddleware
+
+        TenantFeatureFlagMiddleware.invalidate_cache(tenant.schema_name)
 
     fieldsets = (
         ("Subscription", {"fields": ("id", "tenant", "plan", "status", "billing_cycle")}),

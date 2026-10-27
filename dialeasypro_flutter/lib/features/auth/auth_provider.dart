@@ -15,7 +15,11 @@ class AuthState {
   final Agent? agent;
   final String? error;
 
-  const AuthState({this.status = AuthStatus.loading, this.agent, this.error});
+  /// Signed out because the company's plan expired or it was suspended.
+  /// The login screen explains why when this is set.
+  final bool planExpired;
+
+  const AuthState({this.status = AuthStatus.loading, this.agent, this.error, this.planExpired = false});
 
   bool get isAuthenticated => status == AuthStatus.authenticated;
   bool get isLoading => status == AuthStatus.loading;
@@ -34,6 +38,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
       unawaited(NotificationService.instance.cancelAll().catchError((_) {}));
       unawaited(NotificationService.instance.clearAnnounced().catchError((_) {}));
       if (mounted) state = const AuthState(status: AuthStatus.unauthenticated);
+    };
+    // The company's plan expired or it was suspended: every request is now
+    // refused. Sign out at once (same local clean-up as above) and carry the
+    // reason to the login screen, rather than leaving the agent on screens
+    // that fail one request at a time.
+    ApiClient.onPlanExpired = (message) {
+      if (!mounted || state.planExpired) return;
+      unawaited(NotificationService.instance.cancelAll().catchError((_) {}));
+      unawaited(NotificationService.instance.clearAnnounced().catchError((_) {}));
+      unawaited(ApiClient.instance.clearTokens().catchError((_) {}));
+      unawaited(SharedPreferences.getInstance().then((p) => p.remove(_kAgentKey)).catchError((_) => false));
+      state = AuthState(status: AuthStatus.unauthenticated, error: message, planExpired: true);
     };
     _init();
   }

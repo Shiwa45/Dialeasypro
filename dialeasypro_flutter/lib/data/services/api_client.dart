@@ -20,6 +20,12 @@ class ApiClient {
   /// gets a clean re-login instead of a raw 401 error.
   static void Function()? onSessionExpired;
 
+  /// Called when the server answers 403 plan_expired / account_suspended:
+  /// the company's plan ran out or the platform owner suspended it, so every
+  /// request is refused. The app signs out and shows the message on the
+  /// login screen instead of failing request by request.
+  static void Function(String message)? onPlanExpired;
+
   // Single-flight refresh: concurrent 401s share ONE refresh call instead of
   // each firing their own (which races and can spuriously fail).
   Future<_Refresh>? _refreshing;
@@ -59,6 +65,21 @@ class ApiClient {
         // Don't try to refresh on the auth endpoints themselves.
         final path = error.requestOptions.path;
         final isAuthCall = path.contains('/auth/refresh/') || path.contains('/auth/login/');
+
+        // The login screen shows this refusal itself; anywhere else the whole
+        // app is locked out until the account is renewed.
+        if (error.response?.statusCode == 403 && !isAuthCall) {
+          final data = error.response?.data;
+          final code = data is Map ? data['error'] : null;
+          if (code == 'plan_expired' || code == 'account_suspended') {
+            final msg = (data as Map)['message'];
+            try {
+              onPlanExpired?.call(msg is String && msg.isNotEmpty
+                  ? msg
+                  : 'Your plan has expired. Please contact support to renew your account.');
+            } catch (_) {}
+          }
+        }
 
         if (error.response?.statusCode == 401 && !isAuthCall) {
           final outcome = await _tryRefresh();

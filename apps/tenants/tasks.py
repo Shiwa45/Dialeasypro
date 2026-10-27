@@ -36,7 +36,10 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
         base_domain = getattr(settings, "BASE_DOMAIN", "dialeasypro.easyian.com")
         login_url = settings.FRONTEND_URL or f"https://{base_domain}/"
 
-        pwd = temp_password or getattr(settings, "DEFAULT_TENANT_PASSWORD", "Admin@123456")
+        # "" = the admin already has their own password (a resend): say so
+        # rather than print the default, which no longer works.
+        pwd = temp_password if temp_password is not None else getattr(
+            settings, "DEFAULT_TENANT_PASSWORD", "Admin@123456")
 
         context = {
             "tenant": tenant,
@@ -57,7 +60,8 @@ def send_tenant_welcome_email(self, tenant_id, temp_password=None):
                 f"--- LOGIN CREDENTIALS ---\n"
                 f"Workspace Name: {tenant.schema_name}\n"
                 f"Username: {tenant.primary_contact_email}\n"
-                f"Default Password: {pwd}\n\n"
+                + (f"Default Password: {pwd}\n\n" if pwd
+                   else "Password: the one you already use (\"Forgot password?\" resets it)\n\n") +
                 f"⚠️ IMPORTANT: Please change your password after logging in!\n\n"
                 f"Need help? Email {settings.SUPPORT_EMAIL}"
             )

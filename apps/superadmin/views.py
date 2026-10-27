@@ -18,6 +18,7 @@ def superadmin_dashboard_callback(request, context):
         from apps.tenants.models import Tenant
         from apps.plans.models import Subscription
         from apps.core.constants import SubscriptionStatus
+        from django.db.models import Q
 
         now = timezone.now()
         context["stats"] = {
@@ -26,11 +27,15 @@ def superadmin_dashboard_callback(request, context):
                 subscription_status__in=SubscriptionStatus.ACTIVE_STATUSES,
                 is_active=True,
             ).exclude(schema_name="public").count(),
+            # Only trials still running: a suspended or switched-off
+            # tenant used to count as both "trial" and nothing else.
             "trial_tenants": Tenant.objects.filter(
-                subscription_status=SubscriptionStatus.TRIAL
-            ).count(),
-            "suspended_tenants": Tenant.objects.filter(
-                subscription_status=SubscriptionStatus.SUSPENDED
+                subscription_status=SubscriptionStatus.TRIAL, is_active=True,
+            ).exclude(schema_name="public").count(),
+            # Everyone who can't use the platform: switched off, or in any
+            # status that isn't usable (suspended, cancelled, past due...).
+            "suspended_tenants": Tenant.objects.exclude(schema_name="public").filter(
+                Q(is_active=False) | ~Q(subscription_status__in=SubscriptionStatus.ACTIVE_STATUSES)
             ).count(),
             "new_this_month": Tenant.objects.filter(
                 created_at__year=now.year,

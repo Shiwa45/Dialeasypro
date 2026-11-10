@@ -133,6 +133,13 @@ class Agent(AbstractBaseUser, TimeStampedModel):
         db_index=True,
         help_text="Deactivate to block login without deleting the agent.",
     )
+    # Per-agent switch under the company's call-tracking switch
+    # (Tenant.call_tracking_enabled). On by default, so turning the company
+    # switch on covers everyone; an admin turns individual agents off.
+    call_tracking_enabled = models.BooleanField(
+        default=True,
+        help_text="Track this agent's phone calls when the company has call tracking on.",
+    )
     must_change_password = models.BooleanField(
         default=False,
         help_text="Force password change on next login (set on account creation).",

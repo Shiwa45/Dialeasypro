@@ -8,10 +8,13 @@ from apps.calls.views import (
     ClickToCallView, CallDispositionListView, CallDispositionDetailView,
     CallProviderWebhookView, CallStatsView,
     CallRecordingUploadView, CallOutcomeView,
+    CallTrackingSettingsView, PhoneCallSyncView,
 )
 
 urlpatterns = [
     path("", CallLogListCreateView.as_view(), name="api_call_list"),
+    path("tracking/", CallTrackingSettingsView.as_view(), name="api_call_tracking"),
+    path("sync/", PhoneCallSyncView.as_view(), name="api_call_phone_sync"),
     path("click-to-call/", ClickToCallView.as_view(), name="api_click_to_call"),
     path("dispositions/", CallDispositionListView.as_view(), name="api_call_dispositions"),
     path("dispositions/<int:pk>/", CallDispositionDetailView.as_view(), name="api_call_disposition_detail"),

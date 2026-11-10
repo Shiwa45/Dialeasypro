@@ -26,6 +26,10 @@ class AgentProfileSerializer(serializers.ModelSerializer):
     is_online = serializers.BooleanField(read_only=True)
     role_display = serializers.CharField(source="get_role_display", read_only=True)
     profile_photo_url = serializers.SerializerMethodField()
+    # Whether the mobile app tracks this agent's phone calls (company switch
+    # AND the agent's own). The app asks for the call-log and storage
+    # permissions and starts syncing only when this is true.
+    call_tracking = serializers.SerializerMethodField()
 
     class Meta:
         model = Agent
@@ -34,10 +38,19 @@ class AgentProfileSerializer(serializers.ModelSerializer):
             "role", "role_display", "is_tenant_admin",
             "profile_photo_url", "timezone", "language_preference",
             "is_online", "last_active_at", "last_login", "total_login_count", "created_at",
+            "call_tracking",
         ]
         read_only_fields = [
             "id", "email", "role", "is_tenant_admin", "created_at", "last_login", "total_login_count",
         ]
+
+    def get_call_tracking(self, obj) -> bool:
+        from apps.calls.services.phone_tracking import tracking_enabled_for
+
+        try:
+            return tracking_enabled_for(obj)
+        except Exception:  # noqa: BLE001 — never fail sign-in over this
+            return False
 
     def get_profile_photo_url(self, obj):
         if obj.profile_photo:
@@ -64,7 +77,7 @@ class AgentSerializer(serializers.ModelSerializer):
             "role", "role_display", "is_tenant_admin", "is_active",
             "timezone", "shift_start", "shift_end", "working_days",
             "teams", "is_online", "last_login", "last_active_at",
-            "total_login_count", "created_at",
+            "total_login_count", "created_at", "call_tracking_enabled",
         ]
         read_only_fields = ["id", "created_at", "last_login", "total_login_count"]
 
@@ -219,6 +232,7 @@ class AgentUpdateSerializer(serializers.ModelSerializer):
         fields = [
             "name", "email", "phone", "employee_id", "role", "is_active",
             "timezone", "shift_start", "shift_end", "working_days",
+            "call_tracking_enabled",
         ]
 
     def validate_email(self, value):

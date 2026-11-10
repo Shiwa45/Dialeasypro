@@ -9,6 +9,7 @@ import '../../core/services/setup_service.dart';
 import '../../core/theme/colors.dart';
 import '../../core/widgets/widgets.dart';
 import 'recording_disclosure.dart';
+import 'recording_source_panel.dart';
 
 // ============================================================
 // First-run setup.
@@ -147,18 +148,6 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
     }
   }
 
-  Future<void> _openRecordingSettings() async {
-    final where = await SetupService.instance.openCallRecordingSettings();
-    if (!mounted) return;
-    if (where == 'none') {
-      AppToast.show(context,
-          'Could not open the Phone app settings — please follow the steps above.',
-          isError: true);
-    } else if (where != 'settings') {
-      AppToast.show(context, 'Opened the Phone app — follow the steps above.');
-    }
-  }
-
   Future<void> _toggleRecording(bool value) async {
     if (value) {
       // Disclosure and agreement first, then the microphone permission.
@@ -292,17 +281,7 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
                   style: AppTextStyles.caption,
                 ),
                 const SizedBox(height: 10),
-                ...guide.recordingSteps.asMap().entries.map((e) => Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('${e.key + 1}. ',
-                            style: const TextStyle(
-                                fontFamily: 'PlusJakartaSans',
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12.5)),
-                        Expanded(child: Text(e.value, style: AppTextStyles.caption)),
-                      ]),
-                    )),
+                RecordingSourcePanel(onChanged: _refresh),
                 const SizedBox(height: 8),
                 CheckboxListTile(
                   value: _dialerConfirmed,
@@ -310,11 +289,10 @@ class _SetupWizardScreenState extends ConsumerState<SetupWizardScreen>
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   activeColor: AppColors.success,
-                  title: const Text("I've turned on call recording",
+                  title: const Text("I've set up call recording",
                       style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 13)),
                 ),
               ]),
-              action: ('Open Phone app settings', _openRecordingSettings),
             ),
           ],
 

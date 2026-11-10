@@ -117,6 +117,16 @@ class Tenant(TenantMixin, TimeStampedModel):
         verbose_name="Agents may sign in on the web",
     )
 
+    # Phone call tracking: the mobile app saves every incoming and outgoing
+    # call on the agent's phone (from the phone's own call log) and uploads
+    # its recording. Off by default — it reaches beyond calls made in the
+    # app, so a company turns it on deliberately, and can then switch it off
+    # for individual agents (Agent.call_tracking_enabled).
+    call_tracking_enabled = models.BooleanField(
+        default=False,
+        verbose_name="Track all phone calls from the mobile app",
+    )
+
     max_agents_override = models.PositiveIntegerField(
         null=True,
         blank=True,

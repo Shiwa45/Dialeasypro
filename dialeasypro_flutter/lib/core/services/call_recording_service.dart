@@ -76,6 +76,11 @@ class CallRecordingService {
     'Record/PhoneRecord',
     'Music/Recordings/PhoneRecord',
     'Recordings/Call recordings',        // Motorola / some Android 14 builds
+    'Recordings/Record/Call',            // Vivo / iQOO (Funtouch 13+, OriginOS)
+    'Recordings/CallRecordings',
+    'Record/CallRecord',
+    'Recorder/Call',                     // Infinix / Tecno / itel (XOS, HiOS)
+    'Recorder/CallRecord',
     'Recordings/CallRecord',             // Honor MagicOS
     'Sounds/Call',
   ];
@@ -94,6 +99,123 @@ class CallRecordingService {
   /// Every recording file already uploaded, as "path|size|mtime", so one file
   /// is never attached to two calls (it used to be keyed per call only).
   static const _usedFilesKey = 'call_recording_used_files';
+
+  // ---- Where recordings come from (NeoDove-style "Call Recording Path") ----
+  //
+  //  * 'builtin'      — the phone's own call recorder (default). Its folder is
+  //                     found automatically, or chosen by the agent.
+  //  * 'recorder_app' — a call-recorder app (Cube ACR, a recording dialer) on
+  //                     phones whose dialer keeps recordings private (the
+  //                     Google Phone app). The agent chooses its folder.
+  //  * 'app_mic'      — DialSathi records through the microphone during calls
+  //                     dialled from the app (no recorder on the phone at all).
+  static const _sourceKey = 'call_recording_source';
+  static const _folderUriKey = 'call_recording_folder_uri';
+  static const _folderLabelKey = 'call_recording_folder_label';
+  static const sources = ['builtin', 'recorder_app', 'app_mic'];
+
+  Future<String> recordingSource() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_sourceKey) ?? 'builtin';
+    return sources.contains(v) ? v : 'builtin';
+  }
+
+  Future<void> setRecordingSource(String source) async {
+    if (!sources.contains(source)) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sourceKey, source);
+    // The microphone must stay off when a recorder is in use: holding it
+    // stops the phone (or the recorder app) from recording the call.
+    await setMicMode(switch (source) {
+      'app_mic' => 'always',
+      'recorder_app' => 'never',
+      _ => 'auto',
+    });
+  }
+
+  /// The folder the agent chose: (uri, label), or null.
+  Future<({String uri, String label})?> recordingFolder() async {
+    final prefs = await SharedPreferences.getInstance();
+    final uri = prefs.getString(_folderUriKey);
+    if (uri == null || uri.isEmpty) return null;
+    return (uri: uri, label: prefs.getString(_folderLabelKey) ?? uri);
+  }
+
+  /// Opens Android's folder picker. Returns the chosen folder's label, or
+  /// null when cancelled.
+  Future<String?> pickRecordingFolder() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final res = await _probeChannel.invokeMapMethod<String, dynamic>('pickRecordingFolder');
+      final uri = res?['uri'] as String?;
+      if (uri == null || uri.isEmpty) return null;
+      final label = res?['label'] as String? ?? uri;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_folderUriKey, uri);
+      await prefs.setString(_folderLabelKey, label);
+      return label;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearRecordingFolder() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_folderUriKey);
+    await prefs.remove(_folderLabelKey);
+  }
+
+  /// Whether the app can still read the chosen folder (the agent can revoke
+  /// it, and it is lost when the folder is deleted).
+  Future<bool> hasFolderAccess() async {
+    final f = await recordingFolder();
+    if (f == null || !Platform.isAndroid) return false;
+    try {
+      return await _probeChannel.invokeMethod<bool>('hasFolderAccess', {'uri': f.uri}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The newest recording in the chosen folder from the last week, for the
+  /// "Check folder" button: proves the folder is right after a test call.
+  Future<({String name, DateTime modified})?> newestInFolder() async {
+    final now = DateTime.now();
+    final files = await _folderAudio(now.subtract(const Duration(days: 7)), now.add(const Duration(minutes: 1)));
+    if (files.isEmpty) return null;
+    final m = files.first;
+    return (
+      name: m['name'] as String? ?? '',
+      modified: DateTime.fromMillisecondsSinceEpoch((m['modifiedMillis'] as num?)?.toInt() ?? 0),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _folderAudio(DateTime from, DateTime to) async {
+    final f = await recordingFolder();
+    if (f == null || !Platform.isAndroid) return const [];
+    try {
+      final raw = await _probeChannel.invokeListMethod<dynamic>('listFolderAudio', {
+        'uri': f.uri,
+        'fromMillis': from.millisecondsSinceEpoch,
+        'toMillis': to.millisecondsSinceEpoch,
+      });
+      return [
+        for (final e in raw ?? const [])
+          if (e is Map) e.map((k, v) => MapEntry(k.toString(), v)),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<double?> _uriDurationSec(String uri) async {
+    try {
+      final ms = await _probeChannel.invokeMethod<int>('uriDurationMs', {'uri': uri});
+      return ms == null ? null : ms / 1000.0;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<String> micMode() async {
     final prefs = await SharedPreferences.getInstance();
@@ -116,6 +238,9 @@ class CallRecordingService {
   /// the microphone is used only when this phone has never produced a call
   /// recording and its brand ships without a recorder.
   Future<bool> shouldUseMicFallback() async {
+    final source = await recordingSource();
+    if (source == 'app_mic') return true;
+    if (source == 'recorder_app') return false;
     final mode = await micMode();
     if (mode == 'never') return false;
     if (mode == 'always') return true;
@@ -123,12 +248,24 @@ class CallRecordingService {
     final seen = DateTime.tryParse(prefs.getString(_oemSeenKey) ?? '');
     if (seen != null && DateTime.now().difference(seen) < const Duration(days: 30)) return false;
     try {
+      // Xiaomi, Realme, OnePlus and others now ship the Google Phone app as
+      // the dialer. Its recordings stay inside that app where nothing else
+      // can read them, so the brand's "has a recorder" says nothing: those
+      // phones got neither the phone's file nor the microphone fallback.
+      if (await usesGoogleDialer()) return true;
       final brand = (await SetupService.instance.guide()).brand;
       if (brandHasCallRecorder(brand)) return false;
     } catch (_) {
       // Unknown phone: fall through to the microphone.
     }
     return true;
+  }
+
+  /// Whether the phone's default dialer is the Google Phone app, whose call
+  /// recordings are private to it (not in shared storage).
+  Future<bool> usesGoogleDialer() async {
+    final info = await SetupService.instance.deviceInfo();
+    return isGoogleDialer(info['dialerPackage'] as String? ?? '');
   }
 
   Future<void> _markOemSeen() async {
@@ -164,10 +301,9 @@ class CallRecordingService {
     return (prefs.getStringList(_usedFilesKey) ?? const <String>[]).toSet();
   }
 
-  Future<void> _rememberUsed(File f) async {
+  Future<void> _rememberUsed(String key) async {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getStringList(_usedFilesKey) ?? <String>[];
-    final key = _fileKey(f);
     if (list.contains(key)) return;
     list.add(key);
     if (list.length > 1000) list.removeRange(0, list.length - 1000);
@@ -218,6 +354,8 @@ class CallRecordingService {
 
   /// Whether we currently have the access needed to read recording folders.
   Future<bool> hasStorageAccess() async {
+    // A folder the agent chose is readable without any storage permission.
+    if (await hasFolderAccess()) return true;
     // MANAGE_EXTERNAL_STORAGE covers OEM folders not indexed by MediaStore.
     if (await Permission.manageExternalStorage.isGranted) return true;
     // Fallbacks (older OS / audio-only access).
@@ -392,6 +530,7 @@ class CallRecordingService {
     required int durationSec,
     DateTime? endedAt,
     String? leadName,
+    String? contactName,
     File? fallbackFile,
   }) async {
     if (!await isEnabled()) {
@@ -405,7 +544,7 @@ class CallRecordingService {
     final end = endedAt ?? startedAt.add(Duration(seconds: durationSec));
     final job = _Job(
       callId: callId, phone: phoneNumber, startedAt: startedAt, endedAt: end,
-      talkSec: durationSec, leadName: leadName ?? '',
+      talkSec: durationSec, leadName: leadName ?? '', contactName: contactName ?? '',
     );
 
     final canScan = await hasStorageAccess();
@@ -416,7 +555,8 @@ class CallRecordingService {
         await Future.delayed(Duration(seconds: attempt == 0 ? 3 : 5));
         final match = await _findRecordingFile(job);
         if (match != null) {
-          if (await _uploadIfNew(callId, match.file, match.matchedBy)) {
+          if (await _uploadMatch(callId, match)) {
+            _cleanupCopy(match);
             _deleteQuietly(fallbackFile); // the phone's file wins
             return;
           }
@@ -448,6 +588,35 @@ class CallRecordingService {
       _note('No recording yet; will keep checking in the background. Make sure '
           'call recording is enabled in your phone\'s Dialer app.');
     }
+  }
+
+  /// Queue the recording of a call saved by phone call tracking (a call the
+  /// agent made or took outside the app's dialer) and look for it once now.
+  /// The regular sweep keeps looking afterwards. Returns whether it was
+  /// uploaded already.
+  Future<bool> captureForSyncedCall({
+    required String callId,
+    required String phoneNumber,
+    required DateTime startedAt,
+    required int talkSec,
+    String contactName = '',
+    String leadName = '',
+  }) async {
+    if (!await isEnabled()) return false;
+    final job = _Job(
+      callId: callId, phone: phoneNumber, startedAt: startedAt,
+      endedAt: startedAt.add(Duration(seconds: talkSec)),
+      talkSec: talkSec, leadName: leadName, contactName: contactName,
+    );
+    if (await hasStorageAccess()) {
+      final match = await _findRecordingFile(job);
+      if (match != null && await _uploadMatch(callId, match)) {
+        _cleanupCopy(match);
+        return true;
+      }
+    }
+    await _enqueuePending(job);
+    return false;
   }
 
   // ---- Deferred sync -------------------------------------------
@@ -552,8 +721,9 @@ class CallRecordingService {
         continue;
       }
 
-      if (await _uploadIfNew(job.callId, match.file, match.matchedBy)) {
+      if (await _uploadMatch(job.callId, match)) {
         uploaded++;
+        _cleanupCopy(match);
         // The phone's own recording won; the queued mic copy is not needed.
         if (fallbackPath != null) _deleteQuietly(File(fallbackPath));
       } else {
@@ -613,9 +783,30 @@ class CallRecordingService {
     final windowStart = job.startedAt.subtract(const Duration(seconds: 5));
     final windowEnd = job.endedAt.add(const Duration(hours: 6));
 
-    final candidates = <({File file, DateTime mtime, ({int score, String matchedBy}) scored})>[];
+    final candidates = <_Candidate>[];
     final seenPaths = <String>{};
 
+    ({int score, String matchedBy})? score(String name, DateTime mtime, {double? seconds}) {
+      ({int score, String matchedBy})? best;
+      // The lead's name and the name the phone's contacts show for the
+      // number: a recorder names the file after the contact.
+      for (final who in {job.leadName, job.contactName}) {
+        final r = scoreRecordingCandidate(
+          fileName: name,
+          modified: mtime,
+          phoneNumber: job.phone,
+          callEnd: job.endedAt,
+          callStart: job.startedAt,
+          leadName: who,
+          fileDurationSec: seconds,
+          talkSec: job.talkSec,
+        );
+        if (r != null && (best == null || r.score > best.score)) best = r;
+      }
+      return best;
+    }
+
+    // 1. Known call-recorder folders (needs "All files access" on most phones).
     for (final root in roots) {
       for (final rel in _candidateDirs) {
         final dir = Directory('${root.path}/$rel');
@@ -638,55 +829,161 @@ class CallRecordingService {
           if (stat.size < 1024) continue; // ignore empty/placeholder files
           if (used.contains(_fileKey(e))) continue; // already another call's
 
-          final scored = scoreRecordingCandidate(
-            fileName: e.path.split('/').last,
-            modified: mtime,
-            phoneNumber: job.phone,
-            callEnd: job.endedAt,
-            callStart: job.startedAt,
-            leadName: job.leadName,
-          );
-          if (scored != null) candidates.add((file: e, mtime: mtime, scored: scored));
+          final scored = score(e.path.split('/').last, mtime);
+          if (scored != null) {
+            candidates.add(_Candidate(
+              file: e, name: e.path.split('/').last, mtime: mtime, scored: scored, size: stat.size,
+            ));
+          }
         }
       }
     }
+
+    // 2. Android's media index: finds recordings in folders the list above
+    //    doesn't know (every ROM update renames one), and works with only the
+    //    audio permission — the Play Store build has no "All files access".
+    for (final m in await _mediaStoreAudio(windowStart, windowEnd)) {
+      final path = m['path'] as String? ?? '';
+      final name = m['name'] as String? ?? '';
+      final folder = m['folder'] as String? ?? '';
+      if (path.isNotEmpty && !seenPaths.add(path.toLowerCase())) continue;
+      final size = (m['size'] as num?)?.toInt() ?? 0;
+      if (size < 1024) continue;
+      final mtime = DateTime.fromMillisecondsSinceEpoch((m['modifiedMillis'] as num?)?.toInt() ?? 0);
+      if (mtime.isBefore(windowStart) || mtime.isAfter(windowEnd)) continue;
+      final durMs = (m['durationMs'] as num?)?.toInt() ?? -1;
+      final seconds = durMs > 0 ? durMs / 1000.0 : null;
+      final scored = score(name, mtime, seconds: seconds);
+      if (scored == null) continue;
+      // A file outside any call-recording folder is accepted only when its
+      // name identifies the call. A voice memo saved right after a call must
+      // not be taken for it on timing alone.
+      if (scored.matchedBy == 'timestamp' && !looksLikeCallRecordingFolder('$folder/$name')) continue;
+      final file = path.isEmpty ? null : File(path);
+      if (file != null && used.contains(_fileKey(file))) continue;
+      candidates.add(_Candidate(
+        file: file, uri: m['uri'] as String?, name: name, mtime: mtime, scored: scored,
+        seconds: seconds, size: size,
+      ));
+    }
+
+    // 3. The folder the agent chose (their recorder's, or a recorder app's
+    //    such as Cube ACR). Trusted like the known call-recorder folders: a
+    //    nameless file written right at the end of the call counts.
+    for (final m in await _folderAudio(windowStart, windowEnd)) {
+      final name = m['name'] as String? ?? '';
+      final size = (m['size'] as num?)?.toInt() ?? 0;
+      if (size < 1024) continue;
+      final mtime = DateTime.fromMillisecondsSinceEpoch((m['modifiedMillis'] as num?)?.toInt() ?? 0);
+      final scored = score(name, mtime);
+      if (scored == null) continue;
+      candidates.add(_Candidate(
+        file: null, uri: m['uri'] as String?, name: name, mtime: mtime, scored: scored, size: size,
+      ));
+    }
+
+    // One physical file can be reached several ways (its folder, the media
+    // index, the chosen folder): keep it once, and never reuse a file another
+    // call already took.
+    final seenIds = <String>{};
+    candidates.removeWhere((c) => !seenIds.add(c.identity) || used.contains(c.identity));
     if (candidates.isEmpty) return null;
 
     // Check the best few against their real length: a file longer than the
     // whole call is another call's recording, and among the rest the one
     // closest to the talk time wins.
     candidates.sort((a, b) => b.scored.score.compareTo(a.scored.score));
-    _Match? best;
-    var bestScore = -1;
+    _Candidate? best;
+    ({int score, String matchedBy})? bestScored;
     for (final c in candidates.take(5)) {
-      final seconds = await audioDurationSec(c.file.path);
-      final rescored = scoreRecordingCandidate(
-        fileName: c.file.path.split('/').last,
-        modified: c.mtime,
-        phoneNumber: job.phone,
-        callEnd: job.endedAt,
-        callStart: job.startedAt,
-        leadName: job.leadName,
-        fileDurationSec: seconds,
-        talkSec: job.talkSec,
-      );
-      if (rescored != null && rescored.score > bestScore) {
-        bestScore = rescored.score;
-        best = _Match(c.file, rescored.matchedBy);
+      final seconds = c.seconds ??
+          (c.file != null && _readable(c.file!)
+              ? await audioDurationSec(c.file!.path)
+              : (c.uri != null ? await _uriDurationSec(c.uri!) : null));
+      final rescored = score(c.name, c.mtime, seconds: seconds);
+      if (rescored != null && (bestScored == null || rescored.score > bestScored.score)) {
+        bestScored = rescored;
+        best = c;
       }
     }
-    return best;
+    if (best == null || bestScored == null) return null;
+
+    // Readable where it is, or copied out through the media index / folder.
+    if (best.file != null && _readable(best.file!)) {
+      return _Match(best.file!, bestScored.matchedBy, sourceKey: best.identity, sourceName: best.name);
+    }
+    final uri = best.uri;
+    if (uri == null || uri.isEmpty) return null;
+    final copy = await _copyFromMediaStore(uri, best.name);
+    if (copy == null) {
+      _note('Found the recording "${best.name}" but Android would not let the app read it.');
+      return null;
+    }
+    return _Match(copy, bestScored.matchedBy, isCopy: true, sourceKey: best.identity, sourceName: best.name);
   }
 
-  Future<bool> _uploadIfNew(String callId, File file, String matchedBy) async {
+  static const _mediaChannel = MethodChannel('dialeasypro/call_log');
+
+  Future<List<Map<String, dynamic>>> _mediaStoreAudio(DateTime from, DateTime to) async {
+    if (!Platform.isAndroid) return const [];
+    try {
+      final raw = await _mediaChannel.invokeListMethod<dynamic>('findAudio', {
+        'fromMillis': from.millisecondsSinceEpoch,
+        'toMillis': to.millisecondsSinceEpoch,
+      });
+      return [
+        for (final e in raw ?? const [])
+          if (e is Map) e.map((k, v) => MapEntry(k.toString(), v)),
+      ];
+    } on MissingPluginException {
+      return const [];
+    } on PlatformException {
+      return const [];
+    }
+  }
+
+  Future<File?> _copyFromMediaStore(String uri, String name) async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final safe = name.replaceAll(RegExp(r'[^A-Za-z0-9._ +-]'), '_');
+      final dest = '${dir.path}/rec_copy_${DateTime.now().millisecondsSinceEpoch}_$safe';
+      final path = await _mediaChannel.invokeMethod<String>('copyAudio', {'uri': uri, 'dest': dest});
+      return path == null ? null : File(path);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _readable(File f) {
+    try {
+      final raf = f.openSync();
+      raf.closeSync();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _uploadMatch(String callId, _Match m) =>
+      _uploadIfNew(callId, m.file, m.matchedBy, sourceKey: m.sourceKey, sourceName: m.sourceName);
+
+  void _cleanupCopy(_Match m) {
+    if (m.isCopy) _deleteQuietly(m.file);
+  }
+
+  Future<bool> _uploadIfNew(String callId, File file, String matchedBy,
+      {String? sourceKey, String? sourceName}) async {
     final prefs = await SharedPreferences.getInstance();
     final processed = prefs.getStringList(_processedKey) ?? <String>[];
-    final key = '$callId::${file.path}';
-    if (processed.contains(key)) return true;
+    // The original file's identity: a copy made through the media index or
+    // the chosen folder has a new path every time.
+    final usedKey = sourceKey ?? _fileKey(file);
+    final key = '$callId::$usedKey';
+    if (processed.contains(key) || processed.contains('$callId::${file.path}')) return true;
 
     try {
       final dio = ApiClient.instance.dio;
-      final name = file.path.split('/').last;
+      final name = sourceName ?? file.path.split('/').last;
       final seconds = await audioDurationSec(file.path);
 
       // Always through our own backend, which stores it with the server's
@@ -709,7 +1006,7 @@ class CallRecordingService {
       }
       await prefs.setStringList(_processedKey, processed);
       if (matchedBy != 'mic_fallback') {
-        await _rememberUsed(file);
+        await _rememberUsed(usedKey);
         await _markOemSeen();
       }
       lastError = null;
@@ -763,7 +1060,30 @@ class CallRecordingService {
 class _Match {
   final File file;
   final String matchedBy;
-  _Match(this.file, this.matchedBy);
+  /// A copy made through the media index, deleted after upload.
+  final bool isCopy;
+  /// Identity of the original file ("used once" bookkeeping) and its name.
+  final String? sourceKey;
+  final String? sourceName;
+  _Match(this.file, this.matchedBy, {this.isCopy = false, this.sourceKey, this.sourceName});
+}
+
+class _Candidate {
+  final File? file;
+  final String? uri;
+  final String name;
+  final DateTime mtime;
+  final ({int score, String matchedBy}) scored;
+  final double? seconds;
+  final int size;
+  _Candidate({
+    required this.file, this.uri, required this.name, required this.mtime,
+    required this.scored, this.seconds, this.size = 0,
+  });
+
+  /// The same physical file, whichever way it was found: name, size and
+  /// modification time to the second.
+  String get identity => recordingIdentity(name, size, mtime);
 }
 
 /// One call waiting for its recording.
@@ -774,6 +1094,8 @@ class _Job {
   final DateTime endedAt;
   final int talkSec;
   final String leadName;
+  /// The name the phone's contacts show for the number (call log).
+  final String contactName;
 
   _Job({
     required this.callId,
@@ -782,6 +1104,7 @@ class _Job {
     required this.endedAt,
     required this.talkSec,
     required this.leadName,
+    this.contactName = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -791,6 +1114,7 @@ class _Job {
         'endedAt': endedAt.toIso8601String(),
         'durationSec': talkSec,
         'leadName': leadName,
+        'contactName': contactName,
       };
 
   /// Entries queued by older builds have no endedAt: start + talk time.
@@ -806,8 +1130,27 @@ class _Job {
       endedAt: DateTime.tryParse(m['endedAt'] as String? ?? '') ?? started.add(Duration(seconds: talk)),
       talkSec: talk,
       leadName: m['leadName'] as String? ?? '',
+      contactName: m['contactName'] as String? ?? '',
     );
   }
+}
+
+/// One recording file's identity across the ways it can be found (its
+/// folder, the media index, the folder the agent chose).
+String recordingIdentity(String name, int size, DateTime modified) =>
+    'id:${name.toLowerCase()}|$size|${modified.millisecondsSinceEpoch ~/ 1000}';
+
+/// The Google Phone app. Its call recordings are stored inside the app,
+/// out of reach of every other app, so nothing can collect them.
+bool isGoogleDialer(String dialerPackage) =>
+    dialerPackage.trim().toLowerCase() == 'com.google.android.dialer';
+
+/// Whether a folder/file path looks like a call recorder's (as opposed to a
+/// voice recorder's or music).
+bool looksLikeCallRecordingFolder(String path) {
+  final p = path.toLowerCase();
+  if (p.contains('voice recorder') || p.contains('voicerecorder') || p.contains('voice memo')) return false;
+  return p.contains('call') || p.contains('phonerecord') || p.contains('voice_call');
 }
 
 /// Brands whose phones ship with a call recorder of their own. On these the

@@ -100,6 +100,13 @@ class SetupService {
     }
   }
 
+  /// Read the device again: the agent may just have changed the default
+  /// phone app (dialer) in Settings.
+  Future<Map<String, dynamic>> refreshDeviceInfo() async {
+    _cachedInfo = null;
+    return deviceInfo();
+  }
+
   /// Whether this build can ask for "All files access". The Play Store
   /// build cannot; there, recordings are read through Android's audio
   /// library only. True when unknown (older native side, tests).
@@ -224,6 +231,10 @@ class SetupService {
 
   Future<bool> requestIgnoreBatteryOptimizations() =>
       _invoke<bool>('requestIgnoreBatteryOptimizations', false);
+
+  /// Settings → Default apps, where the phone (dialer) app is chosen.
+  Future<bool> openDefaultDialerSettings() =>
+      _invoke<bool>('openDefaultDialerSettings', false);
 
   Future<bool> openAutoStartSettings() =>
       _invoke<bool>('openAutoStartSettings', false);

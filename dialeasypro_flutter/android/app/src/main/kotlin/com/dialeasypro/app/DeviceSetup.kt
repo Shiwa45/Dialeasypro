@@ -32,7 +32,11 @@ object DeviceSetup {
         "model" to (Build.MODEL ?: ""),
         "sdkInt" to Build.VERSION.SDK_INT,
         "dialerPackage" to (defaultDialer(context) ?: ""),
+        "dialerLabel" to (defaultDialer(context)?.let { appLabel(context, it) } ?: ""),
         "allFilesAccess" to declares(context, "android.permission.MANAGE_EXTERNAL_STORAGE"),
+        // The Play Store build cannot read the call log at all, so phone call
+        // tracking is only possible in the direct-install build.
+        "callLogDeclared" to declares(context, "android.permission.READ_CALL_LOG"),
     )
 
     /**
@@ -176,6 +180,37 @@ object DeviceSetup {
             if (launchComponent(activity, pkg, cls)) return true
         }
         return false
+    }
+
+    /**
+     * Open the screen where the default phone (dialer) app is chosen, so the
+     * agent can switch from the Google Phone app to a dialer that records
+     * calls into a folder the app can read. Returns whether a screen opened.
+     */
+    fun openDefaultDialerSettings(activity: Activity): Boolean {
+        val intents = listOf(
+            Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS),
+        )
+        for (intent in intents) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (intent.resolveActivity(activity.packageManager) != null) {
+                    activity.startActivity(intent)
+                    return true
+                }
+            } catch (e: Exception) {
+                // Try the next one.
+            }
+        }
+        return false
+    }
+
+    private fun appLabel(context: Context, pkg: String): String = try {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+    } catch (e: Exception) {
+        pkg
     }
 
     // ---- Low-level helpers ---------------------------------------

@@ -127,11 +127,180 @@ class CallLogListCreateView(generics.ListCreateAPIView):
         # The lead is brought up to date — status, counters, activity, auto
         # follow-up — by the CallLog post_save signal (calls/services/outcomes).
         data = dict(serializer.validated_data)
+        twin = self._phone_entry_to_take_over(data)
+        if twin is not None:
+            serializer.instance = self._take_over(twin, data)
+            return
         call = CallLog(agent=self.request.user, **{k: v for k, v in data.items() if k != "followup_at"})
         call._actor = self.request.user
         call._followup_at = data.get("followup_at")
         call.save()
         serializer.instance = call
+
+    def _phone_entry_to_take_over(self, data):
+        """
+        With phone call tracking on, the phone's call log can deliver a call
+        before the agent saves its outcome in the app. The app's save then
+        completes that row instead of adding a second one.
+        """
+        from apps.calls.services.phone_tracking import merge_app_call_into_phone_entry
+
+        try:
+            return merge_app_call_into_phone_entry(self.request.user, data)
+        except Exception as exc:  # noqa: BLE001 — never lose the call itself
+            logger.warning("[Calls] Phone-entry merge lookup failed: %s", exc)
+            return None
+
+    def _take_over(self, call, data):
+        from apps.calls.services.outcomes import apply_call_outcome
+
+        previous_lead = call.lead_id
+        meta = dict(call.provider_meta or {})
+        fields = []
+        for key, value in data.items():
+            if key in ("followup_at",):
+                continue
+            if key == "duration_seconds" and not value and call.duration_seconds:
+                continue  # keep the phone's real talk time
+            setattr(call, key, value)
+            fields.append(key)
+        meta["merged_with_app_call"] = True
+        call.provider_meta = meta
+        fields.append("provider_meta")
+        call.save(update_fields=sorted(set(fields)))
+        # The phone's entry counted as a dial only if it was already on this
+        # lead (an outbound call is applied when it is created).
+        apply_call_outcome(
+            call, actor=self.request.user,
+            new_dial=previous_lead != call.lead_id,
+            followup_at=data.get("followup_at"),
+        )
+        return call
+
+
+class CallTrackingSettingsView(APIView):
+    """
+    GET/PATCH /api/v1/calls/tracking/   {"enabled": true|false}
+
+    The company's phone call tracking switch. With it on, the mobile app of
+    every agent whose own switch is on (Agent.call_tracking_enabled) saves
+    all incoming and outgoing calls from the phone and uploads recordings.
+    GET also lists who is covered, for the settings screen.
+    """
+
+    def get_permissions(self):
+        from apps.core.capabilities import Cap
+        from apps.core.permissions import capability_required
+
+        return [IsAuthenticatedAgent(), capability_required(Cap.CRM_SETTINGS)()]
+
+    def get(self, request):
+        from apps.authentication.models import Agent
+        from apps.calls.services.phone_tracking import company_tracking_enabled
+
+        agents = Agent.objects.filter(is_active=True).order_by("name")
+        return Response({
+            "enabled": company_tracking_enabled(),
+            "agents": [
+                {"id": a.pk, "name": a.name, "role": a.role, "call_tracking_enabled": a.call_tracking_enabled}
+                for a in agents
+            ],
+        })
+
+    def patch(self, request):
+        from apps.authentication.models import Agent
+        from apps.calls.services.phone_tracking import current_tenant
+        from apps.superadmin.models import AuditLog
+        from apps.core.constants import AuditAction
+
+        tenant = current_tenant()
+        if tenant is None:
+            return Response({"error": "no_tenant"}, status=status.HTTP_400_BAD_REQUEST)
+
+        changed = []
+        if "enabled" in request.data:
+            raw = request.data.get("enabled")
+            if not isinstance(raw, bool):
+                return Response({"error": "invalid", "message": "enabled must be true or false."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            tenant.call_tracking_enabled = raw
+            tenant.save(update_fields=["call_tracking_enabled"])
+            changed.append(f"Phone call tracking turned {'on' if raw else 'off'}")
+
+        # {"agents": {"<id>": true|false, ...}} — per-agent switches.
+        per_agent = request.data.get("agents")
+        if per_agent is not None:
+            if not isinstance(per_agent, dict) or not all(isinstance(v, bool) for v in per_agent.values()):
+                return Response({"error": "invalid", "message": "agents must map agent ids to true or false."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            for agent_id, value in per_agent.items():
+                n = Agent.objects.filter(pk=agent_id).update(call_tracking_enabled=value)
+                if n:
+                    changed.append(f"Call tracking {'on' if value else 'off'} for agent {agent_id}")
+
+        if changed:
+            AuditLog.log(
+                action=AuditAction.SETTINGS_CHANGE,
+                actor_type="tenant_admin",
+                actor_id=request.user.pk,
+                actor_email=request.user.email,
+                entity_type="Tenant",
+                description="; ".join(changed)[:500],
+                request=request,
+            )
+        return self.get(request)
+
+
+class PhoneCallSyncView(APIView):
+    """
+    POST /api/v1/calls/sync/
+        {"calls": [{"device_id": "1234", "number": "+919812345678",
+                    "type": "incoming|outgoing|missed|rejected|blocked",
+                    "started_at": <epoch ms or ISO>, "duration_seconds": 42}, ...]}
+
+    The mobile app's phone call tracking: entries from the phone's call log.
+    Each is saved once (a retry, or a call the app already saved from its
+    dialer, returns the existing call) and the answer says which calls still
+    need their recording uploaded.
+
+    403 call_tracking_off when the company or this agent is not tracked —
+    the app then stops syncing.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, IsNotReadOnly]
+
+    def post(self, request):
+        from apps.calls.services import phone_tracking as pt
+
+        agent = request.user
+        if not pt.tracking_enabled_for(agent):
+            return Response(
+                {"error": "call_tracking_off",
+                 "message": "Phone call tracking is not turned on for you. Ask your admin."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        calls = request.data.get("calls")
+        if not isinstance(calls, list):
+            return Response({"error": "invalid", "message": "Send a list of calls."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if len(calls) > pt.MAX_BATCH:
+            return Response({"error": "too_many", "message": f"Send at most {pt.MAX_BATCH} calls at a time."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        results, skipped = [], []
+        for raw in calls:
+            try:
+                entry = pt.clean_entry(raw)
+            except pt.EntryError as exc:
+                skipped.append({"device_id": str((raw or {}).get("device_id", "")) if isinstance(raw, dict) else "",
+                                "reason": str(exc)})
+                continue
+            try:
+                results.append(pt.sync_entry(agent, entry))
+            except Exception as exc:  # noqa: BLE001 — one bad row must not lose the batch
+                logger.warning("[PhoneSync] Could not save entry %s: %s", entry["device_id"], exc, exc_info=True)
+                skipped.append({"device_id": entry["device_id"], "reason": "Could not save this call."})
+        return Response({"results": results, "skipped": skipped})
 
 
 class CallOutcomeView(APIView):

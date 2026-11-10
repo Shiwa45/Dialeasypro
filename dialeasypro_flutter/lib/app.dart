@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/call_recording_service.dart';
+import 'core/services/call_tracking_service.dart';
+import 'core/services/phone_service.dart';
 import 'core/services/presence_service.dart';
 import 'core/services/setup_service.dart';
 import 'core/theme/app_theme.dart';
@@ -29,6 +31,7 @@ import 'features/leads/lead_import_screen.dart';
 import 'features/leads/leads_list_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/reports/reports_screen.dart';
+import 'features/setup/call_tracking_setup_screen.dart';
 import 'features/setup/setup_wizard_screen.dart';
 import 'features/work/work_session.dart';
 
@@ -119,7 +122,13 @@ final _routerProvider = Provider<GoRouter>((ref) {
   final refresh = _RouterRefresh();
   ref.listen<AuthState>(authProvider, (prev, next) {
     if (prev?.status != next.status) refresh.ping();
-  });
+    // Phone call tracking follows the signed-in agent's flag (set by the
+    // company admin). The service notifies the router when it changes.
+    final agent = next.isAuthenticated ? next.agent : null;
+    CallTrackingService.instance.configure(
+      agentId: agent?.id, enabled: agent?.callTracking ?? false,
+    );
+  }, fireImmediately: true);
   ref.listen<WorkSessionState>(workSessionProvider, (prev, next) {
     if (prev?.onBreak != next.onBreak || prev?.live != next.live) refresh.ping();
   });
@@ -128,7 +137,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     navigatorKey: _rootKey,
     initialLocation: '/splash',
-    refreshListenable: refresh,
+    refreshListenable: Listenable.merge([refresh, CallTrackingService.instance]),
     redirect: (ctx, state) {
       final authState = ref.read(authProvider);
       final loc = state.matchedLocation;
@@ -149,6 +158,14 @@ final _routerProvider = Provider<GoRouter>((ref) {
         return '/setup';
       }
 
+      // Call tracking switched on by the admin: the agent allows call-log
+      // and recording access first.
+      final trackingPath = loc == '/call-tracking';
+      if (CallTrackingService.instance.needsSetupSync) {
+        return trackingPath ? null : '/call-tracking';
+      }
+      if (trackingPath) return '/';
+
       // Working (not on break): auto-dialling only. Leads, manual calls,
       // WhatsApp and the rest open once the agent takes a break, and ending
       // the break brings them back here.
@@ -166,6 +183,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
 
       // First-run setup (outside the shell — no bottom nav during setup)
       GoRoute(path: '/setup', builder: (_, __) => const SetupWizardScreen()),
+      GoRoute(path: '/call-tracking', builder: (_, __) => const CallTrackingSetupScreen()),
 
       // Bottom-nav shell
       ShellRoute(
@@ -252,12 +270,34 @@ class _MainShellState extends ConsumerState<_MainShell>
     Future.microtask(() => ref.read(workSessionProvider.notifier).start());
     // Catch anything left over from a previous session.
     _sweepRecordings();
+    // Phone call tracking: pick up the calls the phone logged since the app
+    // last ran, and each call as it ends.
+    CallTrackingService.instance.syncNow();
+    _phoneEvents = PhoneService.instance.events.listen((e) {
+      if (e.status == CallStatus.ended) CallTrackingService.instance.syncAfterCall();
+    });
   }
+
+  StreamSubscription<PhoneCallEvent>? _phoneEvents;
+  DateTime? _profileCheckedAt;
 
   @override
   void dispose() {
+    _phoneEvents?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// The admin may switch call tracking on or off at any time; the profile
+  /// carries the flag. Re-read it on return to the app, at most every few
+  /// minutes.
+  void _recheckProfile() {
+    final now = DateTime.now();
+    if (_profileCheckedAt != null && now.difference(_profileCheckedAt!) < const Duration(minutes: 5)) {
+      return;
+    }
+    _profileCheckedAt = now;
+    ref.read(authProvider.notifier).refreshProfile();
   }
 
   @override
@@ -269,6 +309,8 @@ class _MainShellState extends ConsumerState<_MainShell>
     // is what actually collects most recordings.
     if (state == AppLifecycleState.resumed) {
       _sweepRecordings();
+      _recheckProfile();
+      CallTrackingService.instance.syncNow();
       // Back from the dialer or a locked screen: tell the server where we are
       // at once, rather than on the next 25-second heartbeat.
       PresenceService.instance.resync();

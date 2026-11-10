@@ -10,13 +10,16 @@ class Agent {
   final String? profilePhotoUrl, lastActiveAt, createdAt;
   final String timezone;
   final int totalLoginCount;
+  /// The admin has turned phone call tracking on for this agent: the app
+  /// saves every call on the phone and uploads its recording.
+  final bool callTracking;
 
   const Agent({
     required this.id, required this.email, required this.name,
     this.phone = '', this.employeeId = '', required this.role,
     this.roleDisplay = '', this.isTenantAdmin = false, this.isActive = true,
     this.isOnline = false, this.profilePhotoUrl, this.lastActiveAt, this.createdAt,
-    this.timezone = 'Asia/Kolkata', this.totalLoginCount = 0,
+    this.timezone = 'Asia/Kolkata', this.totalLoginCount = 0, this.callTracking = false,
   });
 
   factory Agent.fromJson(Map<String, dynamic> j) => Agent(
@@ -35,6 +38,7 @@ class Agent {
     createdAt: j['created_at'] as String?,
     timezone: j['timezone'] as String? ?? 'Asia/Kolkata',
     totalLoginCount: j['total_login_count'] as int? ?? 0,
+    callTracking: j['call_tracking'] as bool? ?? false,
   );
 
   String get initials => name.split(' ').map((n) => n.isNotEmpty ? n[0] : '').take(2).join().toUpperCase();

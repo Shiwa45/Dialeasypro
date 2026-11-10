@@ -48,6 +48,9 @@ class DialerCallRecord {
   /// 'call_log' when the figures came from the phone's call log, 'estimate'
   /// otherwise (the agent then confirms "connected" themselves).
   String outcomeSource = 'estimate';
+  /// The name the phone's contacts show for the number, from the call log.
+  /// Recorders name the file after it, and it often differs from the lead's.
+  String contactName = '';
   bool _finishing = false;
   int? dispositionId;
   String? dispositionName;
@@ -470,6 +473,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
     record.wasConnected = outcome.connected ?? false;
     record.endedAt = outcome.endedAt;
     record.outcomeSource = outcome.source;
+    record.contactName = (log?['cachedName'] as String?) ?? '';
 
     if (!mounted || state.currentCall != record) return;
     state = state.copyWith(phase: DialerPhase.postCall);
@@ -556,6 +560,7 @@ class DialerNotifier extends StateNotifier<DialerState> {
           // A recorder names the file after the contact when the number is
           // saved in the phone.
           leadName: call.leadName,
+          contactName: call.contactName,
           fallbackFile: mic,
         ).catchError((_) {});
       }

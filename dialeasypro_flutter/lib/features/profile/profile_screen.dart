@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../core/legal.dart';
 import '../../core/services/call_recording_service.dart';
+import '../../core/services/call_tracking_service.dart';
 import '../../core/services/setup_service.dart';
 import '../../core/services/tenant_config.dart';
 import '../../core/theme/colors.dart';
@@ -13,6 +14,7 @@ import '../../core/widgets/widgets.dart';
 import '../auth/auth_provider.dart';
 import '../dialer/dialer_state.dart';
 import '../setup/recording_disclosure.dart';
+import '../setup/recording_source_panel.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -28,7 +30,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   int _pendingRecordings = 0;
   bool _scanning = false;
   bool _signingOut = false;
-  String _micMode = 'auto';
 
   /// Force the deferred recording sync now.
   ///
@@ -69,9 +70,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final recEnabled = await CallRecordingService.instance.isEnabled();
     final pending = await CallRecordingService.instance.pendingCount();
     final allFiles = await SetupService.instance.hasAllFilesAccessOption();
-    final micMode = await CallRecordingService.instance.micMode();
     if (mounted) setState(() {
-      _micMode = micMode;
       _allFiles = allFiles;
       _waMode = m;
       _callRecEnabled = recEnabled;
@@ -222,6 +221,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     }
                   }
                   await CallRecordingService.instance.setEnabled(val);
+                  // With call tracking on, recording is required: turning it
+                  // off brings the tracking setup screen back.
+                  await CallTrackingService.instance.refreshReadiness();
                   if (mounted) setState(() => _callRecEnabled = val);
                   if (mounted) {
                     AppToast.show(context, val ? 'Call recording auto-upload ON' : 'Turned off',
@@ -247,34 +249,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              // The app's own microphone recording. On a phone with a call
-              // recorder it must stay off: holding the microphone stops the
-              // phone recording the call.
-              Row(children: [
-                const Expanded(child: Text('App microphone recording', style: AppTextStyles.caption)),
-                DropdownButton<String>(
-                  value: _micMode,
-                  underline: const SizedBox.shrink(),
-                  items: const [
-                    DropdownMenuItem(value: 'auto', child: Text('Auto')),
-                    DropdownMenuItem(value: 'never', child: Text('Off')),
-                    DropdownMenuItem(value: 'always', child: Text('Always')),
-                  ],
-                  onChanged: (v) async {
-                    if (v == null) return;
-                    await CallRecordingService.instance.setMicMode(v);
-                    if (mounted) setState(() => _micMode = v);
-                  },
-                ),
-              ]),
-              Text(
-                _micMode == 'auto'
-                    ? 'Only on phones without their own call recorder.'
-                    : _micMode == 'never'
-                        ? "Only your phone's call recorder is used."
-                        : 'Records every call — on most phones this stops the '
-                            "phone's own recorder from working.",
-                style: AppTextStyles.caption.copyWith(fontSize: 11),
+              // Where recordings come from, and the folder to read them from
+              // (NeoDove-style "Call Recording Path").
+              RecordingSourcePanel(
+                onChanged: () => CallTrackingService.instance.refreshReadiness(),
               ),
               const SizedBox(height: 6),
               // Manual trigger for the deferred sync. The automatic sweep runs
@@ -328,6 +306,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ],
             ],
           ])).animate().fadeIn(delay: 180.ms),
+
+          if (CallTrackingService.instance.active) ...[
+            const SizedBox(height: 14),
+            const _CallTrackingCard(),
+          ],
 
           const SizedBox(height: 14),
 
@@ -413,6 +396,68 @@ class _WaModeBox extends StatelessWidget {
         ]),
         const SizedBox(height: 3),
         Text(subtitle, style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10, color: selected ? AppColors.white.withOpacity(0.85) : AppColors.grey)),
+      ]),
+    );
+  }
+}
+
+
+/// Phone call tracking status, when the admin has it on for this agent.
+class _CallTrackingCard extends StatefulWidget {
+  const _CallTrackingCard();
+
+  @override
+  State<_CallTrackingCard> createState() => _CallTrackingCardState();
+}
+
+class _CallTrackingCardState extends State<_CallTrackingCard> {
+  bool _syncing = false;
+
+  Future<void> _sync() async {
+    setState(() => _syncing = true);
+    final saved = await CallTrackingService.instance.syncNow();
+    if (!mounted) return;
+    setState(() => _syncing = false);
+    final err = CallTrackingService.instance.lastError;
+    AppToast.show(context,
+        err ?? (saved > 0 ? '$saved new call(s) saved' : 'All calls are up to date'),
+        isError: err != null, isSuccess: err == null && saved > 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CallTrackingService.instance;
+    final at = t.lastSyncAt;
+    return BrutalCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const SectionHeader(title: 'Call Tracking', icon: Icons.phone_in_talk_outlined),
+        const SizedBox(height: 4),
+        const Text(
+          'Turned on by your admin: every incoming and outgoing call on this phone is '
+          'saved to the CRM with its recording.',
+          style: AppTextStyles.caption,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          at == null
+              ? 'Not synced yet in this session.'
+              : 'Last synced ${TimeOfDay.fromDateTime(at).format(context)}',
+          style: AppTextStyles.caption,
+        ),
+        if (t.lastError != null) ...[
+          const SizedBox(height: 6),
+          Text(t.lastError!, style: const TextStyle(
+              fontFamily: 'PlusJakartaSans', fontSize: 11.5, color: AppColors.error)),
+        ],
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: _syncing ? null : _sync,
+            child: Text(_syncing ? 'Syncing…' : 'Sync calls now'),
+          ),
+        ),
       ]),
     );
   }

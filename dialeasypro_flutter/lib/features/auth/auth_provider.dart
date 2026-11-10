@@ -158,6 +158,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       'profile_photo_url': agent.profilePhotoUrl, 'last_active_at': agent.lastActiveAt,
       'created_at': agent.createdAt, 'timezone': agent.timezone,
       'total_login_count': agent.totalLoginCount,
+      'call_tracking': agent.callTracking,
     }));
   }
 }

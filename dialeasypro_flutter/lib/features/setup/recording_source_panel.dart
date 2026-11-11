@@ -179,9 +179,9 @@ class _RecordingSourcePanelState extends State<RecordingSourcePanel>
         ),
       option('builtin', "Phone's built-in recorder${_googleDialer ? '' : ' (recommended)'}",
           'Best quality: both sides of every call, including calls not made from DialSathi.'),
-      option('recorder_app', 'Recording dialer app${_googleDialer ? ' (needed on this phone)' : ''}',
-          'Any phone app (dialer) that records calls into a folder on the phone, such as '
-          'Odialer. Set it as your default phone app and select its recordings folder below.'),
+      option('recorder_app', 'Recording dialer or recorder app${_googleDialer ? ' (needed on this phone)' : ''}',
+          'A phone app (dialer) that records calls, such as ODialer, set as your default phone '
+          'app — or a recorder app such as Cube ACR. Select its recordings folder below.'),
       option('app_mic', 'Record with DialSathi (microphone)',
           'Only for calls dialled from DialSathi. Put the call on speaker so both sides are heard.'),
       const SizedBox(height: 6),
@@ -194,14 +194,16 @@ class _RecordingSourcePanelState extends State<RecordingSourcePanel>
         TextButton(onPressed: _openRecorderSettings, child: const Text('Open Phone settings')),
       ],
       if (_source == 'recorder_app') ...[
-        Text('1. Install a dialer that records calls (for example Odialer).', style: small),
-        Text('2. Make it your default phone app${_googleDialer ? ' — the Google Phone app must not stay the default' : ''}.',
-            style: small),
+        Text('1. Install a dialer that records calls (for example ODialer), or a recorder '
+            'app such as Cube ACR.', style: small),
+        Text('2. A dialer: make it your default phone app. A recorder app: allow everything it '
+            'asks for (including its accessibility helper on newer phones).', style: small),
         Text('3. In its settings, turn on recording for all calls.', style: small),
         Text('4. Make a short test call so it creates its recordings folder.', style: small),
         Text('5. Tap "Select folder" below, choose that folder, then "Check folder".', style: small),
         Wrap(spacing: 4, children: [
-          TextButton(onPressed: () => _openStore('Odialer'), child: const Text('Get Odialer')),
+          TextButton(onPressed: () => _openStore('ODialer'), child: const Text('Get ODialer')),
+          TextButton(onPressed: () => _openStore('Cube ACR'), child: const Text('Get Cube ACR')),
           TextButton(onPressed: _openDefaultApps, child: const Text('Set default phone app')),
         ]),
         Container(

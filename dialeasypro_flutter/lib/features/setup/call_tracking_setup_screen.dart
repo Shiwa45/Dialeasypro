@@ -116,9 +116,9 @@ class _CallTrackingSetupScreenState extends ConsumerState<CallTrackingSetupScree
       });
 
   Future<void> _getDialer() async {
-    final uri = Uri.parse('https://play.google.com/store/search?q=Odialer&c=apps');
+    final uri = Uri.parse('https://play.google.com/store/search?q=ODialer&c=apps');
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
-      AppToast.show(context, 'Open the Play Store and search for "Odialer".', isError: true);
+      AppToast.show(context, 'Open the Play Store and search for "ODialer".', isError: true);
     }
   }
 
@@ -190,9 +190,10 @@ class _CallTrackingSetupScreenState extends ConsumerState<CallTrackingSetupScree
                 title: 'Switch from the Google Phone app',
                 done: false,
                 body: 'The Google Phone app keeps call recordings where DialSathi cannot read them. '
-                    'Install a dialer that records calls (for example Odialer), make it your default '
-                    'phone app, then choose "Recording dialer app" below and select its folder.',
-                action: ('Get Odialer', _getDialer),
+                    'Install a dialer that records calls (for example ODialer) and make it your '
+                    'default phone app — or install a recorder app such as Cube ACR. Then choose '
+                    '"Recording dialer app" below and select its recordings folder.',
+                action: ('Get ODialer', _getDialer),
                 secondary: ('Set default phone app', _openDefaultApps),
               ),
             _Item(

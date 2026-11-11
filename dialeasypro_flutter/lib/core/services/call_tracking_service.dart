@@ -38,7 +38,8 @@ class CallTrackingReadiness {
   /// The agent agreed to the recording disclosure and recording is on.
   final bool recording;
   final bool battery;
-  /// The phone uses the Google Phone app, whose recordings no app can read.
+  /// The phone uses the Google Phone app, whose recordings no app can read,
+  /// and no recording dialer or recorder app has been set up instead.
   final bool googleDialer;
 
   const CallTrackingReadiness({
@@ -158,7 +159,10 @@ class CallTrackingService extends ChangeNotifier {
       storage: await _recordingsReadable(),
       recording: await CallRecordingService.instance.isEnabled(),
       battery: await SetupService.instance.isIgnoringBatteryOptimizations(),
-      googleDialer: await CallRecordingService.instance.usesGoogleDialer(),
+      // A recorder app (Cube ACR) records alongside the Google Phone app, so
+      // with one set up the Google app may stay the default dialer.
+      googleDialer: await CallRecordingService.instance.usesGoogleDialer() &&
+          await CallRecordingService.instance.recordingSource() != 'recorder_app',
     );
     final was = _readiness?.complete;
     _readiness = r;

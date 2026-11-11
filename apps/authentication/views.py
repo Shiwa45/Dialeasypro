@@ -998,7 +998,7 @@ class LiveAgentsAPIView(APIView):
 
     def get(self, request):
         from apps.authentication.models import AgentStatus
-        from apps.authentication.presence import agent_live_payload, sweep_stale
+        from apps.authentication.presence import agent_live_payload, compute_today_calls, sweep_stale
         from apps.core.constants import AgentWorkStatus
 
         # Flip any stale sessions to offline so the snapshot is accurate.
@@ -1022,6 +1022,8 @@ class LiveAgentsAPIView(APIView):
                     "last_seen": None, "is_online": False, "current_lead_id": None,
                     "session_started_at": None,
                     "totals": {"available": 0, "on_call": 0, "wrap_up": 0, "break": 0, "online": 0},
+                    # An agent can call without going online (manual calls).
+                    "calls": compute_today_calls(agent, now),
                 })
             else:
                 out.append(agent_live_payload(st, now))

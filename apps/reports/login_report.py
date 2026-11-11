@@ -12,7 +12,7 @@ Days are the tenant's local days (IST), not UTC ones.
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.authentication.models import Agent, AgentLoginSession, AgentStatus, AgentStatusLog
@@ -29,13 +29,14 @@ COLUMNS = [
     ("last_seen", "Last seen"),
     ("online_seconds", "Logged in (h:mm)"),
     ("available_seconds", "Idle / available (h:mm)"),
-    ("on_call_seconds", "On call (h:mm)"),
+    ("on_call_seconds", "On call, dialer status (h:mm)"),
     ("wrap_up_seconds", "Wrap-up (h:mm)"),
     ("break_seconds", "Break (h:mm)"),
     ("break_count", "Breaks"),
     ("break_reasons", "Break reasons"),
     ("calls", "Calls"),
     ("connected_calls", "Connected"),
+    ("talk_seconds", "Talk time (h:mm)"),
     ("occupancy", "Occupancy %"),
 ]
 
@@ -86,6 +87,7 @@ def build_login_report(date_from: date, date_to: date, now=None) -> list[dict]:
     ).filter(Q(ended_at__isnull=True) | Q(ended_at__gt=range_start)).order_by("started_at"):
         logs_by_agent[log.agent_id].append(log)
 
+    from apps.calls.figures import call_figures_by_agent_day
     from apps.calls.models import CallLog
 
     called = set(
@@ -103,16 +105,11 @@ def build_login_report(date_from: date, date_to: date, now=None) -> list[dict]:
         key = (agent_id, timezone.localtime(login_time).date())
         sign_ins.setdefault(key, login_time)
 
-    calls = defaultdict(lambda: {"calls": 0, "connected": 0})
-    for row in (
+    # Calls, connected and talk time as the Calls page counts them
+    # (apps/calls/figures.py).
+    calls = call_figures_by_agent_day(
         CallLog.objects.filter(started_at__gte=range_start, started_at__lt=range_end)
-        .values("agent_id", "started_at__date")
-        .annotate(n=Count("id"), connected=Count("id", filter=Q(is_connected=True)))
-    ):
-        # started_at__date is evaluated in the current (local) time zone.
-        calls[(row["agent_id"], row["started_at__date"])] = {
-            "calls": row["n"], "connected": row["connected"],
-        }
+    )
 
     rows = []
     day = date_to
@@ -135,7 +132,7 @@ def build_login_report(date_from: date, date_to: date, now=None) -> list[dict]:
             reasons = defaultdict(int)
             for b in breaks:
                 reasons[b.break_reason or "Unspecified"] += 1
-            c = calls.get((agent.id, day), {"calls": 0, "connected": 0})
+            c = calls.get((agent.id, day), {"calls": 0, "connected": 0, "talk_seconds": 0})
             online = totals["online"]
             is_today = day == timezone.localdate(now)
             status_now = live.get(agent.id, AgentWorkStatus.OFFLINE) if is_today else None
@@ -165,6 +162,7 @@ def build_login_report(date_from: date, date_to: date, now=None) -> list[dict]:
                 "break_reasons": "; ".join(f"{r} ×{n}" for r, n in sorted(reasons.items())),
                 "calls": c["calls"],
                 "connected_calls": c["connected"],
+                "talk_seconds": c["talk_seconds"],
                 "occupancy": round(totals[AgentWorkStatus.ON_CALL] / online * 100) if online else 0,
             })
         day -= timedelta(days=1)

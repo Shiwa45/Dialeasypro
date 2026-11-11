@@ -183,7 +183,17 @@ def agent_live_payload(st, now=None) -> dict:
         "current_lead_id": st.current_lead_id,
         "session_started_at": st.session_started_at.isoformat() if st.session_started_at else None,
         "totals": compute_today_totals(st.agent, now),
+        "calls": compute_today_calls(st.agent, now),
     }
+
+
+def compute_today_calls(agent, now=None) -> dict:
+    """Today's calls, connected and talk time — the Calls page's figures."""
+    from apps.calls.figures import call_figures
+    from apps.calls.models import CallLog
+
+    now = now or timezone.now()
+    return call_figures(CallLog.objects.filter(agent=agent, started_at__date=timezone.localdate(now)))
 
 
 def _broadcast(st, now=None):

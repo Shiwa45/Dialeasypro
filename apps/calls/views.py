@@ -44,6 +44,54 @@ from apps.leads.models import Lead
 logger = logging.getLogger(__name__)
 
 
+def filter_calls(qs, params):
+    """
+    The call log's filters, shared by the list and its summary boxes
+    (CallStatsView), so the boxes describe exactly the calls listed. The stats
+    used to take the dates only: searching an agent filtered the list and left
+    the boxes on everyone's calls.
+    """
+    if lead_id := params.get("lead"):
+        qs = qs.filter(lead_id=lead_id)
+    if agent_id := params.get("agent"):
+        qs = qs.filter(agent_id=agent_id)
+    if date_from := params.get("date_from"):
+        qs = qs.filter(started_at__date__gte=date_from)
+    if date_to := params.get("date_to"):
+        qs = qs.filter(started_at__date__lte=date_to)
+    if connected := params.get("connected"):
+        qs = qs.filter(is_connected=connected.lower() == "true")
+    if direction := params.get("direction"):
+        qs = qs.filter(direction=direction)
+    if disposition := params.get("disposition"):
+        # "none": calls still waiting for an outcome.
+        if disposition == "none":
+            qs = qs.filter(disposition__isnull=True)
+        else:
+            qs = qs.filter(disposition_id=disposition)
+    if category := params.get("category"):
+        qs = qs.filter(disposition__category=category)
+
+    # Whether a recording exists. The call log shows a recording column,
+    # and "find me the calls I can actually listen back to" had no answer
+    # short of paging the whole log by eye.
+    has_recording = params.get("has_recording")
+    if has_recording is not None and has_recording != "":
+        qs = qs.filter(recording__isnull=has_recording.lower() != "true")
+
+    # Free text over the number and the lead's name. A call log without a
+    # search box means finding one call is a scroll, and the phone number
+    # is how anyone actually refers to a call.
+    if q := params.get("q", "").strip():
+        qs = qs.filter(
+            Q(phone_number__icontains=q)
+            | Q(lead__name__icontains=q)
+            | Q(agent__name__icontains=q)
+        )
+
+    return qs
+
+
 class CallLogListCreateView(generics.ListCreateAPIView):
     """
     GET  /api/v1/calls/     → Paginated call log (filterable by date, agent, lead)
@@ -64,47 +112,7 @@ class CallLogListCreateView(generics.ListCreateAPIView):
 
         # Secure by default, like leads — see calls/scoping.py.
         qs = calls_visible_to(agent, qs)
-
-        params = self.request.query_params
-        if lead_id := params.get("lead"):
-            qs = qs.filter(lead_id=lead_id)
-        if agent_id := params.get("agent"):
-            qs = qs.filter(agent_id=agent_id)
-        if date_from := params.get("date_from"):
-            qs = qs.filter(started_at__date__gte=date_from)
-        if date_to := params.get("date_to"):
-            qs = qs.filter(started_at__date__lte=date_to)
-        if connected := params.get("connected"):
-            qs = qs.filter(is_connected=connected.lower() == "true")
-        if direction := params.get("direction"):
-            qs = qs.filter(direction=direction)
-        if disposition := params.get("disposition"):
-            # "none": calls still waiting for an outcome.
-            if disposition == "none":
-                qs = qs.filter(disposition__isnull=True)
-            else:
-                qs = qs.filter(disposition_id=disposition)
-        if category := params.get("category"):
-            qs = qs.filter(disposition__category=category)
-
-        # Whether a recording exists. The call log shows a recording column,
-        # and "find me the calls I can actually listen back to" had no answer
-        # short of paging the whole log by eye.
-        has_recording = params.get("has_recording")
-        if has_recording is not None and has_recording != "":
-            qs = qs.filter(recording__isnull=has_recording.lower() != "true")
-
-        # Free text over the number and the lead's name. A call log without a
-        # search box means finding one call is a scroll, and the phone number
-        # is how anyone actually refers to a call.
-        if q := params.get("q", "").strip():
-            qs = qs.filter(
-                Q(phone_number__icontains=q)
-                | Q(lead__name__icontains=q)
-                | Q(agent__name__icontains=q)
-            )
-
-        return qs
+        return filter_calls(qs, self.request.query_params)
 
     def create(self, request, *args, **kwargs):
         # A retry of a call already saved (the response was lost) returns that
@@ -974,15 +982,9 @@ class CallStatsView(APIView):
 
     def get(self, request):
         agent = request.user
-        params = request.query_params
-        date_from = params.get("date_from")
-        date_to = params.get("date_to")
-
-        qs = calls_visible_to(agent)
-        if date_from:
-            qs = qs.filter(started_at__date__gte=date_from)
-        if date_to:
-            qs = qs.filter(started_at__date__lte=date_to)
+        # The same filters as the list (search, agent, outcome, …), so the
+        # boxes count the calls the list shows.
+        qs = filter_calls(calls_visible_to(agent), request.query_params)
 
         today = timezone.localdate()
         today_qs = qs.filter(started_at__date=today)

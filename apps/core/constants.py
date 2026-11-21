@@ -150,7 +150,7 @@ class FeatureKey:
         OUTBOUND_WEBHOOK: "Outbound Webhook (push to external CRM)",
         ZAPIER_INTEGRATION: "Zapier / Make.com Integration",
         WHATSAPP_SINGLE_PROVIDER: "WhatsApp Business (Single Provider)",
-        WHATSAPP_MULTI_PROVIDER: "WhatsApp Business (Multiple Providers)",
+        WHATSAPP_MULTI_PROVIDER: "Multiple WhatsApp numbers / accounts",
         BULK_WHATSAPP: "Bulk WhatsApp Campaigns",
         BULK_EMAIL: "Bulk Email Campaigns",
         BULK_SMS: "Bulk SMS Campaigns",

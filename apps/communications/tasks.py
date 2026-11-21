@@ -115,7 +115,7 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
     from apps.leads.models import LeadActivity
 
     try:
-        campaign = BulkCampaign.objects.select_related("template").get(pk=campaign_id)
+        campaign = BulkCampaign.objects.select_related("template__account", "whatsapp_account").get(pk=campaign_id)
     except Exception as exc:
         logger.error(f"[WA Chunk] Setup failed: {exc}")
         return
@@ -130,7 +130,8 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
         id__in=recipient_ids, status="pending"
     ).select_related("lead")
 
-    provider_service, provider_slug = _get_whatsapp_provider()
+    sender = campaign_sender(campaign).account
+    provider_service, provider_slug = _get_whatsapp_provider(sender)
 
     # No connected provider → the mock would "send" and every recipient would
     # be marked sent with nothing delivered. Fail them honestly instead.
@@ -177,6 +178,7 @@ def send_whatsapp_chunk(self, schema_name: str, campaign_id: str, recipient_ids:
                 status="sent",
                 sent_at=timezone.now(),
                 campaign=campaign,
+                account=sender,
             )
 
             recipient.status = "sent"
@@ -488,8 +490,14 @@ def send_sms_chunk(self, schema_name: str, campaign_id: str, recipient_ids: list
 @shared_task(base=TenantAwareTask, bind=True, max_retries=3)
 def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
                           template_id: int = None, sent_by_id: int = None,
-                          variables: list = None):
-    """Send a single WhatsApp message to one lead (click-to-send from lead detail)."""
+                          variables: list = None, account_id: int = None):
+    """
+    Send a single WhatsApp message to one lead (click-to-send from lead detail).
+
+    `account_id` is the number the agent picked; without one the message goes
+    out from the template's account, the number the lead last wrote to, or the
+    default (see whatsapp_accounts.resolve_sender).
+    """
     from apps.communications.models import WhatsAppMessage, WhatsAppTemplate
     from apps.leads.models import Lead, LeadActivity
 
@@ -501,11 +509,15 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
             from apps.authentication.models import Agent
             sent_by = Agent.objects.filter(pk=sent_by_id).first()
 
-        provider_service, provider_slug = _get_whatsapp_provider()
+        from apps.communications.whatsapp_accounts import resolve_sender
+
+        sender = resolve_sender(account_id=account_id, template=template, lead=lead)
+        account = sender.account
+        provider_service, provider_slug = _get_whatsapp_provider(account)
 
         from apps.communications.whatsapp_ready import NOT_CONNECTED_REASON, mock_allowed
 
-        if provider_slug == "mock" and not mock_allowed():
+        if sender.error or (provider_slug == "mock" and not mock_allowed()):
             # Recorded as FAILED so the lead's thread says what happened, and
             # not retried: retrying cannot connect WhatsApp.
             WhatsAppMessage.objects.create(
@@ -513,7 +525,8 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
                 message_type="template" if template else "text",
                 content=template.render(lead) if template else message,
                 template=template, provider="mock", status="failed",
-                error_message=NOT_CONNECTED_REASON,
+                error_message=(sender.error or NOT_CONNECTED_REASON)[:500],
+                account=account,
             )
             return
 
@@ -539,6 +552,7 @@ def send_single_whatsapp(self, schema_name: str, lead_id: int, message: str,
             content=message, template=template,
             provider=provider_slug,
             provider_message_id=msg_id, status="sent", sent_at=timezone.now(),
+            account=account,
         )
         if template:
             from django.db.models import F
@@ -763,23 +777,31 @@ def _check_campaign_completion(campaign_id: str):
     )
 
 
-def _get_whatsapp_provider():
+def _get_whatsapp_provider(account=None):
     """
-    Build the WhatsApp provider from the *tenant's* saved config.
+    Build the WhatsApp provider for one of the tenant's accounts — the
+    default one when none is given.
 
-    The provider and its credentials come from the tenant's WhatsAppConfig
-    singleton, not from a template or global settings — every tenant sends
+    The provider and its credentials come from the tenant's own WhatsApp
+    account, not from a template or global settings — every tenant sends
     through their own WhatsApp Business account. Returns (provider, slug) so
     callers can record which provider actually sent the message; slug is
-    "mock" when the tenant hasn't configured (or activated) one.
+    "mock" when the account isn't configured (or activated).
     """
     from apps.communications.models import WhatsAppConfig
     from apps.communications.providers.whatsapp import build_provider
 
-    config = WhatsAppConfig.objects.filter(singleton=1).first()
+    config = account if account is not None else WhatsAppConfig.get_default()
     provider = build_provider(config)
     slug = config.provider if (config and config.is_active) else "mock"
     return provider, slug
+
+
+def campaign_sender(campaign):
+    """The account a WhatsApp campaign sends from (see whatsapp_accounts)."""
+    from apps.communications.whatsapp_accounts import resolve_sender
+
+    return resolve_sender(account_id=campaign.whatsapp_account_id, template=campaign.template)
 
 
 def _get_sms_provider():
@@ -819,7 +841,13 @@ def whatsapp_launch_problem(campaign) -> str:
         NOT_CONNECTED, mock_allowed, unmapped_placeholders, whatsapp_connected,
     )
 
-    if not whatsapp_connected() and not mock_allowed():
+    sender = campaign_sender(campaign)
+    if sender.error:
+        return sender.error
+    if not whatsapp_connected(sender.account) and not mock_allowed():
+        if sender.account is not None and campaign.whatsapp_account_id:
+            return (f'The sending number "{sender.account.label}" isn\'t connected. '
+                    "Send it a test message in Settings → WhatsApp, or pick another number.")
         return NOT_CONNECTED["message"]
     template = campaign.template
     if template is None:

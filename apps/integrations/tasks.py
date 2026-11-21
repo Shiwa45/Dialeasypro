@@ -81,17 +81,25 @@ def process_meta_whatsapp_webhook(self, schema_name: str, webhook_log_id: str):
 
 
 def _record_health(config, summary: dict):
-    """Keep the integrations screen honest about what last arrived."""
-    if config is None:
-        return
+    """
+    Keep the integrations screen honest about what last arrived — on each
+    account a message was filed under, or the default one for a delivery
+    that carried only receipts.
+    """
     from django.db.models import F
 
-    type(config).objects.filter(pk=config.pk).update(
-        last_webhook_at=timezone.now(),
-        last_webhook_error=summary["last_error"][:500],
-        total_inbound_messages=F("total_inbound_messages") + summary["messages"],
-        updated_at=timezone.now(),
-    )
+    from apps.communications.models import WhatsAppConfig
+
+    by_account = summary.get("by_account") or {}
+    if not by_account and config is not None:
+        by_account = {config.pk: 0}
+    for pk, count in by_account.items():
+        WhatsAppConfig.objects.filter(pk=pk).update(
+            last_webhook_at=timezone.now(),
+            last_webhook_error=summary["last_error"][:500],
+            total_inbound_messages=F("total_inbound_messages") + count,
+            updated_at=timezone.now(),
+        )
 
 
 @shared_task(
@@ -109,11 +117,12 @@ def enrich_ctwa_attribution(self, schema_name: str, conversation_id: str):
     only after the lead arrived, can be recovered without replaying webhooks.
     """
     from apps.communications.models import WhatsAppConversation
-    from apps.integrations.meta_whatsapp import enrich_attribution, get_config
+    from apps.integrations.meta_whatsapp import config_for_number, enrich_attribution, get_config
 
     conversation = WhatsAppConversation.objects.filter(pk=conversation_id).first()
     if conversation is None:
         return {"status": "missing"}
 
-    enriched = enrich_attribution(conversation, get_config())
+    config = config_for_number(conversation.business_phone_number_id, fallback=get_config())
+    enriched = enrich_attribution(conversation, config)
     return {"status": "enriched" if enriched else "unchanged"}

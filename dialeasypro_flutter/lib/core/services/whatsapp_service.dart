@@ -50,11 +50,16 @@ class WhatsAppService {
   /// Send via org's configured Cloud API (Interakt/AiSensy/etc.)
   /// Goes through our backend, which handles the actual provider call.
   /// Returns null on success, or the server's reason it was refused.
+  ///
+  /// [accountId] is the WhatsApp number to send from. Without it the server
+  /// picks: the number the lead last wrote to, the template's number, or the
+  /// company's default.
   Future<String?> sendCloud({
     required int leadId,
     String? message,
     int? templateId,
     List<String>? variables,
+    int? accountId,
   }) async {
     try {
       await ApiClient.instance.dio.post(
@@ -65,6 +70,7 @@ class WhatsAppService {
           if (templateId != null) 'template_id': templateId,
           // {{1}}, {{2}}, ... in order — what the customer will actually see.
           if (templateId != null && variables != null) 'variables': variables,
+          if (accountId != null) 'account_id': accountId,
         },
       );
       return null;

@@ -13,8 +13,21 @@ import '../../data/services/services.dart';
 import '../auth/auth_provider.dart';
 
 // Approved, active templates only: the provider rejects anything else, and
-// the send used to fail with nothing but "Send failed".
-final _templatesProvider = FutureProvider.autoDispose<List<WhatsAppTemplate>>((_) => CommsService.instance.listTemplates(approvedOnly: true));
+// the send used to fail with nothing but "Send failed". Keyed by the number
+// sending: a number can only send its own WhatsApp Business Account's
+// templates and shared ones (null = no number picked, all of them).
+final _templatesProvider = FutureProvider.autoDispose.family<List<WhatsAppTemplate>, int?>(
+    (_, accountId) => CommsService.instance.listTemplates(approvedOnly: true, accountId: accountId));
+
+// The company's WhatsApp numbers. Only a company with more than one gets the
+// "Send from" choice; failing to load them just hides it.
+final _sendersProvider = FutureProvider.autoDispose<List<WhatsAppSender>>((_) async {
+  try {
+    return await CommsService.instance.listWhatsAppSenders();
+  } catch (_) {
+    return const [];
+  }
+});
 
 class WhatsAppSendScreen extends ConsumerStatefulWidget {
   final int leadId;
@@ -26,6 +39,9 @@ class WhatsAppSendScreen extends ConsumerStatefulWidget {
 
 class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
   String _mode = 'native';
+  /// The WhatsApp number to send from; null = automatic (the number the lead
+  /// last wrote to, else the template's or the company default).
+  int? _fromId;
   bool _useTemplate = false;
   WhatsAppTemplate? _selectedTemplate;
   final Map<int, TextEditingController> _vars = {};
@@ -114,6 +130,7 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
           leadId: _lead!.id, message: msg,
           templateId: _useTemplate ? _selectedTemplate?.id : null,
           variables: _useTemplate ? _orderedVariables() : null,
+          accountId: _fromId,
         );
         if (mounted) {
           setState(() => _sending = false);
@@ -135,7 +152,10 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final templatesAsync = ref.watch(_templatesProvider);
+    final templatesAsync = ref.watch(_templatesProvider(_mode == 'cloud' ? _fromId : null));
+    final senders = (ref.watch(_sendersProvider).valueOrNull ?? const <WhatsAppSender>[])
+        .where((x) => x.isActive)
+        .toList();
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -184,6 +204,29 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
             )),
           ]),
 
+          // Which company number sends — only with Cloud API and more than one
+          // connected number. Native mode sends from the agent's own WhatsApp.
+          if (_mode == 'cloud' && senders.length > 1) ...[
+            const SizedBox(height: 16),
+            const Text('SEND FROM', style: AppTextStyles.label),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              _FromChip(
+                label: 'Automatic',
+                hint: 'Number they last wrote to',
+                selected: _fromId == null,
+                onTap: () => setState(() { _fromId = null; _selectedTemplate = null; }),
+              ),
+              for (final x in senders)
+                _FromChip(
+                  label: x.label + (x.isDefault ? ' · default' : ''),
+                  hint: x.displayPhone,
+                  selected: _fromId == x.id,
+                  onTap: () => setState(() { _fromId = x.id; _selectedTemplate = null; }),
+                ),
+            ]),
+          ],
+
           const SizedBox(height: 20),
 
           // Template toggle
@@ -228,6 +271,10 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
                             Expanded(child: Text(t.name, style: AppTextStyles.h5)),
                             TagChip(label: t.status, backgroundColor: t.status == 'approved' ? AppColors.successBg : AppColors.warningBg),
                           ]),
+                          if (senders.length > 1 && t.accountLabel.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text('Number: ${t.accountLabel}', style: AppTextStyles.caption),
+                          ],
                           const SizedBox(height: 6),
                           Text(t.bodyText, style: AppTextStyles.caption, maxLines: 3, overflow: TextOverflow.ellipsis),
                         ]),
@@ -284,6 +331,32 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
           const SizedBox(height: 30),
         ]),
       ),
+    );
+  }
+}
+
+class _FromChip extends StatelessWidget {
+  final String label, hint;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FromChip({required this.label, required this.hint, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return BrutalCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      color: selected ? AppColors.purple : AppColors.white,
+      borderColor: AppColors.black,
+      shadowOffset: selected ? 2 : 3,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Text(label, style: TextStyle(fontFamily: 'PlusJakartaSans', fontWeight: FontWeight.w700, fontSize: 12.5,
+            color: selected ? AppColors.white : AppColors.black)),
+        if (hint.isNotEmpty)
+          Text(hint, style: TextStyle(fontFamily: 'PlusJakartaSans', fontSize: 10,
+              color: selected ? AppColors.white.withValues(alpha: 0.85) : AppColors.grey)),
+      ]),
     );
   }
 }

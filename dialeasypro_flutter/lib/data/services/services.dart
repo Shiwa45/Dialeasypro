@@ -200,10 +200,20 @@ class CommsService {
   CommsService._();
   static final instance = CommsService._();
 
-  Future<List<WhatsAppTemplate>> listTemplates({bool approvedOnly = true}) async {
-    final r = await _dio.get('/comms/whatsapp/templates/',
-        queryParameters: approvedOnly ? {'approved_only': true} : null);
+  /// [accountId]: only what that WhatsApp number can send — its own
+  /// templates, its WhatsApp Business Account's, and shared ones.
+  Future<List<WhatsAppTemplate>> listTemplates({bool approvedOnly = true, int? accountId}) async {
+    final r = await _dio.get('/comms/whatsapp/templates/', queryParameters: {
+      if (approvedOnly) 'approved_only': true,
+      if (accountId != null) 'account': accountId,
+    });
     return (r.data as List).map((e) => WhatsAppTemplate.fromJson(e)).toList();
+  }
+
+  /// The company's WhatsApp numbers (for the "Send from" choice).
+  Future<List<WhatsAppSender>> listWhatsAppSenders() async {
+    final r = await _dio.get('/comms/whatsapp/senders/');
+    return (r.data as List).map((e) => WhatsAppSender.fromJson(Map<String, dynamic>.from(e))).toList();
   }
 
   Future<void> sendWhatsApp(int leadId, String message, {int? templateId}) async {

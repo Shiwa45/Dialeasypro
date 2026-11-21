@@ -735,6 +735,11 @@ UNFOLD = {
                         "icon": "language",
                         "link": reverse_lazy("admin:tenants_domain_changelist"),
                     },
+                    {
+                        "title": "Support Notes",
+                        "icon": "sticky_note_2",
+                        "link": reverse_lazy("admin:superadmin_supportnote_changelist"),
+                    },
                 ],
             },
             {
@@ -751,6 +756,14 @@ UNFOLD = {
                         "title": "Plan Features",
                         "icon": "tune",
                         "link": reverse_lazy("admin:plans_planfeature_changelist"),
+                    },
+                    {
+                        # Per-company add-ons (HRMS, Sales & Billing,
+                        # Recruitment, AI) and one-off feature grants. Also
+                        # one click per module from Tenants → Actions.
+                        "title": "Add-ons (Tenant Entitlements)",
+                        "icon": "extension",
+                        "link": reverse_lazy("admin:plans_tenantentitlement_changelist"),
                     },
                     {
                         "title": "Subscriptions",
@@ -781,12 +794,49 @@ UNFOLD = {
                             "admin:superadmin_globalsettings_changelist"
                         ),
                     },
+                ],
+            },
+            {
+                "separator": True,
+                "title": "Background Jobs",
+                "collapsible": True,
+                "items": [
                     {
                         "title": "Scheduled Tasks",
                         "icon": "schedule",
                         "link": reverse_lazy(
                             "admin:django_celery_beat_periodictask_changelist"
                         ),
+                    },
+                    {
+                        "title": "Cron Schedules",
+                        "icon": "event_repeat",
+                        "link": reverse_lazy("admin:django_celery_beat_crontabschedule_changelist"),
+                    },
+                    {
+                        "title": "Interval Schedules",
+                        "icon": "timer",
+                        "link": reverse_lazy("admin:django_celery_beat_intervalschedule_changelist"),
+                    },
+                    {
+                        "title": "One-off (Clocked) Schedules",
+                        "icon": "alarm",
+                        "link": reverse_lazy("admin:django_celery_beat_clockedschedule_changelist"),
+                    },
+                    {
+                        "title": "Solar Schedules",
+                        "icon": "wb_sunny",
+                        "link": reverse_lazy("admin:django_celery_beat_solarschedule_changelist"),
+                    },
+                    {
+                        "title": "Task Results",
+                        "icon": "task_alt",
+                        "link": reverse_lazy("admin:django_celery_results_taskresult_changelist"),
+                    },
+                    {
+                        "title": "Group Results",
+                        "icon": "account_tree",
+                        "link": reverse_lazy("admin:django_celery_results_groupresult_changelist"),
                     },
                 ],
             },
@@ -804,6 +854,16 @@ UNFOLD = {
                         "title": "Groups",
                         "icon": "group",
                         "link": reverse_lazy("admin:auth_group_changelist"),
+                    },
+                    {
+                        "title": "Issued Sign-in Tokens",
+                        "icon": "key",
+                        "link": reverse_lazy("admin:token_blacklist_outstandingtoken_changelist"),
+                    },
+                    {
+                        "title": "Revoked Sign-in Tokens",
+                        "icon": "key_off",
+                        "link": reverse_lazy("admin:token_blacklist_blacklistedtoken_changelist"),
                     },
                 ],
             },

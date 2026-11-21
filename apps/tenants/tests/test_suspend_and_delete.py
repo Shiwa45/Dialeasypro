@@ -159,3 +159,25 @@ def test_bulk_delete_drops_every_schema(public):
 def test_the_public_schema_is_never_deleted(public):
     with pytest.raises(ValueError):
         Tenant(schema_name="public").delete()
+
+
+# ---- Add-on modules from the Tenants list -----------------------------------
+
+def test_the_add_on_actions_grant_and_remove_a_whole_module(tenant):
+    from django.contrib.messages.storage.fallback import FallbackStorage
+
+    from apps.core.constants import ModuleKey
+    from apps.plans.models import TenantEntitlement
+
+    def run(name):
+        request = RequestFactory().post("/superadmin/")
+        request.user = type("U", (), {"email": "boss@platform.test", "__str__": lambda s: "boss"})()
+        request.session = {}
+        request._messages = FallbackStorage(request)
+        getattr(TenantAdmin(Tenant, admin.site), name)(request, Tenant.objects.filter(pk=tenant.pk))
+
+    run("grant_hrms")
+    keys = set(TenantEntitlement.objects.filter(tenant=tenant, module_key="hrms").values_list("feature_key", flat=True))
+    assert keys == set(ModuleKey.FEATURES[ModuleKey.HRMS])
+    run("revoke_hrms")
+    assert not TenantEntitlement.objects.filter(tenant=tenant, module_key="hrms").exists()

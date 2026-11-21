@@ -4,7 +4,7 @@ TeleCRM Backend — apps/communications/whatsapp_ready.py
 Two questions every WhatsApp send has to answer before it goes out:
 
 1. Is WhatsApp actually connected?
-   With no active WhatsAppConfig the provider factory hands back the Mock
+   With no active WhatsApp account the provider factory hands back the Mock
    provider, which logs and returns a fake id. Bulk campaigns used to treat
    that as success — a whole audience marked "sent", Delivered 0, and not one
    message on a phone. Sends now refuse up front, and the send tasks mark
@@ -49,11 +49,13 @@ LEAD_VARIABLE_FIELDS = {
 }
 
 
-def whatsapp_connected() -> bool:
+def whatsapp_connected(account=None) -> bool:
+    """This account is live — or, with none named, any account is."""
     from apps.communications.models import WhatsAppConfig
 
-    config = WhatsAppConfig.objects.filter(singleton=1).first()
-    return bool(config and config.is_active)
+    if account is not None:
+        return bool(account.is_active)
+    return WhatsAppConfig.objects.filter(is_active=True).exists()
 
 
 def mock_allowed() -> bool:

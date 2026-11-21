@@ -13,17 +13,17 @@ from apps.communications.models import (
 class WhatsAppConfigAdmin(ModelAdmin):
     # Credentials are an encrypted blob — never surface them in the changelist.
     list_display = [
-        "provider", "is_active", "inbound_enabled",
+        "label", "display_phone", "provider", "is_default", "is_active", "inbound_enabled",
         "total_inbound_messages", "last_webhook_at", "last_error",
     ]
     readonly_fields = [
-        "last_verified_at", "singleton",
+        "last_verified_at", "phone_number_id",
         "last_webhook_at", "last_webhook_error", "total_inbound_messages",
     ]
 
     def has_add_permission(self, request):
-        # Singleton, created on first access via GET /comms/whatsapp/config/
-        # (WhatsAppConfig.get_solo()) — the admin never creates the first row.
+        # Accounts are added from the tenant's own Settings → WhatsApp screen,
+        # which checks the plan and verifies the credentials.
         #
         # Deliberately no DB query here: Django's admin index builds its
         # sidebar by calling this with no schema context guaranteed — the
@@ -35,7 +35,7 @@ class WhatsAppConfigAdmin(ModelAdmin):
 
 @admin.register(WhatsAppTemplate)
 class WhatsAppTemplateAdmin(ModelAdmin):
-    list_display = ["name", "category", "provider", "status", "usage_count", "is_active"]
+    list_display = ["name", "account", "category", "provider", "status", "usage_count", "is_active"]
     list_filter = ["status", "provider", "category"]
     search_fields = ["name"]
 

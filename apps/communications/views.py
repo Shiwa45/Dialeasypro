@@ -62,9 +62,19 @@ class WhatsAppTemplateListView(generics.ListCreateAPIView):
         return [IsAuthenticatedAgent()]
 
     def get_queryset(self):
-        qs = WhatsAppTemplate.objects.filter(is_active=True)
+        from django.db.models import Q
+
+        qs = WhatsAppTemplate.objects.filter(is_active=True).select_related("account")
         if self.request.query_params.get("approved_only"):
             qs = qs.filter(status="approved")
+        # ?account=<id>: templates that number can send — its own and the
+        # shared ones.
+        if account := self.request.query_params.get("account"):
+            sender = WhatsAppConfig.objects.filter(pk=account).first() if str(account).isdigit() else None
+            if sender is not None:
+                # Its own templates, those of other numbers in the same
+                # WhatsApp Business Account, and the shared ones.
+                qs = qs.filter(Q(account__in=sender.same_business_account()) | Q(account__isnull=True))
         return qs.order_by("name")
 
 
@@ -210,11 +220,28 @@ class SendWhatsAppView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        from apps.communications.whatsapp_accounts import resolve_sender
         from apps.communications.whatsapp_ready import (
             NOT_CONNECTED, mock_allowed, unmapped_placeholders, whatsapp_connected,
         )
 
-        if not whatsapp_connected() and not mock_allowed():
+        account_id = serializer.validated_data.get("account_id")
+        sender = resolve_sender(
+            account_id=account_id, template=template if template_id is not None else None, lead=lead,
+        )
+        if sender.error:
+            return Response(
+                {"error": "sender_not_usable", "message": sender.error},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not whatsapp_connected(sender.account) and not mock_allowed():
+            if account_id not in (None, "") and sender.account is not None:
+                return Response(
+                    {"error": "whatsapp_not_connected",
+                     "message": f'"{sender.account.label}" isn\'t connected yet. '
+                                "Send it a test message in Settings → WhatsApp, or pick another number."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response(NOT_CONNECTED, status=status.HTTP_400_BAD_REQUEST)
         if template_id and serializer.validated_data.get("variables") is None:
             missing = unmapped_placeholders(template)
@@ -234,11 +261,17 @@ class SendWhatsAppView(APIView):
                 "template_id": template_id,
                 "sent_by_id": request.user.pk,
                 "variables": serializer.validated_data.get("variables"),
+                # The resolved sender, so the message goes out from the number
+                # the agent was shown even if the lead writes in meanwhile.
+                "account_id": sender.account.pk if sender.account is not None else None,
             },
             queue="notifications",
         )
 
-        return Response({"message": "WhatsApp message queued.", "lead": lead.name})
+        return Response({
+            "message": "WhatsApp message queued.", "lead": lead.name,
+            "sent_from": sender.account.sender_label if sender.account is not None else None,
+        })
 
 
 class LogNativeWhatsAppView(APIView):
@@ -605,106 +638,396 @@ class BulkCampaignPauseView(APIView):
         return Response({"message": "Campaign paused."})
 
 
+def _require_whatsapp_feature(request):
+    """403→402 upsell unless the plan has any WhatsApp channel feature."""
+    has = getattr(request, "has_feature", lambda k: False)
+    if has(FeatureKey.ONE_CLICK_WHATSAPP) or has(FeatureKey.BULK_WHATSAPP):
+        return
+    from apps.core.exceptions import FeatureNotEnabledException
+    raise FeatureNotEnabledException(feature_key=FeatureKey.BULK_WHATSAPP)
+
+
+def _audit_account(request, config, description):
+    AuditLog.log(
+        action=AuditAction.UPDATE,
+        actor_type="agent",
+        actor_id=request.user.pk,
+        actor_email=request.user.email,
+        tenant_schema=connection.schema_name,
+        entity_type="WhatsAppConfig",
+        entity_id=config.pk,
+        entity_repr=config.label,
+        description=description,
+        request=request,
+        is_sensitive=True,
+    )
+
+
+def _account_or_404(pk):
+    from django.http import Http404
+
+    config = WhatsAppConfig.objects.filter(pk=pk).first()
+    if config is None:
+        raise Http404("WhatsApp account not found.")
+    return config
+
+
+def _test_account(request, config):
+    """
+    Send a real one-off message through this account's saved credentials. On
+    success the account is marked active (sends start flowing); on failure the
+    provider's own error is stored and returned, and it stays inactive.
+    """
+    from django.utils import timezone
+
+    from apps.communications.providers.whatsapp import (
+        WhatsAppError, provider_class, verify_config,
+    )
+
+    phone = (request.data.get("phone") or "").strip()
+    message = (request.data.get("message") or "TeleCRM WhatsApp test message.").strip()
+    if not phone:
+        return Response(
+            {"error": "phone_required", "message": "Provide a phone number to test with."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    ok, detail = verify_config(config)
+    if not ok:
+        config.is_active = False
+        config.last_error = detail
+        config.save(update_fields=["is_active", "last_error", "updated_at"])
+        return Response(
+            {"ok": False, "error": "invalid_credentials", "message": detail},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    provider = provider_class(config.provider)(dict(config.credentials or {}))
+    try:
+        msg_id = provider.send_text(phone=phone, message=message)
+    except WhatsAppError as exc:
+        config.is_active = False
+        config.last_error = str(exc)[:500]
+        config.save(update_fields=["is_active", "last_error", "updated_at"])
+        return Response(
+            {"ok": False, "error": "send_failed", "message": str(exc)},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    config.is_active = True
+    config.last_error = ""
+    config.last_verified_at = timezone.now()
+    config.save(update_fields=["is_active", "last_error", "last_verified_at", "updated_at"])
+    return Response({"ok": True, "provider_message_id": msg_id, "sent_to": phone})
+
+
+def _rotate_verify_token(request, config):
+    """
+    Mint a fresh webhook verify token and return it EXACTLY ONCE.
+
+    The token is what proves a caller is Meta during the webhook handshake, so
+    it is a secret: WhatsAppConfigSerializer masks it like any other, and the
+    only way to read one is to create it here and paste it straight into the
+    Meta app. Rotating invalidates the old one, which will break verification
+    until Meta's webhook configuration is updated with the new value — that is
+    the intended trade and the response says so.
+    """
+    import secrets
+
+    token = secrets.token_urlsafe(32)
+    credentials = dict(config.credentials or {})
+    rotated = bool(credentials.get("verify_token"))
+    credentials["verify_token"] = token
+    config.credentials = credentials
+    config.save(update_fields=["credentials", "updated_at"])
+
+    _audit_account(request, config, f"Rotated the Meta WhatsApp webhook verify token ({config.label})")
+    logger.info(
+        "[Meta CTWA] Verify token rotated | schema=%s account=%s by=%s",
+        connection.schema_name, config.pk, request.user.pk,
+    )
+    return Response({
+        "verify_token": token,
+        "rotated": rotated,
+        "message": (
+            "Copy this now — it is not shown again. Paste it into the Meta "
+            "app's WhatsApp webhook configuration as the Verify Token, then "
+            "click Verify and Save."
+        ),
+    })
+
+
 class WhatsAppConfigView(APIView):
     """
     GET/PUT /api/v1/comms/whatsapp/config/
 
-    The tenant's WhatsApp Business connection: which provider they send through
-    and that provider's credentials. Admin-only, and only useful to a tenant
-    whose plan includes a WhatsApp feature (one-click or bulk) — otherwise
-    there's nothing to send. Credentials are write-only; the response never
-    contains a secret's value.
+    The tenant's DEFAULT WhatsApp account — kept for the screens and app
+    versions written when a tenant had one connection. The full list lives at
+    /comms/whatsapp/accounts/. Admin-only, and only useful to a tenant whose
+    plan includes a WhatsApp feature. Credentials are write-only; the
+    response never contains a secret's value.
     """
 
     permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
 
-    def _require_whatsapp_feature(self, request):
-        """403→402 upsell unless the plan has any WhatsApp channel feature."""
-        has = getattr(request, "has_feature", lambda k: False)
-        if has(FeatureKey.ONE_CLICK_WHATSAPP) or has(FeatureKey.BULK_WHATSAPP):
-            return
-        from apps.core.exceptions import FeatureNotEnabledException
-        raise FeatureNotEnabledException(feature_key=FeatureKey.BULK_WHATSAPP)
-
     def get(self, request):
-        self._require_whatsapp_feature(request)
+        _require_whatsapp_feature(request)
         config = WhatsAppConfig.get_solo()
         return Response(WhatsAppConfigSerializer(config, context={"request": request}).data)
 
     def put(self, request):
-        self._require_whatsapp_feature(request)
+        _require_whatsapp_feature(request)
         config = WhatsAppConfig.get_solo()
         serializer = WhatsAppConfigSerializer(config, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        AuditLog.log(
-            action=AuditAction.UPDATE,
-            actor_type="agent",
-            actor_id=request.user.pk,
-            actor_email=request.user.email,
-            tenant_schema=connection.schema_name,
-            entity_type="WhatsAppConfig",
-            description=f"Updated WhatsApp provider to {config.provider}",
-            request=request,
-            is_sensitive=True,
-        )
+        _audit_account(request, config, f"Updated WhatsApp provider to {config.provider}")
         return Response(WhatsAppConfigSerializer(config, context={"request": request}).data)
 
 
 class WhatsAppConfigTestView(APIView):
-    """
-    POST /api/v1/comms/whatsapp/config/test/   {"phone": "+9198...", "message": "..."}
-
-    Sends a real one-off message through the saved credentials. On success the
-    config is marked active (sends start flowing); on failure the provider's own
-    error is stored and returned, and the config stays inactive. Admin-only.
-    """
+    """POST /api/v1/comms/whatsapp/config/test/ — test-send from the default account."""
 
     permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
 
     def post(self, request):
-        from django.utils import timezone
+        return _test_account(request, WhatsAppConfig.get_solo())
 
-        from apps.communications.providers.whatsapp import (
-            WhatsAppError, provider_class, verify_config,
+
+class WhatsAppAccountListView(APIView):
+    """
+    GET  /api/v1/comms/whatsapp/accounts/  → every connected WhatsApp number
+    POST /api/v1/comms/whatsapp/accounts/  → connect another one
+
+    A second number needs the multi-account plan feature
+    (WHATSAPP_MULTI_PROVIDER). Admin-only.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def get(self, request):
+        _require_whatsapp_feature(request)
+        from apps.communications.whatsapp_accounts import can_add_account
+
+        accounts = WhatsAppConfig.objects.order_by("-is_default", "label", "pk")
+        return Response({
+            "results": WhatsAppConfigSerializer(accounts, many=True, context={"request": request}).data,
+            "can_add": can_add_account(request),
+        })
+
+    def post(self, request):
+        _require_whatsapp_feature(request)
+        from apps.communications.whatsapp_accounts import can_add_account
+
+        if not can_add_account(request):
+            from apps.core.exceptions import FeatureNotEnabledException
+
+            raise FeatureNotEnabledException(feature_key=FeatureKey.WHATSAPP_MULTI_PROVIDER)
+        if not (request.data.get("label") or "").strip():
+            return Response(
+                {"error": "validation_error", "message": "Validation failed.",
+                 "detail": {"label": ["Give this number a name, e.g. Sales or Support."]}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        data = dict(request.data)
+        config = WhatsAppConfig()
+        source_id = data.pop("copy_credentials_from", None)
+        if source_id not in (None, ""):
+            # Another number in a WhatsApp Business Account that is already
+            # connected: the token, app secret and webhook settings are the
+            # account's, so only the new number's id has to be entered.
+            source = WhatsAppConfig.objects.filter(pk=source_id).first()
+            if source is None or source.provider != "meta_cloud":
+                return Response(
+                    {"error": "invalid_source",
+                     "message": "Pick a connected Meta Cloud API number to copy the account details from."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            pnid = str((data.get("credentials") or {}).get("phone_number_id") or "").strip()
+            if not pnid:
+                return Response(
+                    {"error": "validation_error", "message": "Validation failed.",
+                     "detail": {"phone_number_id": ["Pick or enter the new number's Phone number ID."]}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            shared = {k: v for k, v in (source.credentials or {}).items()
+                      if k in SAME_ACCOUNT_CREDENTIALS and v}
+            data["credentials"] = {**shared, "phone_number_id": pnid}
+            data["provider"] = "meta_cloud"
+            for field in SAME_ACCOUNT_SETTINGS:
+                data.setdefault(field, getattr(source, f"{field}_id" if field == "inbound_assign_to" else field))
+        serializer = WhatsAppConfigSerializer(config, data=data, partial=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        _audit_account(request, config, f"Connected WhatsApp number {config.label} ({config.provider})")
+        return Response(
+            WhatsAppConfigSerializer(config, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
         )
 
-        config = WhatsAppConfig.get_solo()
-        phone = (request.data.get("phone") or "").strip()
-        message = (request.data.get("message") or "TeleCRM WhatsApp test message.").strip()
-        if not phone:
+
+#: Credentials that belong to the WhatsApp Business Account / Meta app rather
+#: than to one number — copied when another number of the same account is added.
+SAME_ACCOUNT_CREDENTIALS = (
+    "access_token", "business_account_id", "app_secret", "verify_token", "ads_access_token",
+)
+#: Inbound settings copied the same way: the numbers share one webhook.
+SAME_ACCOUNT_SETTINGS = (
+    "default_language", "graph_api_version", "inbound_enabled", "create_leads_from_inbound",
+    "ctwa_leads_only", "reopen_lead_on_inbound", "inbound_assign_to",
+)
+
+
+class WhatsAppAccountMetaNumbersView(APIView):
+    """
+    GET /api/v1/comms/whatsapp/accounts/{id}/meta-numbers/
+
+    Every phone number in this number's Meta WhatsApp Business Account, read
+    from Meta with the saved token — so adding a second number of the same
+    account is a pick from a list, not a hunt for its Phone number ID.
+    Each row says whether it is already connected here.
+    """
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def get(self, request, pk):
+        import requests
+        from django.conf import settings
+
+        _require_whatsapp_feature(request)
+        config = _account_or_404(pk)
+        creds = config.credentials or {}
+        waba, token = config.business_account_id, creds.get("access_token")
+        if config.provider != "meta_cloud" or not waba or not token:
             return Response(
-                {"error": "phone_required", "message": "Provide a phone number to test with."},
+                {"error": "not_meta_cloud",
+                 "message": "This needs a Meta Cloud API number with its access token and "
+                            "WhatsApp Business Account ID saved."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        ok, detail = verify_config(config)
-        if not ok:
-            config.is_active = False
-            config.last_error = detail
-            config.save(update_fields=["is_active", "last_error", "updated_at"])
-            return Response(
-                {"ok": False, "error": "invalid_credentials", "message": detail},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        provider = provider_class(config.provider)(dict(config.credentials or {}))
+        version = config.graph_api_version or getattr(settings, "META_GRAPH_API_VERSION", "v25.0")
         try:
-            msg_id = provider.send_text(phone=phone, message=message)
-        except WhatsAppError as exc:
-            config.is_active = False
-            config.last_error = str(exc)[:500]
-            config.save(update_fields=["is_active", "last_error", "updated_at"])
-            return Response(
-                {"ok": False, "error": "send_failed", "message": str(exc)},
-                status=status.HTTP_502_BAD_GATEWAY,
+            resp = requests.get(
+                f"https://graph.facebook.com/{version}/{waba}/phone_numbers",
+                params={"fields": "id,display_phone_number,verified_name,quality_rating,"
+                                  "code_verification_status,status"},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
             )
+            body = resp.json() if resp.content else {}
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("[WA] Listing WABA numbers failed for account %s: %s", config.pk, exc)
+            return Response({"error": "meta_unreachable", "message": "Could not reach Meta. Try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        if resp.status_code >= 400 or "error" in body:
+            message = (body.get("error") or {}).get("message") or f"Meta answered {resp.status_code}."
+            return Response({"error": "meta_error", "message": message}, status=status.HTTP_502_BAD_GATEWAY)
 
-        config.is_active = True
-        config.last_error = ""
-        config.last_verified_at = timezone.now()
-        config.save(update_fields=["is_active", "last_error", "last_verified_at", "updated_at"])
-        return Response({"ok": True, "provider_message_id": msg_id, "sent_to": phone})
+        connected = {
+            a.phone_number_id: a.label for a in WhatsAppConfig.objects.exclude(phone_number_id="")
+        }
+        numbers = [
+            {
+                "phone_number_id": str(n.get("id") or ""),
+                "display_phone": n.get("display_phone_number") or "",
+                "verified_name": n.get("verified_name") or "",
+                "quality_rating": n.get("quality_rating") or "",
+                "status": n.get("status") or n.get("code_verification_status") or "",
+                "connected_as": connected.get(str(n.get("id") or "")),
+            }
+            for n in body.get("data") or [] if n.get("id")
+        ]
+        return Response({"business_account_id": waba, "numbers": numbers})
+
+
+class WhatsAppAccountDetailView(APIView):
+    """GET/PATCH/DELETE /api/v1/comms/whatsapp/accounts/{id}/ — admin-only."""
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def get(self, request, pk):
+        _require_whatsapp_feature(request)
+        return Response(WhatsAppConfigSerializer(_account_or_404(pk), context={"request": request}).data)
+
+    def patch(self, request, pk):
+        _require_whatsapp_feature(request)
+        config = _account_or_404(pk)
+        serializer = WhatsAppConfigSerializer(config, data=request.data, partial=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        _audit_account(request, config, f"Updated WhatsApp number {config.label}")
+        return Response(WhatsAppConfigSerializer(config, context={"request": request}).data)
+
+    def delete(self, request, pk):
+        """
+        Disconnect a number. Its messages, templates and campaigns stay: they
+        are history, and a message keeps its text even without a sender. A
+        campaign still sending from it must be paused first.
+        """
+        _require_whatsapp_feature(request)
+        config = _account_or_404(pk)
+        if BulkCampaign.objects.filter(whatsapp_account=config, status__in=("running", "scheduled")).exists():
+            return Response(
+                {"error": "account_in_use",
+                 "message": f"A running or scheduled campaign sends from {config.label}. Pause it first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        label = config.label
+        _audit_account(request, config, f"Disconnected WhatsApp number {label}")
+        config.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WhatsAppAccountTestView(APIView):
+    """POST /api/v1/comms/whatsapp/accounts/{id}/test/ {"phone": "+9198..."}"""
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def post(self, request, pk):
+        return _test_account(request, _account_or_404(pk))
+
+
+class WhatsAppAccountMakeDefaultView(APIView):
+    """POST /api/v1/comms/whatsapp/accounts/{id}/make-default/"""
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def post(self, request, pk):
+        config = _account_or_404(pk)
+        config.is_default = True
+        config.save()
+        _audit_account(request, config, f"Made {config.label} the default WhatsApp number")
+        return Response(WhatsAppConfigSerializer(config, context={"request": request}).data)
+
+
+class WhatsAppAccountVerifyTokenView(APIView):
+    """POST /api/v1/comms/whatsapp/accounts/{id}/webhook-token/ — see _rotate_verify_token."""
+
+    permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
+
+    def post(self, request, pk):
+        return _rotate_verify_token(request, _account_or_404(pk))
+
+
+class WhatsAppSendersView(APIView):
+    """
+    GET /api/v1/comms/whatsapp/senders/
+
+    The numbers an agent can send from — names and numbers only, never a
+    credential. Feeds the "Send from" picker on one-click sends and campaigns.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def get(self, request):
+        accounts = WhatsAppConfig.objects.order_by("-is_default", "label", "pk")
+        return Response([
+            {
+                "id": a.pk, "label": a.label, "display_phone": a.display_phone,
+                "is_default": a.is_default, "is_active": a.is_active, "provider": a.provider,
+            }
+            for a in accounts
+        ])
 
 
 class WhatsAppWebhookView(APIView):
@@ -728,10 +1051,16 @@ class WhatsAppWebhookView(APIView):
         # replies" — with a notification to the agent — into any thread.
         import hmac
 
-        config = WhatsAppConfig.objects.filter(singleton=1).first()
+        # Each WhatsApp account has its own token, so the token also says
+        # which account (number) the post is for.
         sent = request.query_params.get("token") or request.headers.get("X-Webhook-Token") or ""
-        expected = config.webhook_token if config else ""
-        if not (sent and expected and hmac.compare_digest(sent, expected)):
+        config = None
+        if sent:
+            for candidate in WhatsAppConfig.objects.exclude(webhook_token=""):
+                if hmac.compare_digest(sent, candidate.webhook_token):
+                    config = candidate
+                    break
+        if config is None:
             logger.warning(f"[WA Webhook] Unauthenticated post refused ({provider})")
             return Response({"error": "unauthenticated"}, status=401)
 
@@ -744,7 +1073,7 @@ class WhatsAppWebhookView(APIView):
         from apps.communications import whatsapp_webhooks
 
         try:
-            whatsapp_webhooks.handle(provider, payload)
+            whatsapp_webhooks.handle(provider, payload, account=config)
         except Exception as exc:
             logger.error(f"[WA Webhook] Handler error ({provider}): {exc}", exc_info=True)
 
@@ -756,58 +1085,12 @@ class WhatsAppWebhookView(APIView):
 # ============================================================
 
 class WhatsAppVerifyTokenView(APIView):
-    """
-    POST /api/v1/comms/whatsapp/webhook-token/
-
-    Mint a fresh webhook verify token and return it EXACTLY ONCE.
-
-    The token is what proves a caller is Meta during the webhook handshake, so
-    it is a secret: WhatsAppConfigSerializer masks it like any other, and the
-    only way to read one is to create it here and paste it straight into the
-    Meta app. Rotating invalidates the old one, which will break verification
-    until Meta's webhook configuration is updated with the new value — that is
-    the intended trade and the response says so.
-    """
+    """POST /api/v1/comms/whatsapp/webhook-token/ — the default account's (see _rotate_verify_token)."""
 
     permission_classes = [IsAuthenticatedAgent, IsTenantAdmin]
 
     def post(self, request):
-        import secrets
-
-        config = WhatsAppConfig.get_solo()
-        token = secrets.token_urlsafe(32)
-
-        credentials = dict(config.credentials or {})
-        rotated = bool(credentials.get("verify_token"))
-        credentials["verify_token"] = token
-        config.credentials = credentials
-        config.save(update_fields=["credentials", "updated_at"])
-
-        AuditLog.log(
-            action=AuditAction.UPDATE,
-            actor_type="agent",
-            actor_id=request.user.pk,
-            actor_email=request.user.email,
-            tenant_schema=connection.schema_name,
-            entity_type="WhatsAppConfig",
-            description="Rotated the Meta WhatsApp webhook verify token",
-            request=request,
-            is_sensitive=True,
-        )
-        logger.info(
-            "[Meta CTWA] Verify token rotated | schema=%s by=%s",
-            connection.schema_name, request.user.pk,
-        )
-
-        return Response({
-            "verify_token": token,
-            "rotated": rotated,
-            "message": (
-                "Copy this now — it is not shown again. Paste it into the Meta "
-                "app's WhatsApp webhook configuration as the Verify Token, then "
-                "click Verify and Save."
-            ),
-        })
+        return _rotate_verify_token(request, WhatsAppConfig.get_solo())
 
 
 class WhatsAppConversationListView(generics.ListAPIView):

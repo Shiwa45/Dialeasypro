@@ -28,16 +28,43 @@ from apps.core.constants import WhatsAppProvider
 # ============================================================
 class WhatsAppConfig(TimeStampedModel):
     """
-    A tenant's own WhatsApp Business connection.
+    One WhatsApp Business connection — a "WhatsApp account" in the app.
 
-    One row per tenant (singleton). Holds which provider they send through and
-    that provider's credentials — encrypted at rest, so a database dump never
-    exposes a tenant's API keys. Each provider needs a different bag of
-    credentials; the shape is documented per-provider in providers/whatsapp.py.
+    A tenant can connect several: a Sales number and a Support number, or two
+    Meta WhatsApp Business Accounts. Each holds which provider it sends
+    through and that provider's credentials — encrypted at rest, so a
+    database dump never exposes a tenant's API keys. Each provider needs a
+    different bag of credentials; the shape is documented per-provider in
+    providers/whatsapp.py.
+
+    Exactly one is the default: it sends whenever nothing chooses another
+    number (a campaign without a sender, a reply to a lead who never wrote
+    in). This used to be a singleton, so every caller that only needs "the"
+    connection asks for the default via `get_solo()` and keeps working.
+
+    More than one account needs the WHATSAPP_MULTI_PROVIDER plan feature.
     """
 
-    # Enforced as a singleton in save(); a tenant sends through one provider.
-    singleton = models.PositiveSmallIntegerField(default=1, unique=True, editable=False)
+    label = models.CharField(
+        max_length=60, default="Main number",
+        help_text='How this number is shown when choosing a sender, e.g. "Sales".',
+    )
+    is_default = models.BooleanField(
+        default=False, db_index=True,
+        help_text="Sends from this account unless another one is chosen.",
+    )
+    # Not a secret, and copied out of `credentials` on save so an inbound
+    # Meta delivery (which names the number it reached) can find its account
+    # with a query. The encrypted credentials can't be searched.
+    phone_number_id = models.CharField(max_length=50, blank=True, default="", db_index=True)
+    # The Meta WhatsApp Business Account (WABA) the number belongs to, copied
+    # out of the credentials the same way. One WABA can hold several numbers,
+    # and its templates are approved once for all of them.
+    business_account_id = models.CharField(max_length=50, blank=True, default="", db_index=True)
+    display_phone = models.CharField(
+        max_length=25, blank=True, default="",
+        help_text="The number customers see, e.g. +91 98765 43210.",
+    )
 
     provider = models.CharField(
         max_length=30, choices=WhatsAppProvider.CHOICES, default=WhatsAppProvider.INTERAKT,
@@ -112,28 +139,112 @@ class WhatsAppConfig(TimeStampedModel):
     webhook_token = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
-        verbose_name = "WhatsApp Configuration"
-        verbose_name_plural = "WhatsApp Configuration"
+        verbose_name = "WhatsApp Account"
+        verbose_name_plural = "WhatsApp Accounts"
+        ordering = ["-is_default", "label", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_default"], condition=models.Q(is_default=True),
+                name="one_default_whatsapp_account",
+            ),
+        ]
 
     def __str__(self):
         state = "active" if self.is_active else "inactive"
-        return f"WhatsApp via {self.get_provider_display()} ({state})"
+        return f"{self.label} — WhatsApp via {self.get_provider_display()} ({state})"
+
+    def shares_business_account_with(self, other) -> bool:
+        """Both numbers are in the same Meta WhatsApp Business Account."""
+        return bool(
+            other is not None
+            and self.business_account_id
+            and self.business_account_id == other.business_account_id
+            and self.provider == other.provider
+        )
+
+    def same_business_account(self):
+        """This account and every other number in its WhatsApp Business Account."""
+        if not self.business_account_id:
+            return type(self).objects.filter(pk=self.pk)
+        return type(self).objects.filter(
+            business_account_id=self.business_account_id, provider=self.provider,
+        )
+
+    @property
+    def sender_label(self) -> str:
+        """ "Sales (+91 98765 43210)" — what a send-from picker shows. """
+        return f"{self.label} ({self.display_phone})" if self.display_phone else self.label
 
     def save(self, *args, **kwargs):
-        self.singleton = 1
+        from django.db import transaction
+
+        update_fields = kwargs.get("update_fields")
+        extra = set()
         if not self.webhook_token:
             import secrets
 
             self.webhook_token = secrets.token_urlsafe(32)
-            if kwargs.get("update_fields") is not None:
-                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"webhook_token"}
-        super().save(*args, **kwargs)
+            extra.add("webhook_token")
+        creds = self.credentials or {}
+        pnid = str(creds.get("phone_number_id") or "").strip()[:50]
+        if pnid != self.phone_number_id:
+            self.phone_number_id = pnid
+            extra.add("phone_number_id")
+        waba = str(creds.get("business_account_id") or "").strip()[:50]
+        if waba != self.business_account_id:
+            self.business_account_id = waba
+            extra.add("business_account_id")
+        if not type(self).objects.exclude(pk=self.pk).filter(is_default=True).exists():
+            # The first account — or the only one left — is the default.
+            if not self.is_default:
+                self.is_default = True
+                extra.add("is_default")
+        if update_fields is not None and extra:
+            kwargs["update_fields"] = set(update_fields) | extra
+        with transaction.atomic():
+            if self.is_default:
+                type(self).objects.exclude(pk=self.pk).filter(is_default=True).update(is_default=False)
+            super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        from django.db import transaction
+
+        with transaction.atomic():
+            was_default = self.is_default
+            result = super().delete(*args, **kwargs)
+            if was_default:
+                heir = type(self).objects.order_by("-is_active", "pk").first()
+                if heir is not None:
+                    type(self).objects.filter(pk=heir.pk).update(is_default=True)
+        return result
+
+    @classmethod
+    def get_default(cls) -> "WhatsAppConfig | None":
+        """The default account, or None when nothing has been connected."""
+        return cls.objects.filter(is_default=True).first() or cls.objects.order_by("pk").first()
 
     @classmethod
     def get_solo(cls) -> "WhatsAppConfig":
-        """The tenant's config row, created inactive on first access."""
-        obj, _ = cls.objects.get_or_create(singleton=1)
+        """
+        The default account, created inactive on first access.
+
+        Kept for every caller written when a tenant had exactly one
+        connection: "the" connection is now the default one.
+        """
+        obj = cls.get_default()
+        if obj is None:
+            obj = cls(is_default=True)
+            obj.save()
         return obj
+
+    @classmethod
+    def for_phone_number_id(cls, phone_number_id: str) -> "WhatsAppConfig | None":
+        """The account a Meta delivery to this business number belongs to."""
+        pnid = str(phone_number_id or "").strip()
+        if not pnid:
+            return None
+        return cls.objects.filter(phone_number_id=pnid).order_by("-is_active", "pk").first()
+
 
 class WhatsAppTemplate(TimeStampedModel):
     """
@@ -153,7 +264,16 @@ class WhatsAppTemplate(TimeStampedModel):
         ("paused", "Paused by Meta"),
     ]
 
-    name = models.CharField(max_length=100, unique=True)
+    # Which WhatsApp account the template was approved on. Meta approves a
+    # template per WhatsApp Business Account, so two accounts can each have a
+    # "welcome" — the name is unique per account, not per tenant. Blank means
+    # usable from any account (templates made before accounts existed, or a
+    # provider that shares templates across numbers).
+    account = models.ForeignKey(
+        WhatsAppConfig, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="templates",
+    )
+    name = models.CharField(max_length=100)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="marketing")
     language = models.CharField(max_length=10, default="en", help_text="e.g. en, hi, mr")
 
@@ -197,6 +317,27 @@ class WhatsAppTemplate(TimeStampedModel):
         verbose_name = "WhatsApp Template"
         verbose_name_plural = "WhatsApp Templates"
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "name"], name="whatsapp_template_name_per_account",
+            ),
+            models.UniqueConstraint(
+                fields=["name"], condition=models.Q(account__isnull=True),
+                name="whatsapp_template_name_shared",
+            ),
+        ]
+
+    def usable_from(self, account) -> bool:
+        """
+        A shared template goes out from any number; others from their own
+        number and from every other number in the same WhatsApp Business
+        Account, because Meta approves a template for the whole account.
+        """
+        if self.account_id is None:
+            return True
+        if account is None:
+            return False
+        return self.account_id == account.pk or self.account.shares_business_account_with(account)
 
     def __str__(self):
         return f"{self.name} [{self.get_status_display()}]"
@@ -435,6 +576,13 @@ class WhatsAppMessage(TimeStampedModel):
         help_text="Template used (for outbound template messages).",
     )
 
+    # Which of the tenant's WhatsApp accounts sent or received it. A reply to
+    # the customer goes out from the number they last wrote to.
+    account = models.ForeignKey(
+        WhatsAppConfig, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="messages",
+    )
+
     # Provider tracking
     provider = models.CharField(max_length=30, choices=WhatsAppProvider.CHOICES, default=WhatsAppProvider.INTERAKT)
     provider_message_id = models.CharField(max_length=200, blank=True, default="", db_index=True)
@@ -534,6 +682,12 @@ class BulkCampaign(TimeStampedUUIDModel):
     # WhatsApp
     template = models.ForeignKey(
         WhatsAppTemplate, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="campaigns",
+    )
+    # The number the campaign sends from. Blank = the template's own account,
+    # else the default account.
+    whatsapp_account = models.ForeignKey(
+        WhatsAppConfig, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="campaigns",
     )
 

@@ -956,43 +956,47 @@ class MetaWhatsAppWebhookView(View):
 
     # ---- Verification (Meta calls this once, on subscribe) ----
     def get(self, request, *args, **kwargs):
-        from apps.integrations.meta_whatsapp import get_config, verify_token_for
+        from apps.integrations.meta_whatsapp import any_verify_token_matches
 
         mode = request.GET.get("hub.mode")
         token = request.GET.get("hub.verify_token") or ""
         challenge = request.GET.get("hub.challenge") or ""
 
-        expected = verify_token_for(get_config())
+        # Any of the tenant's WhatsApp accounts may be the one Meta is
+        # verifying: each Meta app is set up with its account's token.
+        matched = any_verify_token_matches(token)
 
-        if mode == "subscribe" and expected and hmac.compare_digest(token, expected):
+        if mode == "subscribe" and matched:
             logger.info("[Meta CTWA] Webhook verified for schema=%s", connection.schema_name)
             return HttpResponse(challenge, content_type="text/plain")
 
         # Never say WHICH part was wrong — that turns this into a token oracle.
         logger.warning(
-            "[Meta CTWA] Verification rejected | schema=%s mode=%s token_configured=%s",
-            connection.schema_name, mode, bool(expected),
+            "[Meta CTWA] Verification rejected | schema=%s mode=%s",
+            connection.schema_name, mode,
         )
         return HttpResponse("Forbidden", status=403)
 
     # ---- Deliveries -------------------------------------------
     def post(self, request, *args, **kwargs):
         from apps.integrations.meta_whatsapp import (
-            app_secret_for, get_config, signature_required, verify_signature,
+            all_configs, app_secrets, signature_required, verify_signature,
         )
         from apps.integrations.tasks import process_meta_whatsapp_webhook
 
         raw_body = request.body
-        config = get_config()
+        configs = all_configs()
 
-        # 1. Authenticity, before anything is parsed or stored.
+        # 1. Authenticity, before anything is parsed or stored. Accounts set
+        #    up on different Meta apps sign with different secrets; a delivery
+        #    is genuine if any of them signed it.
         signature = request.headers.get("X-Hub-Signature-256", "")
-        app_secret = app_secret_for(config)
-        if app_secret or signature or signature_required():
-            if not verify_signature(raw_body, signature, app_secret):
+        secrets_ = app_secrets()
+        if secrets_ or signature or signature_required():
+            if not any(verify_signature(raw_body, signature, s) for s in secrets_):
                 logger.warning(
                     "[Meta CTWA] Invalid signature | schema=%s has_secret=%s has_header=%s",
-                    connection.schema_name, bool(app_secret), bool(signature),
+                    connection.schema_name, bool(secrets_), bool(signature),
                 )
                 return HttpResponse("Invalid signature", status=401)
 
@@ -1006,8 +1010,10 @@ class MetaWhatsAppWebhookView(View):
         if not isinstance(payload, dict):
             return JsonResponse({"status": "ignored", "reason": "malformed"}, status=400)
 
-        # 3. Is this tenant actually receiving?
-        if config is None or not config.inbound_enabled:
+        # 3. Is this tenant actually receiving on any number? Which account
+        #    each message belongs to is decided per message, by the number it
+        #    reached (meta_whatsapp.process_payload).
+        if not any(c.inbound_enabled for c in configs):
             logger.info(
                 "[Meta CTWA] Inbound disabled — delivery discarded | schema=%s",
                 connection.schema_name,

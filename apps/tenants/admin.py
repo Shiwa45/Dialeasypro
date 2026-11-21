@@ -91,7 +91,11 @@ class TenantAdmin(ModelAdmin):
         return form
     ordering = ["-created_at"]
     inlines = [DomainInline]
-    actions = ["suspend_tenants", "activate_tenants", "reset_trial", "sync_subscriptions", "send_welcome_emails"]
+    actions = [
+        "suspend_tenants", "activate_tenants", "reset_trial", "sync_subscriptions", "send_welcome_emails",
+        "grant_hrms", "grant_erp_sales", "grant_recruitment", "grant_ai_suite",
+        "revoke_hrms", "revoke_erp_sales", "revoke_recruitment", "revoke_ai_suite",
+    ]
 
     def get_urls(self):
         from django.urls import path
@@ -569,6 +573,69 @@ class TenantAdmin(ModelAdmin):
             tenant.set_trial(days=14)
             count += 1
         self.message_user(request, f"✅ Trial reset for {count} tenant(s).")
+
+    # ---- Add-on modules -------------------------------------------
+    # One click per company instead of one Tenant Entitlement row per feature
+    # (5 for HRMS, 5 for Sales & Billing, 4 for Recruitment): a row left out
+    # left one screen of the module locked.
+
+    def _grant(self, request, queryset, module):
+        from apps.core.constants import ModuleKey
+        from apps.plans.models import TenantEntitlement
+
+        label = dict(ModuleKey.CHOICES).get(module, module)
+        names = []
+        for tenant in queryset.exclude(schema_name="public"):
+            TenantEntitlement.grant_module(tenant, module, note=f"Granted by {request.user}")
+            names.append(tenant.company_name or tenant.schema_name)
+        self.message_user(request, f"✅ {label} add-on switched on for: {', '.join(names) or 'nobody'}.")
+
+    def _revoke(self, request, queryset, module):
+        from apps.core.constants import ModuleKey
+        from apps.plans.models import TenantEntitlement
+
+        label = dict(ModuleKey.CHOICES).get(module, module)
+        names = []
+        for tenant in queryset.exclude(schema_name="public"):
+            if TenantEntitlement.revoke_module(tenant, module):
+                names.append(tenant.company_name or tenant.schema_name)
+        self.message_user(
+            request,
+            f"{label} add-on removed from: {', '.join(names)}. Their plan's own features are unchanged."
+            if names else f"None of the selected tenants had the {label} add-on.",
+        )
+
+    @action(description="Add-on: switch on HRMS")
+    def grant_hrms(self, request, queryset):
+        self._grant(request, queryset, "hrms")
+
+    @action(description="Add-on: switch on Sales & Billing (ERP)")
+    def grant_erp_sales(self, request, queryset):
+        self._grant(request, queryset, "erp_sales")
+
+    @action(description="Add-on: switch on Recruitment")
+    def grant_recruitment(self, request, queryset):
+        self._grant(request, queryset, "recruitment")
+
+    @action(description="Add-on: switch on AI Suite")
+    def grant_ai_suite(self, request, queryset):
+        self._grant(request, queryset, "ai_suite")
+
+    @action(description="Add-on: remove HRMS")
+    def revoke_hrms(self, request, queryset):
+        self._revoke(request, queryset, "hrms")
+
+    @action(description="Add-on: remove Sales & Billing (ERP)")
+    def revoke_erp_sales(self, request, queryset):
+        self._revoke(request, queryset, "erp_sales")
+
+    @action(description="Add-on: remove Recruitment")
+    def revoke_recruitment(self, request, queryset):
+        self._revoke(request, queryset, "recruitment")
+
+    @action(description="Add-on: remove AI Suite")
+    def revoke_ai_suite(self, request, queryset):
+        self._revoke(request, queryset, "ai_suite")
 
     def get_queryset(self, request):
         return (

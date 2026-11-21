@@ -53,6 +53,7 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = WhatsAppConfig
         fields = [
+            "id", "label", "display_phone", "phone_number_id", "business_account_id", "is_default",
             "provider", "is_active", "default_language",
             "credentials", "configured_fields", "required_fields",
             "last_verified_at", "last_error", "updated_at",
@@ -63,9 +64,34 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
             "webhook",
         ]
         read_only_fields = [
+            "id", "phone_number_id", "business_account_id", "is_default",
             "is_active", "last_verified_at", "last_error", "updated_at",
             "last_webhook_at", "last_webhook_error", "total_inbound_messages",
         ]
+
+    def validate_label(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Give this number a name, e.g. Sales or Support.")
+        clash = WhatsAppConfig.objects.filter(label__iexact=value)
+        if self.instance is not None and self.instance.pk:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError(f'Another WhatsApp number is already called "{value}".')
+        return value
+
+    def validate_credentials(self, value):
+        """The same Meta number can't be connected twice: its messages would have two homes."""
+        pnid = str((value or {}).get("phone_number_id") or "").strip()
+        if pnid:
+            clash = WhatsAppConfig.objects.filter(phone_number_id=pnid)
+            if self.instance is not None and self.instance.pk:
+                clash = clash.exclude(pk=self.instance.pk)
+            if clash.exists():
+                raise serializers.ValidationError({
+                    "phone_number_id": f'This number is already connected as "{clash.first().label}".'
+                })
+        return value
 
     def get_webhook(self, obj) -> dict:
         """
@@ -119,6 +145,7 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
 
     #: Plain (non-secret) settings a client may PUT.
     _WRITABLE = (
+        "label", "display_phone",
         "provider", "default_language", "inbound_enabled",
         "create_leads_from_inbound", "ctwa_leads_only", "inbound_assign_to",
         "reopen_lead_on_inbound", "graph_api_version",
@@ -149,9 +176,12 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
                     continue
                 merged[key] = value
             instance.credentials = merged
-        # Any credential change forces re-verification before sends resume.
-        instance.is_active = False
-        instance.last_error = ""
+        # A credential or provider change forces re-verification before sends
+        # resume. Renaming a number, or switching inbound settings, does not —
+        # it used to switch sending off until the next test message.
+        if new_creds is not None or "provider" in validated_data or instance.pk is None:
+            instance.is_active = False
+            instance.last_error = ""
         instance.save()
         return instance
 
@@ -162,16 +192,46 @@ class WhatsAppTemplateSerializer(serializers.ModelSerializer):
     placeholders = serializers.SerializerMethodField()
     unmapped = serializers.SerializerMethodField()
 
+    account_label = serializers.CharField(source="account.label", read_only=True, default=None)
+
     class Meta:
         model = WhatsAppTemplate
         fields = [
-            "id", "name", "category", "language",
+            "id", "account", "account_label", "name", "category", "language",
             "header_type", "header_text", "header_media_url",
             "body_text", "footer_text",
             "variable_mapping", "provider", "provider_template_id", "status",
             "is_active", "usage_count", "placeholders", "unmapped",
         ]
         read_only_fields = ["id", "usage_count"]
+        # The per-account name rule is checked in validate() with a message
+        # that says where the clash is; DRF's generated one names columns.
+        validators = []
+
+    def validate(self, data):
+        """Unique per account — the database would otherwise answer with a 500."""
+        inst = self.instance
+        name = data.get("name", getattr(inst, "name", None))
+        account = data["account"] if "account" in data else getattr(inst, "account", None)
+        if name:
+            # Numbers in one WhatsApp Business Account share its templates,
+            # so the name is checked across all of them.
+            owners = account.same_business_account() if account is not None else None
+            clash = (WhatsAppTemplate.objects.filter(name=name, account__in=owners) if owners is not None
+                     else WhatsAppTemplate.objects.filter(name=name, account__isnull=True))
+            if inst is not None:
+                clash = clash.exclude(pk=inst.pk)
+            found = clash.select_related("account").first()
+            if found is not None:
+                if found.account is None:
+                    where = "shared by every number"
+                elif found.account_id == getattr(account, "pk", None):
+                    where = f"on {found.account.label}"
+                else:
+                    where = (f"on {found.account.label}, in the same WhatsApp Business Account — "
+                             "it can already be sent from this number")
+                raise serializers.ValidationError({"name": f'A template "{name}" already exists {where}.'})
+        return data
 
     def get_placeholders(self, obj) -> list:
         from apps.communications.whatsapp_ready import placeholder_numbers
@@ -207,6 +267,7 @@ class WhatsAppTemplateSerializer(serializers.ModelSerializer):
 class WhatsAppMessageSerializer(serializers.ModelSerializer):
     lead_name = serializers.CharField(source="lead.name", read_only=True)
     sent_by_name = serializers.CharField(source="sent_by.name", read_only=True)
+    account_label = serializers.CharField(source="account.sender_label", read_only=True, default=None)
 
     class Meta:
         model = WhatsAppMessage
@@ -214,7 +275,7 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
             "id", "lead", "lead_name", "sent_by", "sent_by_name",
             "direction", "message_type", "content", "template",
             "status", "sent_at", "delivered_at", "read_at",
-            "error_message", "created_at",
+            "error_message", "created_at", "account", "account_label",
         ]
         read_only_fields = ["id", "direction", "status", "sent_at", "created_at"]
 
@@ -224,6 +285,9 @@ class SendWhatsAppSerializer(serializers.Serializer):
     lead_id = serializers.IntegerField()
     message = serializers.CharField(max_length=4096, required=False, allow_blank=True)
     template_id = serializers.IntegerField(required=False)
+    # The WhatsApp number to send from. Optional: without it the template's
+    # account, the number the lead last wrote to, or the default is used.
+    account_id = serializers.IntegerField(required=False, allow_null=True)
     # Values for {{1}}, {{2}}, ... in order, as the agent filled them in. When
     # absent, the template's own field mapping fills them from the lead.
     variables = serializers.ListField(
@@ -248,6 +312,9 @@ class BulkCampaignSerializer(serializers.ModelSerializer):
     delivery_rate = serializers.FloatField(read_only=True)
     progress_percent = serializers.IntegerField(read_only=True)
     pending_count = serializers.SerializerMethodField()
+    whatsapp_account_label = serializers.CharField(
+        source="whatsapp_account.sender_label", read_only=True, default=None,
+    )
 
     def get_pending_count(self, obj) -> int:
         """
@@ -262,7 +329,8 @@ class BulkCampaignSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "channel", "created_by", "created_by_name",
             "audience_filters", "estimated_recipients",
-            "template", "email_subject", "email_body", "sms_text", "sms_sender_id",
+            "template", "whatsapp_account", "whatsapp_account_label",
+            "email_subject", "email_body", "sms_text", "sms_sender_id",
             "status", "failure_reason", "scheduled_at", "started_at", "completed_at",
             "total_recipients", "sent_count", "delivered_count",
             "failed_count", "replied_count", "delivery_rate", "progress_percent",
@@ -280,7 +348,7 @@ class BulkCampaignCreateSerializer(serializers.ModelSerializer):
         model = BulkCampaign
         fields = [
             "name", "channel", "audience_filters",
-            "template", "email_subject", "email_body",
+            "template", "whatsapp_account", "email_subject", "email_body",
             "sms_text", "sms_sender_id", "scheduled_at",
         ]
 
@@ -321,6 +389,15 @@ class BulkCampaignCreateSerializer(serializers.ModelSerializer):
                     + ", ".join("{{%d}}" % n for n in missing)
                     + ") — otherwise customers receive the placeholder text."
                 )})
+            account = data.get("whatsapp_account")
+            if account is not None and not data["template"].usable_from(account):
+                raise serializers.ValidationError({"whatsapp_account": (
+                    f'"{data["template"].name}" was approved for {data["template"].account.label}\'s '
+                    f"WhatsApp Business Account, so it can't be sent from {account.label}. "
+                    "Pick a number in that account or another template."
+                )})
+        elif data.get("whatsapp_account") is not None:
+            data["whatsapp_account"] = None  # a sender only means something for WhatsApp
         if channel == "email":
             if not data.get("email_subject"):
                 raise serializers.ValidationError({"email_subject": "Subject required for email campaigns."})

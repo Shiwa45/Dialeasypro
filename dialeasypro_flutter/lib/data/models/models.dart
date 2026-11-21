@@ -446,11 +446,15 @@ class WhatsAppTemplate {
   final int id;
   final String name, category, language, bodyText, headerText, status, provider;
   final int usageCount;
+  /// The WhatsApp number it was approved on; null = any number.
+  final int? accountId;
+  final String accountLabel;
 
   const WhatsAppTemplate({
     required this.id, required this.name, this.category = 'utility',
     this.language = 'en', required this.bodyText, this.headerText = '',
     this.status = 'pending', this.provider = 'interakt', this.usageCount = 0,
+    this.accountId, this.accountLabel = '',
   });
 
   factory WhatsAppTemplate.fromJson(Map<String, dynamic> j) => WhatsAppTemplate(
@@ -463,6 +467,33 @@ class WhatsAppTemplate {
     status: j['status'] as String? ?? 'pending',
     provider: j['provider'] as String? ?? 'interakt',
     usageCount: j['usage_count'] as int? ?? 0,
+    accountId: j['account'] as int?,
+    accountLabel: j['account_label'] as String? ?? '',
+  );
+}
+
+/// One of the company's WhatsApp numbers an agent can send from
+/// (GET /comms/whatsapp/senders/ — names only, never credentials).
+class WhatsAppSender {
+  final int id;
+  final String label, displayPhone, provider;
+  final bool isDefault, isActive;
+
+  const WhatsAppSender({
+    required this.id, required this.label, this.displayPhone = '',
+    this.provider = '', this.isDefault = false, this.isActive = false,
+  });
+
+  /// "Sales (+91 98765 43210)"
+  String get title => displayPhone.isEmpty ? label : '$label ($displayPhone)';
+
+  factory WhatsAppSender.fromJson(Map<String, dynamic> j) => WhatsAppSender(
+    id: j['id'] as int,
+    label: j['label'] as String? ?? '',
+    displayPhone: j['display_phone'] as String? ?? '',
+    provider: j['provider'] as String? ?? '',
+    isDefault: j['is_default'] as bool? ?? false,
+    isActive: j['is_active'] as bool? ?? false,
   );
 }
 

@@ -79,14 +79,57 @@ class MetaWhatsAppError(Exception):
 
 def get_config():
     """
-    The tenant's WhatsApp connection, or None if the row does not exist yet.
+    The tenant's default WhatsApp account, or None if none exists yet.
 
-    Deliberately does NOT create the singleton: a webhook from a tenant that
-    never configured WhatsApp should be rejected, not quietly given a config.
+    Deliberately does NOT create one: a webhook from a tenant that never
+    configured WhatsApp should be rejected, not quietly given a config.
     """
     from apps.communications.models import WhatsAppConfig
 
-    return WhatsAppConfig.objects.filter(singleton=1).first()
+    return WhatsAppConfig.get_default()
+
+
+def all_configs() -> list:
+    """Every WhatsApp account the tenant has, default first."""
+    from apps.communications.models import WhatsAppConfig
+
+    return list(WhatsAppConfig.objects.order_by("-is_default", "pk"))
+
+
+def config_for_number(phone_number_id: str, fallback=None):
+    """
+    The account a delivery to this business number belongs to.
+
+    A tenant can connect several numbers to one webhook URL (one Meta app
+    serving several WhatsApp Business Accounts). Each message names the number
+    it reached, so it is filed under that account; a number nobody has
+    connected falls back to the default account, as before accounts existed.
+    """
+    from apps.communications.models import WhatsAppConfig
+
+    return WhatsAppConfig.for_phone_number_id(phone_number_id) or fallback
+
+
+def any_verify_token_matches(token: str) -> bool:
+    """Meta's handshake: does this token belong to any of the tenant's accounts?"""
+    if not token:
+        return False
+    candidates = [verify_token_for(c) for c in all_configs()] or [verify_token_for(None)]
+    return any(t and hmac.compare_digest(token, t) for t in candidates)
+
+
+def app_secrets() -> list:
+    """Every app secret a delivery may be signed with (one per Meta app)."""
+    secrets_ = []
+    for config in all_configs():
+        secret = app_secret_for(config)
+        if secret and secret not in secrets_:
+            secrets_.append(secret)
+    if not secrets_:
+        fallback = app_secret_for(None)
+        if fallback:
+            secrets_.append(fallback)
+    return secrets_
 
 
 def graph_version(config=None) -> str:
@@ -652,7 +695,7 @@ def _resolve_conversation(message: InboundMessage, lead, referral: dict):
     return conversation, True
 
 
-def _record_message(message: InboundMessage, lead, conversation):
+def _record_message(message: InboundMessage, lead, conversation, account=None):
     """
     Store the inbound message once.
 
@@ -683,6 +726,7 @@ def _record_message(message: InboundMessage, lead, conversation):
             "status": "received",
             "wa_timestamp": message.timestamp,
             "metadata": metadata,
+            "account": account,
         },
     )
     return wa_message, created
@@ -831,7 +875,7 @@ def process_message(message: InboundMessage, config, webhook_log=None) -> Proces
             return ProcessResult(status="skipped", detail="lead creation not permitted")
 
         conversation, conv_created = _resolve_conversation(message, lead, referral)
-        wa_message, msg_created = _record_message(message, lead, conversation)
+        wa_message, msg_created = _record_message(message, lead, conversation, account=config)
 
         if msg_created and conversation is not None:
             _touch_conversation(conversation, message)
@@ -954,9 +998,19 @@ def process_payload(payload: dict, config, webhook_log=None) -> dict:
         "last_error": "",
     }
 
+    summary["by_account"] = {}
+    summary["disabled"] = 0
+
     for message in messages:
+        account = config_for_number(message.phone_number_id, fallback=config)
+        if account is None or not account.inbound_enabled:
+            # This number's account isn't receiving. Acknowledged, not stored:
+            # retrying won't switch it on.
+            summary["disabled"] += 1
+            continue
+        summary["by_account"][account.pk] = summary["by_account"].get(account.pk, 0) + 1
         try:
-            result = process_message(message, config, webhook_log)
+            result = process_message(message, account, webhook_log)
         except PlanLimitExceededException as exc:
             # An upgrade — not a retry — fixes this, so it is counted and the
             # delivery is still acknowledged.

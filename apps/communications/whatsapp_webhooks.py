@@ -133,8 +133,13 @@ PARSERS = {
 # Recording
 # ============================================================
 
-def handle(provider: str, payload: dict):
-    """Parse and record one webhook post. Unknown shapes are logged, not raised."""
+def handle(provider: str, payload: dict, account=None):
+    """
+    Parse and record one webhook post. Unknown shapes are logged, not raised.
+
+    `account` is the WhatsApp account whose webhook URL (token) was posted to;
+    inbound messages are tied to it so the reply goes out from that number.
+    """
     parser = PARSERS.get(provider)
     if parser is None:
         logger.warning(
@@ -146,7 +151,7 @@ def handle(provider: str, payload: dict):
     for receipt in receipts:
         record_receipt(receipt)
     for message in inbound:
-        record_inbound(provider, message)
+        record_inbound(provider, message, account=account)
 
 
 def record_receipt(receipt: Receipt):
@@ -186,7 +191,7 @@ def lead_for_number(phone: str):
     )
 
 
-def record_inbound(provider: str, message: Inbound):
+def record_inbound(provider: str, message: Inbound, account=None):
     from apps.communications.models import WhatsAppMessage
     from apps.leads.models import LeadActivity
 
@@ -208,7 +213,7 @@ def record_inbound(provider: str, message: Inbound):
         lead=lead, direction="inbound",
         message_type=message.message_type if message.message_type in valid_types else "unsupported",
         content=message.text, provider=provider, status="received",
-        provider_message_id=message.message_id,
+        provider_message_id=message.message_id, account=account,
     )
     if lead.assigned_to_id:
         from django.db import connection

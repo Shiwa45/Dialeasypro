@@ -140,6 +140,19 @@ def _replace_auto_followups(lead, note: str) -> None:
 
 def apply_call_outcome(call, *, actor=None, new_dial: bool = True, followup_at=None) -> None:
     """
+    Bring the call's lead up to date with this call (see _apply_call_outcome),
+    then let workflows know: call connected / not connected / outcome saved.
+    """
+    _apply_call_outcome(call, actor=actor, new_dial=new_dial, followup_at=followup_at)
+    if call.lead_id:
+        from apps.automation import hooks
+        from apps.leads.models import Lead
+
+        hooks.call_applied(call, Lead.objects.filter(pk=call.lead_id, is_deleted=False).first())
+
+
+def _apply_call_outcome(call, *, actor=None, new_dial: bool = True, followup_at=None) -> None:
+    """
     Bring the call's lead up to date with this call.
 
     new_dial=False when an outcome is set on a call that already counted as

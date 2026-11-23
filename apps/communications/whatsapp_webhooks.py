@@ -235,3 +235,7 @@ def record_inbound(provider: str, message: Inbound, account=None):
         lead=lead, activity_type="whatsapp",
         description=f"WhatsApp reply received: {message.text[:100]}",
     )
+    from apps.automation import hooks
+
+    hooks.whatsapp_received(lead, message_id=message.message_id or f"{provider}:{phone}:{message.text[:40]}",
+                            text=message.text, account_id=getattr(account, "pk", None))

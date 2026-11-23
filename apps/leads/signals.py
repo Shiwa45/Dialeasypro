@@ -43,6 +43,9 @@ def lead_pre_save(sender, instance, **kwargs):
             old = Lead.objects.get(pk=instance.pk)
             if old.assigned_to_id != instance.assigned_to_id and instance.assigned_to_id:
                 instance.assigned_at = timezone.now()
+            # What it was, for workflows started by a status or owner change.
+            instance._old_status = old.status
+            instance._old_owner_id = old.assigned_to_id
         except Lead.DoesNotExist:
             pass
 
@@ -56,6 +59,17 @@ def lead_post_save(sender, instance, created, **kwargs):
     """
     if created:
         _check_lead_plan_limit(instance)
+
+    # Workflows: a new lead, a status change, a new owner.
+    from apps.automation import hooks
+
+    hooks.lead_saved(
+        instance, created=created,
+        old_status=getattr(instance, "_old_status", None),
+        old_owner_id=getattr(instance, "_old_owner_id", None),
+    )
+    instance._old_status = instance.status
+    instance._old_owner_id = instance.assigned_to_id
 
     # Broadcast to monitoring dashboard (non-blocking — best effort)
     try:

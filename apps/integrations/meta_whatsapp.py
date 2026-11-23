@@ -917,6 +917,14 @@ def process_message(message: InboundMessage, config, webhook_log=None) -> Proces
 
     _notify(lead, conversation, message, is_new_lead=lead_created)
 
+    # Workflows (keyword auto-replies and the like) — only for a message
+    # stored now, never for a redelivery.
+    if msg_created:
+        from apps.automation import hooks
+
+        hooks.whatsapp_received(lead, message_id=message.message_id, text=message.text,
+                                account_id=getattr(config, "pk", None))
+
     return ProcessResult(
         status="processed",
         lead_id=lead.pk,

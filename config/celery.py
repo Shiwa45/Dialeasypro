@@ -98,6 +98,20 @@ app.conf.beat_schedule = {
         "options": {"queue": "bulk_ops"},
     },
 
+    # ---- Workflows ------------------------------------------
+    # Resume runs whose wait is over (and any whose first hand-off was lost).
+    "workflows-tick": {
+        "task": "apps.automation.tasks.workflows_tick",
+        "schedule": timedelta(minutes=1),
+        "options": {"queue": "default"},
+    },
+    # Missed follow-ups and inactive leads are states, found by a scan.
+    "workflows-scan": {
+        "task": "apps.automation.tasks.workflows_scan",
+        "schedule": crontab(minute="*/15"),
+        "options": {"queue": "default"},
+    },
+
     # ---- Lead Scoring (nightly) ----------------------------
     "recalculate-lead-scores": {
         "task": "apps.leads.tasks.dispatch_lead_score_recalculation",

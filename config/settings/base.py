@@ -83,6 +83,7 @@ TENANT_APPS = [
     "apps.erp",             # Add-on module (ModuleKey.ERP_SALES)
     "apps.recruitment",     # Add-on module (ModuleKey.RECRUITMENT)
     "apps.ai",              # Add-on module (ModuleKey.AI_SUITE)
+    "apps.automation",      # Workflows (FeatureKey.FOLLOW_UP_AUTOMATION)
 ]
 
 # django-tenants requires this exact format:

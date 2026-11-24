@@ -554,3 +554,22 @@ def test_meta_numbers_passes_metas_error_on(admin):
         response = _call(WhatsAppAccountMetaNumbersView, "get", admin, pk=sales.pk)
     assert response.status_code == 502
     assert "OAuth" in response.data["message"]
+
+
+def test_meta_numbers_retries_with_basic_fields_and_explains_permissions(admin):
+    from apps.communications.views import WhatsAppAccountMetaNumbersView
+
+    sales = _waba_number("Sales", "p1")
+    denied = MagicMock(status_code=400, content=b"{}")
+    denied.json.return_value = {"error": {"code": 200, "message": "(#200) You do not have permission"}}
+    ok = MagicMock(status_code=200, content=b"{}")
+    ok.json.return_value = {"data": [{"id": "p1", "display_phone_number": "+91 1"}]}
+    with patch("requests.get", side_effect=[denied, ok]) as got:
+        response = _call(WhatsAppAccountMetaNumbersView, "get", admin, pk=sales.pk)
+    assert response.status_code == 200 and got.call_count == 2
+    assert got.call_args.kwargs["params"]["fields"] == "id,display_phone_number,verified_name"
+
+    with patch("requests.get", side_effect=[denied, denied]):
+        response = _call(WhatsAppAccountMetaNumbersView, "get", admin, pk=sales.pk)
+    assert response.status_code == 502
+    assert "whatsapp_business_management" in response.data["message"]

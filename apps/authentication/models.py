@@ -446,6 +446,7 @@ class NotificationKind:
     FOLLOWUP_DUE = "followup_due"
     FOLLOWUP_OVERDUE = "followup_overdue"
     LEAD_ASSIGNED = "lead_assigned"
+    WHATSAPP_REPLY = "whatsapp_reply"
     SYSTEM = "system"
 
     CHOICES = [
@@ -453,6 +454,7 @@ class NotificationKind:
         (FOLLOWUP_DUE, "Follow-up due"),
         (FOLLOWUP_OVERDUE, "Follow-up overdue"),
         (LEAD_ASSIGNED, "Lead assigned"),
+        (WHATSAPP_REPLY, "WhatsApp reply"),
         (SYSTEM, "System"),
     ]
 

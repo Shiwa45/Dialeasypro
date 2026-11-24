@@ -563,3 +563,138 @@ class LoginResponse {
     mustChangePassword: j['must_change_password'] as bool? ?? false,
   );
 }
+
+// ─── WhatsApp inbox ─────────────────────────────────────────
+/// Whether free text can still be sent: WhatsApp allows it for 24 hours after
+/// the customer's last message, after that only an approved template.
+class ReplyWindow {
+  final bool open;
+  final DateTime? closesAt;
+
+  const ReplyWindow({this.open = false, this.closesAt});
+
+  factory ReplyWindow.fromJson(Map<String, dynamic>? j) => ReplyWindow(
+    open: j?['open'] as bool? ?? false,
+    closesAt: DateTime.tryParse(j?['closes_at'] as String? ?? '')?.toLocal(),
+  );
+
+  /// "23h left", "40 min left", or '' once closed.
+  String leftLabel(DateTime now) {
+    final at = closesAt;
+    if (!open || at == null) return '';
+    final left = at.difference(now);
+    if (left.isNegative) return '';
+    if (left.inHours >= 1) return '${left.inHours}h left';
+    return '${left.inMinutes < 1 ? 1 : left.inMinutes} min left';
+  }
+}
+
+/// One customer who has written in: the newest message and what is unread.
+class InboxConversation {
+  final int leadId;
+  final String leadName, phone, status;
+  final String? ownerName;
+  final int unread;
+  final String lastText, lastDirection, lastStatus;
+  final String? lastAccountLabel;
+  final DateTime? lastAt;
+  final ReplyWindow window;
+
+  const InboxConversation({
+    required this.leadId, required this.leadName, this.phone = '', this.status = '',
+    this.ownerName, this.unread = 0, this.lastText = '', this.lastDirection = 'inbound',
+    this.lastStatus = '', this.lastAccountLabel, this.lastAt, this.window = const ReplyWindow(),
+  });
+
+  bool get lastIsMine => lastDirection == 'outbound';
+
+  factory InboxConversation.fromJson(Map<String, dynamic> j) {
+    final last = Map<String, dynamic>.from(j['last_message'] as Map? ?? const {});
+    return InboxConversation(
+      leadId: j['lead_id'] as int,
+      leadName: j['lead_name'] as String? ?? '',
+      phone: j['phone'] as String? ?? '',
+      status: j['status'] as String? ?? '',
+      ownerName: j['owner_name'] as String?,
+      unread: j['unread'] as int? ?? 0,
+      lastText: last['text'] as String? ?? '',
+      lastDirection: last['direction'] as String? ?? 'inbound',
+      lastStatus: last['status'] as String? ?? '',
+      lastAccountLabel: last['account_label'] as String?,
+      lastAt: DateTime.tryParse(last['at'] as String? ?? '')?.toLocal(),
+      window: ReplyWindow.fromJson(j['window'] as Map<String, dynamic>?),
+    );
+  }
+}
+
+class InboxMessage {
+  final String id, direction, type, content, status, errorMessage;
+  final String? templateName, sentByName, accountLabel;
+  final DateTime at;
+
+  const InboxMessage({
+    required this.id, required this.direction, this.type = 'text', this.content = '',
+    this.status = '', this.errorMessage = '', this.templateName, this.sentByName,
+    this.accountLabel, required this.at,
+  });
+
+  bool get isMine => direction == 'outbound';
+
+  /// What to show in the bubble: the text, else the template, else the kind.
+  String get display {
+    if (content.isNotEmpty) return content;
+    if ((templateName ?? '').isNotEmpty) return 'Template: $templateName';
+    return '[$type]';
+  }
+
+  factory InboxMessage.fromJson(Map<String, dynamic> j) => InboxMessage(
+    id: '${j['id']}',
+    direction: j['direction'] as String? ?? 'inbound',
+    type: j['message_type'] as String? ?? 'text',
+    content: j['content'] as String? ?? '',
+    status: j['status'] as String? ?? '',
+    errorMessage: j['error_message'] as String? ?? '',
+    templateName: j['template_name'] as String?,
+    sentByName: j['sent_by_name'] as String?,
+    accountLabel: j['account_label'] as String?,
+    at: (DateTime.tryParse(j['sent_at'] as String? ?? '') ??
+            DateTime.tryParse(j['created_at'] as String? ?? '') ??
+            DateTime.now())
+        .toLocal(),
+  );
+}
+
+class InboxThread {
+  final int leadId;
+  final String leadName, phone, status;
+  final String? ownerName, lastAccountLabel;
+  final int? lastAccountId;
+  final int unread;
+  final ReplyWindow window;
+  final List<InboxMessage> messages;
+
+  const InboxThread({
+    required this.leadId, required this.leadName, this.phone = '', this.status = '',
+    this.ownerName, this.lastAccountId, this.lastAccountLabel, this.unread = 0,
+    this.window = const ReplyWindow(), this.messages = const [],
+  });
+
+  factory InboxThread.fromJson(Map<String, dynamic> j) {
+    final lead = Map<String, dynamic>.from(j['lead'] as Map? ?? const {});
+    return InboxThread(
+      leadId: lead['id'] as int,
+      leadName: lead['name'] as String? ?? '',
+      phone: lead['phone'] as String? ?? '',
+      status: lead['status'] as String? ?? '',
+      ownerName: lead['owner_name'] as String?,
+      lastAccountId: j['last_account_id'] as int?,
+      lastAccountLabel: j['last_account_label'] as String?,
+      unread: j['unread'] as int? ?? 0,
+      window: ReplyWindow.fromJson(j['window'] as Map<String, dynamic>?),
+      messages: [
+        for (final m in (j['messages'] as List? ?? const []))
+          InboxMessage.fromJson(Map<String, dynamic>.from(m as Map)),
+      ],
+    );
+  }
+}

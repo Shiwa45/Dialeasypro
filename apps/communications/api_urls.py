@@ -12,6 +12,7 @@ from apps.communications.views import (
     WhatsAppAccountMakeDefaultView, WhatsAppAccountVerifyTokenView, WhatsAppSendersView,
     WhatsAppAccountMetaNumbersView,
     WhatsAppVerifyTokenView, WhatsAppConversationListView,
+    WhatsAppInboxView, WhatsAppInboxSummaryView, WhatsAppInboxThreadView, WhatsAppInboxReadView,
     CampaignAudiencePreviewView,
 )
 
@@ -30,6 +31,11 @@ urlpatterns = [
     path("whatsapp/accounts/<int:pk>/meta-numbers/", WhatsAppAccountMetaNumbersView.as_view(),
          name="api_wa_account_meta_numbers"),
     path("whatsapp/senders/", WhatsAppSendersView.as_view(), name="api_wa_senders"),
+    # The inbox: leads who have written in, and what is unread.
+    path("whatsapp/inbox/", WhatsAppInboxView.as_view(), name="api_wa_inbox"),
+    path("whatsapp/inbox/summary/", WhatsAppInboxSummaryView.as_view(), name="api_wa_inbox_summary"),
+    path("whatsapp/inbox/<int:lead_id>/", WhatsAppInboxThreadView.as_view(), name="api_wa_inbox_thread"),
+    path("whatsapp/inbox/<int:lead_id>/read/", WhatsAppInboxReadView.as_view(), name="api_wa_inbox_read"),
     path("whatsapp/conversations/", WhatsAppConversationListView.as_view(), name="api_wa_conversations"),
     path("whatsapp/templates/", WhatsAppTemplateListView.as_view(), name="api_wa_templates"),
     path("whatsapp/templates/<int:pk>/", WhatsAppTemplateDetailView.as_view(), name="api_wa_template_detail"),

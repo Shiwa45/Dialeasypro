@@ -917,6 +917,12 @@ def process_message(message: InboundMessage, config, webhook_log=None) -> Proces
 
     _notify(lead, conversation, message, is_new_lead=lead_created)
 
+    # The WhatsApp inbox: badge, live refresh, and the owner's notification.
+    if msg_created:
+        from apps.communications import inbox
+
+        inbox.message_arrived(lead, message.text or f"[{message.message_type}]", is_new_lead=lead_created)
+
     # Workflows (keyword auto-replies and the like) — only for a message
     # stored now, never for a redelivery.
     if msg_created:

@@ -231,6 +231,41 @@ class CommsService {
   }
 }
 
+// ─── WHATSAPP INBOX ─────────────────────────────────────────
+/// Customers who have written in on WhatsApp. Scoped server-side: an agent
+/// sees the conversations on their own leads.
+class InboxService {
+  InboxService._();
+  static final instance = InboxService._();
+
+  Future<List<InboxConversation>> list({bool unreadOnly = false, String search = '', int page = 1}) async {
+    final r = await _dio.get('/comms/whatsapp/inbox/', queryParameters: {
+      if (unreadOnly) 'unread': 'true',
+      if (search.trim().isNotEmpty) 'q': search.trim(),
+      'page': page,
+      'page_size': 30,
+    });
+    final results = (r.data['results'] as List?) ?? const [];
+    return results.map((e) => InboxConversation.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  /// Conversations with unread messages (for the badge).
+  Future<int> unreadConversations() async {
+    final r = await _dio.get('/comms/whatsapp/inbox/summary/');
+    return (r.data['unread_conversations'] as int?) ?? 0;
+  }
+
+  Future<InboxThread> thread(int leadId) async {
+    final r = await _dio.get('/comms/whatsapp/inbox/$leadId/');
+    return InboxThread.fromJson(Map<String, dynamic>.from(r.data as Map));
+  }
+
+  /// The thread is on screen: clears its unread messages for the team.
+  Future<void> markRead(int leadId) async {
+    await _dio.post('/comms/whatsapp/inbox/$leadId/read/');
+  }
+}
+
 // ─── REPORTS ────────────────────────────────────────────────
 class ReportsService {
   ReportsService._();

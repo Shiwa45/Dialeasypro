@@ -24,6 +24,8 @@ import 'features/dialer/dialer_state.dart';
 import 'features/dialer/queue_starter_screen.dart';
 import 'features/features_provider.dart';
 import 'features/hrms/my_work_screen.dart';
+import 'features/inbox/inbox_screen.dart';
+import 'features/inbox/inbox_thread_screen.dart';
 import 'features/leads/followups_screen.dart';
 import 'features/leads/lead_detail_screen.dart';
 import 'features/leads/lead_form_screen.dart';
@@ -223,6 +225,12 @@ final _routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/leads/:id/whatsapp',
         builder: (_, s) => WhatsAppSendScreen(leadId: int.parse(s.pathParameters['id']!)),
+      ),
+      // WhatsApp inbox. Like WhatsApp itself, it opens on a break.
+      GoRoute(path: '/inbox', builder: (_, __) => const InboxScreen()),
+      GoRoute(
+        path: '/inbox/:id',
+        builder: (_, s) => InboxThreadScreen(leadId: int.parse(s.pathParameters['id']!)),
       ),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
       GoRoute(path: '/followups', builder: (_, __) => const FollowupsScreen()),

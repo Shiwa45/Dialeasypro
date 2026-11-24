@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/colors.dart';
+import '../inbox/inbox_button.dart';
 import '../notifications/notification_bell.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/brand.dart';
@@ -50,6 +51,7 @@ class DashboardScreen extends ConsumerWidget {
                 BrandWordmark(size: 19),
               ]),
               actions: [
+                const InboxButton(),
                 const NotificationBell(),
                 Padding(
                   padding: const EdgeInsets.only(right: 12, top: 8, bottom: 8),

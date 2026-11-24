@@ -594,6 +594,12 @@ class WhatsAppMessage(TimeStampedModel):
     read_at = models.DateTimeField(null=True, blank=True)
     error_message = models.CharField(max_length=500, blank=True, default="")
 
+    # Inbox: when someone in the CRM opened an inbound message. `read_at` is
+    # the customer reading OUR message (a provider receipt); this is the other
+    # way round. Null on an inbound message = unread in the inbox. Shared by
+    # the team: once anyone opens the thread it is read for everyone.
+    seen_at = models.DateTimeField(null=True, blank=True)
+
     # Media attachment
     media_url = models.URLField(blank=True, default="")
 
@@ -630,6 +636,7 @@ class WhatsAppMessage(TimeStampedModel):
             models.Index(fields=["lead", "created_at"]),
             models.Index(fields=["status", "created_at"]),
             models.Index(fields=["conversation", "wa_timestamp"]),
+            models.Index(fields=["lead", "direction", "seen_at"], name="wa_msg_inbox_unread"),
         ]
 
     def __str__(self):

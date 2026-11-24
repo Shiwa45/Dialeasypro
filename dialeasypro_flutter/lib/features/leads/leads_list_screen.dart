@@ -5,6 +5,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/colors.dart';
+import '../inbox/inbox_button.dart';
 import '../../core/utils/utils.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/models/models.dart';
@@ -139,6 +140,7 @@ class _LeadsListScreenState extends ConsumerState<LeadsListScreen> {
                 : const Text('Leads'),
         actions: [
           if (!_selectMode) ...[
+            if (!_showSearch) const InboxButton(),
             IconButton(
               icon: Icon(_showSearch ? Icons.close : Icons.search, color: AppColors.black),
               onPressed: () {

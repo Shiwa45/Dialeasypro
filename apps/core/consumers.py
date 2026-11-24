@@ -223,6 +223,21 @@ class AgentMonitorConsumer(AsyncJsonWebsocketConsumer):
         """Push system-level alerts to admin dashboard."""
         await self.send_json(event)
 
+    # The WhatsApp webhooks broadcast these to monitors too. A group message
+    # with no handler raises in Channels and drops the socket, so every
+    # inbound WhatsApp message was disconnecting the Live Agents screen.
+    async def new_lead(self, event):
+        """A lead was created (e.g. from a Click-to-WhatsApp ad)."""
+        await self.send_json(event)
+
+    async def message_received(self, event):
+        """A customer wrote in on WhatsApp."""
+        await self.send_json(event)
+
+    async def whatsapp_inbox(self, event):
+        """The WhatsApp inbox changed — refresh it and its badge."""
+        await self.send_json(event)
+
 
 class NotificationConsumer(AsyncJsonWebsocketConsumer):
     """
@@ -307,6 +322,10 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
 
     async def message_received(self, event):
         """WhatsApp/email/SMS reply received."""
+        await self.send_json(event)
+
+    async def whatsapp_inbox(self, event):
+        """A customer wrote on WhatsApp — refresh the inbox and its badge."""
         await self.send_json(event)
 
     async def system_alert(self, event):

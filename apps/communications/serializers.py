@@ -268,14 +268,15 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
     lead_name = serializers.CharField(source="lead.name", read_only=True)
     sent_by_name = serializers.CharField(source="sent_by.name", read_only=True)
     account_label = serializers.CharField(source="account.sender_label", read_only=True, default=None)
+    template_name = serializers.CharField(source="template.name", read_only=True, default=None)
 
     class Meta:
         model = WhatsAppMessage
         fields = [
             "id", "lead", "lead_name", "sent_by", "sent_by_name",
-            "direction", "message_type", "content", "template",
-            "status", "sent_at", "delivered_at", "read_at",
-            "error_message", "created_at", "account", "account_label",
+            "direction", "message_type", "content", "template", "template_name",
+            "status", "sent_at", "delivered_at", "read_at", "seen_at",
+            "error_message", "created_at", "account", "account_label", "media_url",
         ]
         read_only_fields = ["id", "direction", "status", "sent_at", "created_at"]
 

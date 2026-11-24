@@ -141,6 +141,7 @@ class _Row extends StatelessWidget {
         'followup_due' => (Icons.schedule, AppColors.warm),
         'followup_scheduled' => (Icons.event_available, AppColors.brand),
         'lead_assigned' => (Icons.person_add_alt, AppColors.visit),
+        'whatsapp_reply' => (Icons.chat, AppColors.won),
         _ => (Icons.info_outline, AppColors.text2),
       };
 

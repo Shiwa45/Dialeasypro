@@ -906,21 +906,35 @@ class WhatsAppAccountMetaNumbersView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         version = config.graph_api_version or getattr(settings, "META_GRAPH_API_VERSION", "v25.0")
-        try:
+
+        def ask(fields):
             resp = requests.get(
                 f"https://graph.facebook.com/{version}/{waba}/phone_numbers",
-                params={"fields": "id,display_phone_number,verified_name,quality_rating,"
-                                  "code_verification_status,status"},
+                params={"fields": fields},
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=10,
             )
-            body = resp.json() if resp.content else {}
+            return resp, (resp.json() if resp.content else {})
+
+        try:
+            resp, body = ask("id,display_phone_number,verified_name,quality_rating,code_verification_status,status")
+            if "error" in body:
+                # Some tokens may read the numbers but not every field of them
+                # (Meta answers #200 / #100 for the whole call): ask for the basics.
+                resp, body = ask("id,display_phone_number,verified_name")
         except (requests.RequestException, ValueError) as exc:
             logger.warning("[WA] Listing WABA numbers failed for account %s: %s", config.pk, exc)
             return Response({"error": "meta_unreachable", "message": "Could not reach Meta. Try again."},
                             status=status.HTTP_502_BAD_GATEWAY)
         if resp.status_code >= 400 or "error" in body:
-            message = (body.get("error") or {}).get("message") or f"Meta answered {resp.status_code}."
+            err = body.get("error") or {}
+            message = err.get("message") or f"Meta answered {resp.status_code}."
+            if err.get("code") in (10, 200, 100):
+                message = (
+                    "Meta won't list this account's numbers for the saved access token — it needs the "
+                    "whatsapp_business_management permission on this WhatsApp Business Account "
+                    f"(Meta said: {message})"
+                )
             return Response({"error": "meta_error", "message": message}, status=status.HTTP_502_BAD_GATEWAY)
 
         connected = {
@@ -1133,3 +1147,143 @@ class WhatsAppConversationListView(generics.ListAPIView):
             queryset = queryset.filter(meta_campaign_id=campaign_id)
 
         return queryset.order_by("-last_message_at", "-created_at")
+
+
+# ------------------------------------------------------------
+# WhatsApp inbox — every lead that has written in, with what is unread.
+# The rules live in apps/communications/inbox.py; these views only shape it.
+# ------------------------------------------------------------
+
+def _inbox_row(lead, accounts):
+    from apps.communications import inbox
+
+    account = accounts.get(lead.wa_last_account)
+    text = lead.wa_last_text or ""
+    if not text and lead.wa_last_template:
+        text = f"Template: {lead.wa_last_template}"
+    if not text and lead.wa_last_type and lead.wa_last_type != "text":
+        text = f"[{lead.wa_last_type}]"
+    return {
+        "lead_id": lead.pk,
+        "lead_name": lead.name,
+        "phone": lead.phone,
+        "status": lead.status,
+        "owner_id": lead.assigned_to_id,
+        "owner_name": getattr(lead.assigned_to, "name", None),
+        "unread": lead.wa_unread,
+        "last_message": {
+            "text": text[:160],
+            "direction": lead.wa_last_direction,
+            "type": lead.wa_last_type,
+            "status": lead.wa_last_status,
+            "at": lead.wa_last_at,
+            "account_id": lead.wa_last_account,
+            "account_label": account.sender_label if account else None,
+        },
+        "last_inbound_at": lead.wa_last_inbound_at,
+        "window": inbox.window(lead.wa_last_inbound_at),
+    }
+
+
+class WhatsAppInboxView(generics.GenericAPIView):
+    """
+    GET /api/v1/comms/whatsapp/inbox/?unread=1&mine=1&unassigned=1&agent=&account=&q=
+
+    Leads who have written in on WhatsApp, newest conversation first. Each
+    person sees the conversations on leads they may see (agents: their own).
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+    pagination_class = StandardResultsSetPagination
+
+    def get(self, request):
+        from apps.communications import inbox
+
+        page = self.paginate_queryset(inbox.conversations(request.user, request.query_params))
+        accounts = {a.pk: a for a in WhatsAppConfig.objects.all()}
+        return self.get_paginated_response([_inbox_row(lead, accounts) for lead in page])
+
+
+class WhatsAppInboxSummaryView(APIView):
+    """GET /api/v1/comms/whatsapp/inbox/summary/ — unread totals for the badge."""
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def get(self, request):
+        from apps.communications import inbox
+
+        return Response(inbox.summary(request.user))
+
+
+def _inbox_lead(request, lead_id):
+    from apps.leads.views import leads_visible_to
+
+    return leads_visible_to(request.user).select_related("assigned_to").filter(pk=lead_id).first()
+
+
+class WhatsAppInboxThreadView(APIView):
+    """
+    GET /api/v1/comms/whatsapp/inbox/{lead_id}/
+
+    One conversation: the lead, whether free text can still be sent, and the
+    newest messages (oldest first, for reading top to bottom). Reading it does
+    not mark it read — the client posts to read/ when the thread is on screen.
+    """
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def get(self, request, lead_id):
+        from django.db.models import Max
+
+        from apps.communications import inbox
+
+        lead = _inbox_lead(request, lead_id)
+        if lead is None:
+            return Response({"error": "lead_not_found"}, status=status.HTTP_404_NOT_FOUND)
+
+        messages = list(
+            WhatsAppMessage.objects.filter(lead=lead)
+            .select_related("sent_by", "template", "account")
+            .order_by("-created_at")[:inbox.THREAD_LIMIT]
+        )
+        messages.reverse()
+        last_inbound = WhatsAppMessage.objects.filter(lead=lead, direction="inbound").aggregate(
+            at=Max("created_at"))["at"]
+        last_account = next((m.account for m in reversed(messages) if m.account_id), None)
+        return Response({
+            "lead": {
+                "id": lead.pk, "name": lead.name, "phone": lead.phone, "status": lead.status,
+                "source": lead.source, "city": lead.city,
+                "owner_id": lead.assigned_to_id,
+                "owner_name": getattr(lead.assigned_to, "name", None),
+            },
+            "window": inbox.window(last_inbound),
+            "unread": inbox.unread_count(lead),
+            "last_account_id": last_account.pk if last_account else None,
+            "last_account_label": last_account.sender_label if last_account else None,
+            "messages": WhatsAppMessageSerializer(messages, many=True).data,
+        })
+
+
+class WhatsAppInboxReadView(APIView):
+    """POST /api/v1/comms/whatsapp/inbox/{lead_id}/read/ — the thread was opened."""
+
+    permission_classes = [IsAuthenticatedAgent]
+
+    def post(self, request, lead_id):
+        from apps.communications import inbox
+
+        lead = _inbox_lead(request, lead_id)
+        if lead is None:
+            return Response({"error": "lead_not_found"}, status=status.HTTP_404_NOT_FOUND)
+        cleared = inbox.mark_seen(lead)
+        if cleared:
+            # The owner's "wrote on WhatsApp" notification is answered too.
+            from apps.authentication.models import Notification, NotificationKind
+
+            from django.utils import timezone
+
+            Notification.objects.filter(
+                lead_id_ref=lead.pk, kind=NotificationKind.WHATSAPP_REPLY, is_read=False,
+            ).update(is_read=True, read_at=timezone.now())
+        return Response({"cleared": cleared, **inbox.summary(request.user)})

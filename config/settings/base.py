@@ -335,7 +335,14 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         "anon": "20/hour",
-        "user": "1000/hour",
+        # Per signed-in person, across every tab and phone they have open.
+        # It is a guard against runaway clients, not a quota: 1000/hour was
+        # used up by ordinary work — an agent on auto-dial (heartbeat every
+        # 25 s, notifications, several requests per call) or an admin with a
+        # couple of CRM tabs polling — and then EVERY screen failed for the
+        # rest of the hour. Per minute also keeps the throttle's history in
+        # Redis short (at most 300 timestamps per person instead of 1000).
+        "user": "300/minute",
         "login": "10/minute",
         # Refreshing needs a token we signed, so there is nothing to guess;
         # the limit is about runaway clients. Per IP, and an office behind one

@@ -63,13 +63,15 @@ class HealthCheckView(View):
         # ---- Check PostgreSQL ----------------------------------
         db_status = self._check_database()
         services["database"] = db_status
-        if db_status != "ok":
+        # The checks answer "ok (3ms)", so an exact "ok" never matched and the
+        # endpoint reported "degraded" (503) while everything was fine.
+        if not db_status.startswith("ok"):
             overall_healthy = False
 
         # ---- Check Redis --------------------------------------
         redis_status = self._check_redis()
         services["redis"] = redis_status
-        if redis_status != "ok":
+        if not redis_status.startswith("ok"):
             overall_healthy = False
 
         # ---- Check Celery (non-critical — don't fail health) --

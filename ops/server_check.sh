@@ -1,0 +1,129 @@
+#!/bin/bash
+# ============================================================
+# DialSathi server health check — READ ONLY.
+# Changes nothing: no restarts, no deletes, no config edits.
+# Prints no passwords, keys or tokens.
+#
+# Run from PowerShell (see ops/README.txt):
+#   Get-Content -Raw .\ops\server_check.sh | ssh <user>@<server> "tr -d '\r' | bash -s" | Out-File -Encoding utf8 .\ops\server_report.txt
+# ============================================================
+set +e
+SINCE="${SINCE:-6h}"
+
+if docker ps >/dev/null 2>&1; then D="docker"; else D="sudo -n docker"; fi
+sec(){ echo; echo "==================== $* ===================="; }
+
+sec "WHEN / HOST"
+date; hostname; uptime
+
+sec "CPU / MEMORY / DISK"
+echo "cpus: $(nproc)"
+grep -m1 "model name" /proc/cpuinfo
+free -h
+df -h / /var/lib/docker 2>/dev/null | sort -u
+echo; echo "swap:"; swapon --show 2>/dev/null || echo "none"
+
+sec "LOAD RIGHT NOW (top 15 processes by CPU)"
+ps -eo pid,pcpu,pmem,rss,etime,comm --sort=-pcpu | head -16
+
+sec "OUT-OF-MEMORY KILLS (kernel log)"
+( journalctl -k --since "-3 days" 2>/dev/null || sudo -n dmesg -T 2>/dev/null || dmesg -T 2>/dev/null ) \
+  | grep -iE "out of memory|oom-kill|killed process" | tail -20 || true
+echo "(nothing above = no OOM kills found)"
+
+sec "CONTAINERS"
+$D ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}'
+
+sec "CONTAINER RESTARTS / START TIMES / MEMORY LIMITS"
+for c in $($D ps -a --format '{{.Names}}'); do
+  $D inspect -f '{{.Name}}  restarts={{.RestartCount}}  started={{.State.StartedAt}}  oomKilled={{.State.OOMKilled}}  exit={{.State.ExitCode}}  memLimit={{.HostConfig.Memory}}' "$c"
+done
+
+sec "CONTAINER CPU / MEMORY (snapshot)"
+$D stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}'
+
+WEB=$($D ps --format '{{.Names}}' | grep -E 'web' | head -1)
+REDIS=$($D ps --format '{{.Names}}' | grep -E 'redis' | head -1)
+WORKER=$($D ps --format '{{.Names}}' | grep -E 'celery_worker|worker' | head -1)
+echo; echo "web=$WEB redis=$REDIS worker=$WORKER"
+
+sec "WEB LOG SUMMARY (last $SINCE)"
+LOG=$(mktemp)
+$D logs --since "$SINCE" "$WEB" > "$LOG" 2>&1
+echo "log lines: $(wc -l < "$LOG")"
+echo "429 Too Many Requests: $(grep -c 'Too Many Requests' "$LOG")"
+echo "500 / server errors:   $(grep -cE '"status_code": 5[0-9][0-9]|Internal Server Error' "$LOG")"
+echo "403 Forbidden:         $(grep -c 'Forbidden:' "$LOG")"
+echo "Tracebacks:            $(grep -c 'Traceback' "$LOG")"
+echo "Worker timeouts:       $(grep -c 'WORKER TIMEOUT' "$LOG")"
+echo "Worker (re)boots:      $(grep -cE 'Booting worker|Worker exiting' "$LOG")"
+echo "DB connection errors:  $(grep -ciE 'OperationalError|too many connections|could not connect' "$LOG")"
+echo "AuthDiag debug lines:  $(grep -c 'AuthDiag' "$LOG")"
+echo
+echo "--- 429s per hour ---"
+grep 'Too Many Requests' "$LOG" | grep -oE '"timestamp": "[0-9T:-]{13}' | sort | uniq -c | tail -12
+echo
+echo "--- 429s by endpoint (top 15) ---"
+grep 'Too Many Requests' "$LOG" | grep -oE 'Too Many Requests: [^"]+' | sed 's/Too Many Requests: //' | sort | uniq -c | sort -rn | head -15
+echo
+echo "--- all API requests per minute, busiest 10 minutes ---"
+grep -oE '"timestamp": "[0-9T:-]{16}' "$LOG" | sort | uniq -c | sort -rn | head -10
+echo
+echo "--- busiest endpoints (top 20) ---"
+grep -oE 'path=/[^ ]+' "$LOG" | sed 's/path=//' | sort | uniq -c | sort -rn | head -20
+echo
+echo "--- last 15 errors (not 429/403/AuthDiag) ---"
+grep -E '"level": "(ERROR|CRITICAL)"|Traceback|WORKER TIMEOUT' "$LOG" | grep -v AuthDiag | tail -15 | cut -c1-400
+echo
+echo "--- server starts in the window (deploys / crashes) ---"
+grep -nE 'Startup complete|Starting gunicorn|Listening at|Booting worker' "$LOG" | tail -12 | cut -c1-200
+rm -f "$LOG"
+
+sec "DATABASE (from inside the web container; no passwords printed)"
+$D exec "$WEB" python manage.py shell -c "
+from django.db import connection
+from django.conf import settings
+d = settings.DATABASES['default']
+print('host:', d.get('HOST'), '| CONN_MAX_AGE:', d.get('CONN_MAX_AGE'))
+with connection.cursor() as c:
+    c.execute('show max_connections'); print('max_connections:', c.fetchone()[0])
+    c.execute('select count(*) from pg_stat_activity'); print('connections now:', c.fetchone()[0])
+    c.execute(\"select state, count(*) from pg_stat_activity group by 1 order by 2 desc\"); print('by state:', c.fetchall())
+    c.execute('select pg_size_pretty(pg_database_size(current_database()))'); print('db size:', c.fetchone()[0])
+from django.conf import settings as s
+print('throttle rates:', s.REST_FRAMEWORK.get('DEFAULT_THROTTLE_RATES', {}).get('user'), '(user)')
+" 2>&1 | tail -12
+
+sec "UNAPPLIED MIGRATIONS (shared + each tenant)"
+$D exec "$WEB" python manage.py shell -c "
+from io import StringIO
+from django.core.management import call_command
+from django_tenants.utils import get_tenant_model, schema_context
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+def pending(schema):
+    with schema_context(schema):
+        ex = MigrationExecutor(connection)
+        return [f'{m.app_label}.{m.name}' for m, _ in ex.migration_plan(ex.loader.graph.leaf_nodes())]
+print('public:', pending('public') or 'up to date')
+for t in get_tenant_model().objects.exclude(schema_name='public'):
+    p = pending(t.schema_name)
+    print(f'{t.schema_name}:', p or 'up to date')
+" 2>&1 | tail -40
+
+sec "REDIS"
+$D exec "$REDIS" sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning info memory | grep -E "used_memory_human|maxmemory_human|maxmemory_policy"; redis-cli -a "$REDIS_PASSWORD" --no-auth-warning info clients | grep connected_clients; redis-cli -a "$REDIS_PASSWORD" --no-auth-warning dbsize' 2>&1
+
+sec "CELERY WORKER (last $SINCE)"
+$D logs --since "$SINCE" "$WORKER" 2>&1 | grep -ciE "error|exception" | sed 's/^/errors: /'
+$D logs --since "$SINCE" "$WORKER" 2>&1 | grep -E "ERROR|Exception" | tail -5 | cut -c1-300
+
+sec "PUBLIC PORTS (what the internet can reach)"
+( ss -tlnp 2>/dev/null || sudo -n ss -tlnp 2>/dev/null ) | awk 'NR==1 || /0.0.0.0|\[::\]|\*:/' | head -20
+
+sec "NGINX ERRORS (last 30)"
+( sudo -n tail -n 30 /var/log/nginx/error.log 2>/dev/null || tail -n 30 /var/log/nginx/error.log 2>/dev/null ) | cut -c1-300
+echo; echo "--- nginx 5xx in access log (last 2000 lines) ---"
+( sudo -n tail -n 2000 /var/log/nginx/access.log 2>/dev/null || tail -n 2000 /var/log/nginx/access.log 2>/dev/null ) | awk '{print $9}' | grep -E '^5' | sort | uniq -c
+
+sec "DONE"

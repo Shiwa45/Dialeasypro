@@ -35,8 +35,11 @@ class AgentJWTAuthentication(BaseAuthentication):
     def authenticate(self, request):
         auth_header = request.META.get(self.AUTH_HEADER, "")
 
-        # ---- DIAGNOSTIC LOGGING (temporary) --------------------
-        logger.warning(
+        # ---- Diagnostic logging ----------------------------------
+        # DEBUG, not WARNING: at WARNING this wrote a line for every API
+        # request (~650 lines in 15 minutes) and buried the real warnings.
+        # Turn the logger to DEBUG to see it again when tracing auth.
+        logger.debug(
             "[AuthDiag] path=%s host=%s schema=%s auth_prefix=%r "
             "x_tenant_schema=%r x_workspace_id=%r x_tenant_domain=%r ua=%r",
             request.path,

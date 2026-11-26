@@ -55,7 +55,7 @@ class _InboxThreadScreenState extends State<InboxThreadScreen> with WidgetsBindi
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _load();
-    _poll = Timer.periodic(const Duration(seconds: 8), (_) => _load());
+    _poll = Timer.periodic(const Duration(seconds: 20), (_) => _load());
   }
 
   @override

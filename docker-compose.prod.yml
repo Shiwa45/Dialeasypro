@@ -18,8 +18,11 @@ services:
       - "${REDIS_PASSWORD}"
     volumes:
       - redis_data:/data
+    # Only this server may reach Redis. Published on 0.0.0.0 it was open to
+    # the whole internet, guarded by nothing but its password. The app's
+    # containers reach it by name over the Docker network, not this port.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -43,8 +46,23 @@ services:
       - REDIS_HOST=redis
       - DB_SSLMODE=${DB_SSLMODE:-prefer}
       - PGSSLMODE=${DB_SSLMODE:-prefer}
+    # nginx on this server proxies to 127.0.0.1:8000. Published on 0.0.0.0
+    # the app was also reachable directly on :8000, around nginx and HTTPS.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    # Workers: each runs one Django request at a time, so 4 meant that four
+    # slow requests (a report, an export) stalled everyone. 6 fits this
+    # server (4 vCPU, 8 GB; ~120 MB each). --max-requests recycles a worker
+    # now and then so memory cannot creep up over days.
+    command: >
+      gunicorn config.asgi:application
+      --worker-class uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000
+      --workers ${WEB_WORKERS:-6}
+      --timeout 120
+      --graceful-timeout 30
+      --max-requests 2000
+      --max-requests-jitter 200
     volumes:
       - ./staticfiles:/app/staticfiles
       - ./mediafiles:/app/mediafiles

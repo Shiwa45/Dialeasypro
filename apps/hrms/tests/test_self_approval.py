@@ -43,11 +43,21 @@ def admin():
     return _employee("boss@x.com", AgentRole.ADMIN, "EMP-BOSS")
 
 
+def _working_day():
+    """A weekday about ten days out. "Ten days from today" on its own landed
+    on a Sunday some weeks; approval re-counts working days, found none, and
+    these tests failed for reasons that had nothing to do with them."""
+    day = timezone.localdate() + timedelta(days=10)
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return day
+
+
 def _leave(agent):
     unpaid = LeaveType.objects.get_or_create(
         name="Unpaid-T", defaults={"annual_quota_days": Decimal("0"), "is_paid": False},
     )[0]
-    start = timezone.localdate() + timedelta(days=10)
+    start = _working_day()
     return LeaveRequest.objects.create(
         employee=agent.employee, leave_type=unpaid, start_date=start, end_date=start, days=1,
     )
@@ -142,7 +152,7 @@ def test_leave_is_not_approved_twice(hr, other_hr):
     from apps.hrms.services import leave as leave_svc
 
     paid = LeaveType.objects.create(name="Casual-T", annual_quota_days=Decimal("12"), is_paid=True)
-    start = timezone.localdate() + timedelta(days=10)
+    start = _working_day()
     leave = LeaveRequest.objects.create(
         employee=hr.employee, leave_type=paid, start_date=start, end_date=start, days=1,
     )

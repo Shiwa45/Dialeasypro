@@ -28,7 +28,16 @@ from apps.leads.models import (
 # ============================================================
 
 class CustomFieldSerializer(serializers.ModelSerializer):
-    field_key = serializers.CharField(required=False, allow_blank=True)
+    """
+    A custom field as admins manage it from Settings → Custom Fields.
+
+    * The key is made from the name (unique, snake_case) unless one is given.
+    * The key and the type cannot change once the field exists — imports, the
+      app and every saved value refer to them.
+    * A dropdown needs at least one option, or it renders as an empty picker.
+    """
+
+    field_key = serializers.CharField(required=False, allow_blank=True, max_length=50)
 
     class Meta:
         model = CustomField
@@ -37,6 +46,61 @@ class CustomFieldSerializer(serializers.ModelSerializer):
             "is_active", "sort_order", "options", "placeholder",
         ]
         read_only_fields = ["id"]
+
+    def validate_name(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Give the field a name.")
+        clash = CustomField.objects.filter(name__iexact=value)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError(f'There is already a field called "{value}".')
+        return value
+
+    def validate_options(self, value):
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Options must be a list.")
+        cleaned, seen = [], set()
+        for option in value:
+            text = str(option).strip()[:100]
+            if text and text.lower() not in seen:
+                seen.add(text.lower())
+                cleaned.append(text)
+        return cleaned
+
+    def validate(self, attrs):
+        from django.utils.text import slugify
+
+        if self.instance is not None:
+            for fixed in ("field_key", "field_type"):
+                if fixed in attrs and attrs[fixed] != getattr(self.instance, fixed):
+                    label = "key" if fixed == "field_key" else "type"
+                    raise serializers.ValidationError({
+                        fixed: f"A field's {label} can't be changed once it exists. "
+                               "Switch this one off and add a new field instead.",
+                    })
+            attrs.pop("field_key", None)
+            field_type = self.instance.field_type
+        else:
+            field_type = attrs.get("field_type", "text")
+            base = slugify(attrs.get("field_key") or attrs.get("name", "")).replace("-", "_")[:50] or "field"
+            key, n = base, 2
+            while CustomField.objects.filter(field_key=key).exists():
+                key = f"{base[:46]}_{n}"
+                n += 1
+            attrs["field_key"] = key
+
+        options = attrs.get("options", None if self.instance is not None else [])
+        if field_type == "dropdown":
+            current = options if options is not None else self.instance.options
+            if not current:
+                raise serializers.ValidationError({"options": "A dropdown needs at least one option."})
+        elif options:
+            attrs["options"] = []
+        return attrs
 
 
 class CustomFieldValueSerializer(serializers.ModelSerializer):

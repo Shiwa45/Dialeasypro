@@ -14,6 +14,7 @@ LeadActivityListView         GET       /api/v1/leads/{id}/activities/
 LeadImportView               POST      /api/v1/leads/import/
 LeadImportJobDetailView      GET       /api/v1/leads/import/{id}/
 CustomFieldListView          GET/POST  /api/v1/leads/custom-fields/
+CustomFieldDetailView        GET/PATCH/DELETE /api/v1/leads/custom-fields/{id}/
 LeadDashboardStatsView       GET       /api/v1/leads/stats/
 LeadPipelineView             GET       /api/v1/leads/pipeline/
 
@@ -1173,22 +1174,73 @@ class LeadImportJobDetailView(generics.RetrieveAPIView):
 # Custom Fields
 # ============================================================
 
-class CustomFieldListView(generics.ListAPIView):
+class CustomFieldListView(generics.ListCreateAPIView):
     """
-    GET /api/v1/leads/custom-fields/  → The tenant's custom fields.
+    GET  /api/v1/leads/custom-fields/  → the workspace's active custom fields
+         (?include_inactive=1 also lists switched-off ones, for admins).
+    POST /api/v1/leads/custom-fields/  → add a field (workspace admins).
 
-    Read-only by design. These fields are the spreadsheet columns a client may
-    map an import onto, and they are configured for each client from the
-    platform's own panel — Tenants → the tenant → Import fields — not by the
-    client themselves. POST used to be open to any tenant admin.
+    Custom fields are the extra boxes on the Add Lead form and the columns an
+    import can map onto. They used to be set only from the platform panel;
+    workspace admins now manage their own, within the plan's custom-field
+    limit. The platform panel (Tenants → Import fields) still works too.
     """
 
     serializer_class = CustomFieldSerializer
     pagination_class = None  # Small finite list; return plain array
-    permission_classes = [IsAuthenticatedAgent]
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsTenantAdmin()]
+        return [IsAuthenticatedAgent()]
 
     def get_queryset(self):
-        return CustomField.objects.filter(is_active=True).order_by("sort_order")
+        qs = CustomField.objects.order_by("sort_order", "name")
+        wants_all = self.request.query_params.get("include_inactive") in ("1", "true")
+        if wants_all and _is_admin(self.request.user):
+            return qs
+        return qs.filter(is_active=True)
+
+    def perform_create(self, serializer):
+        enforce_custom_field_quota()
+        serializer.save()
+
+
+class CustomFieldDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE /api/v1/leads/custom-fields/<id>/  (workspace admins)
+
+    The key and the type are fixed once a field exists: imports, the mobile
+    app and saved values refer to the key, and a value typed as text cannot
+    be read back as a date. Rename, reorder, change options, or switch the
+    field off instead. DELETE also removes every value captured for it.
+    """
+
+    serializer_class = CustomFieldSerializer
+    permission_classes = [IsTenantAdmin]
+    queryset = CustomField.objects.all()
+
+    def perform_update(self, serializer):
+        turning_on = serializer.validated_data.get("is_active") is True and not serializer.instance.is_active
+        if turning_on:
+            enforce_custom_field_quota()
+        serializer.save()
+
+
+def _is_admin(user) -> bool:
+    return getattr(user, "role", None) == AgentRole.ADMIN or getattr(user, "is_superuser", False)
+
+
+def enforce_custom_field_quota():
+    """402 if one more ACTIVE custom field would pass the plan's limit."""
+    from apps.core.quotas import current_plan
+
+    limit = getattr(current_plan(), "custom_fields_limit", None) or None
+    if limit is None:
+        return
+    current = CustomField.objects.filter(is_active=True).count()
+    if current + 1 > limit:
+        raise PlanLimitExceededException(limit_type="custom_fields", current=current, max_allowed=limit)
 
 
 class LeadFormConfigView(APIView):

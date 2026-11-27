@@ -1,0 +1,103 @@
+"""
+TeleCRM Backend — apps/leads/api_urls.py
+
+DRF API URL patterns for the leads app.
+Mounted at: /api/v1/leads/  (in config/urls.py)
+"""
+from django.urls import path
+
+from apps.leads.views import (
+    LeadExportView,
+    AvailableQueuesView,
+    CallQueueDetailView,
+    CallQueueListCreateView,
+    CustomFieldDetailView,
+    CustomFieldListView,
+    LeadFormConfigView,
+    FollowUpCompleteView,
+    FollowUpListCreateView,
+    MyFollowUpsView,
+    LeadActivityListView,
+    LeadBatchDetailView,
+    LeadBatchDistributeView,
+    LeadBatchListView,
+    LeadBatchStatsView,
+    LeadBatchStatusView,
+    LeadBatchUnassignView,
+    LeadBulkAssignView,
+    LeadBulkDeleteView,
+    LeadDistributeView,
+    LeadFlushView,
+    LeadDashboardStatsView,
+    LeadDetailView,
+    LeadImportJobDetailView,
+    LeadImportPreviewView,
+    LeadImportView,
+    LeadListCreateView,
+    LeadNoteListCreateView,
+    LeadPipelineView,
+    LeadStatusUpdateView,
+    LeadUnassignByAgentView,
+    QueuePullNextView,
+    QueueReleaseView,
+)
+
+urlpatterns = [
+    # ---- Call Queues (defined before <int:pk>/ to avoid route clashes) ----
+    path("queues/", CallQueueListCreateView.as_view(), name="api_queue_list"),
+    path("queues/available/", AvailableQueuesView.as_view(), name="api_queue_available"),
+    path("queues/release/", QueueReleaseView.as_view(), name="api_queue_release"),
+    path("queues/<int:pk>/", CallQueueDetailView.as_view(), name="api_queue_detail"),
+    path("queues/<int:pk>/pull/", QueuePullNextView.as_view(), name="api_queue_pull"),
+
+    # ---- Lead batches --------------------------------------
+    # Declared BEFORE "<int:pk>/" — otherwise "batches" is captured by the
+    # lead-detail route and every batch request dies on an int coercion.
+    path("batches/", LeadBatchListView.as_view(), name="api_lead_batches"),
+    path("batches/distribute/", LeadBatchDistributeView.as_view(), name="api_lead_batch_distribute"),
+    path("batches/<int:pk>/", LeadBatchDetailView.as_view(), name="api_lead_batch_detail"),
+    path("batches/<int:pk>/status/", LeadBatchStatusView.as_view(), name="api_lead_batch_status"),
+    path("batches/<int:pk>/unassign/", LeadBatchUnassignView.as_view(), name="api_lead_batch_unassign"),
+    path("batches/<int:pk>/stats/", LeadBatchStatsView.as_view(), name="api_lead_batch_stats"),
+
+    # ---- Lead CRUD -----------------------------------------
+    path("", LeadListCreateView.as_view(), name="api_lead_list"),
+    path("<int:pk>/", LeadDetailView.as_view(), name="api_lead_detail"),
+    path("<int:pk>/status/", LeadStatusUpdateView.as_view(), name="api_lead_status"),
+
+    # ---- Bulk operations -----------------------------------
+    path("bulk-assign/", LeadBulkAssignView.as_view(), name="api_lead_bulk_assign"),
+    path("bulk-delete/", LeadBulkDeleteView.as_view(), name="api_lead_bulk_delete"),
+    path("distribute/", LeadDistributeView.as_view(), name="api_lead_distribute"),
+    path("flush/", LeadFlushView.as_view(), name="api_lead_flush"),
+    path("unassign-by-agent/", LeadUnassignByAgentView.as_view(), name="api_lead_unassign_by_agent"),
+
+    # ---- Follow-ups ----------------------------------------
+    # Before the <int:lead_id> routes: "followups" is not an integer, so it
+    # would not actually collide, but keeping the literal first makes the
+    # ordering obvious to the next person adding a route here.
+    path("followups/mine/", MyFollowUpsView.as_view(), name="api_my_followups"),
+    path("<int:lead_id>/followups/", FollowUpListCreateView.as_view(), name="api_followup_list"),
+    path("followups/<int:pk>/complete/", FollowUpCompleteView.as_view(), name="api_followup_complete"),
+
+    # ---- Notes & Activity ----------------------------------
+    path("<int:lead_id>/notes/", LeadNoteListCreateView.as_view(), name="api_lead_notes"),
+    path("<int:lead_id>/activities/", LeadActivityListView.as_view(), name="api_lead_activities"),
+
+    # ---- Import --------------------------------------------
+    path("import/preview/", LeadImportPreviewView.as_view(), name="api_lead_import_preview"),
+    path("import/", LeadImportView.as_view(), name="api_lead_import"),
+    path("import/<uuid:pk>/", LeadImportJobDetailView.as_view(), name="api_lead_import_status"),
+
+    # ---- Custom Fields -------------------------------------
+    path("custom-fields/", CustomFieldListView.as_view(), name="api_custom_fields"),
+    path("custom-fields/<int:pk>/", CustomFieldDetailView.as_view(), name="api_custom_field_detail"),
+    path("form-config/", LeadFormConfigView.as_view(), name="api_lead_form_config"),
+
+    # ---- Export -------------------------------------------
+    path("export/", LeadExportView.as_view(), name="api_lead_export"),
+
+    # ---- Dashboard & Pipeline ------------------------------
+    path("stats/", LeadDashboardStatsView.as_view(), name="api_lead_stats"),
+    path("pipeline/", LeadPipelineView.as_view(), name="api_lead_pipeline"),
+]

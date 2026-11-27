@@ -11,6 +11,7 @@ from apps.leads.views import (
     AvailableQueuesView,
     CallQueueDetailView,
     CallQueueListCreateView,
+    CustomFieldDetailView,
     CustomFieldListView,
     LeadFormConfigView,
     FollowUpCompleteView,
@@ -90,6 +91,7 @@ urlpatterns = [
 
     # ---- Custom Fields -------------------------------------
     path("custom-fields/", CustomFieldListView.as_view(), name="api_custom_fields"),
+    path("custom-fields/<int:pk>/", CustomFieldDetailView.as_view(), name="api_custom_field_detail"),
     path("form-config/", LeadFormConfigView.as_view(), name="api_lead_form_config"),
 
     # ---- Export -------------------------------------------

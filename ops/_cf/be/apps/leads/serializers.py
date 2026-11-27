@@ -1,0 +1,908 @@
+"""
+TeleCRM Backend — apps/leads/serializers.py
+
+DRF serializers for all lead-related models.
+"""
+from django.utils import timezone
+from rest_framework import serializers
+
+from apps.authentication.models import Agent
+from apps.core.constants import AgentRole, FollowUpType, LeadPriority, LeadSource, LeadStatus
+from apps.core.utils import normalize_indian_phone
+from apps.leads.models import (
+    CallQueue,
+    CallQueueMembership,
+    CustomField,
+    CustomFieldValue,
+    FollowUp,
+    Lead,
+    LeadActivity,
+    LeadBatch,
+    LeadImportJob,
+    LeadNote,
+)
+
+
+# ============================================================
+# Custom Field Serializers
+# ============================================================
+
+class CustomFieldSerializer(serializers.ModelSerializer):
+    """
+    A custom field as admins manage it from Settings → Custom Fields.
+
+    * The key is made from the name (unique, snake_case) unless one is given.
+    * The key and the type cannot change once the field exists — imports, the
+      app and every saved value refer to them.
+    * A dropdown needs at least one option, or it renders as an empty picker.
+    """
+
+    field_key = serializers.CharField(required=False, allow_blank=True, max_length=50)
+
+    class Meta:
+        model = CustomField
+        fields = [
+            "id", "name", "field_key", "field_type", "is_required",
+            "is_active", "sort_order", "options", "placeholder",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_name(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Give the field a name.")
+        clash = CustomField.objects.filter(name__iexact=value)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError(f'There is already a field called "{value}".')
+        return value
+
+    def validate_options(self, value):
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Options must be a list.")
+        cleaned, seen = [], set()
+        for option in value:
+            text = str(option).strip()[:100]
+            if text and text.lower() not in seen:
+                seen.add(text.lower())
+                cleaned.append(text)
+        return cleaned
+
+    def validate(self, attrs):
+        from django.utils.text import slugify
+
+        if self.instance is not None:
+            for fixed in ("field_key", "field_type"):
+                if fixed in attrs and attrs[fixed] != getattr(self.instance, fixed):
+                    label = "key" if fixed == "field_key" else "type"
+                    raise serializers.ValidationError({
+                        fixed: f"A field's {label} can't be changed once it exists. "
+                               "Switch this one off and add a new field instead.",
+                    })
+            attrs.pop("field_key", None)
+            field_type = self.instance.field_type
+        else:
+            field_type = attrs.get("field_type", "text")
+            base = slugify(attrs.get("field_key") or attrs.get("name", "")).replace("-", "_")[:50] or "field"
+            key, n = base, 2
+            while CustomField.objects.filter(field_key=key).exists():
+                key = f"{base[:46]}_{n}"
+                n += 1
+            attrs["field_key"] = key
+
+        options = attrs.get("options", None if self.instance is not None else [])
+        if field_type == "dropdown":
+            current = options if options is not None else self.instance.options
+            if not current:
+                raise serializers.ValidationError({"options": "A dropdown needs at least one option."})
+        elif options:
+            attrs["options"] = []
+        return attrs
+
+
+class CustomFieldValueSerializer(serializers.ModelSerializer):
+    field_key = serializers.CharField(source="field.field_key", read_only=True)
+    field_name = serializers.CharField(source="field.name", read_only=True)
+
+    class Meta:
+        model = CustomFieldValue
+        fields = ["field", "field_key", "field_name", "value"]
+
+
+# ============================================================
+# Lead Serializers
+# ============================================================
+
+class FollowUpSerializer(serializers.ModelSerializer):
+    followup_type_display = serializers.CharField(source="get_followup_type_display", read_only=True)
+    assigned_to_name = serializers.CharField(source="assigned_to.name", read_only=True)
+    is_overdue = serializers.SerializerMethodField()
+    # Who the follow-up is with. A reminder that says "follow up with lead 54"
+    # is useless on a phone's lock screen, and the mobile app had no way to
+    # resolve the name without a request per follow-up.
+    lead_name = serializers.CharField(source="lead.name", read_only=True)
+    lead_phone = serializers.CharField(source="lead.phone", read_only=True)
+
+    class Meta:
+        model = FollowUp
+        fields = [
+            "id", "lead", "lead_name", "lead_phone",
+            "assigned_to", "assigned_to_name",
+            "followup_type", "followup_type_display",
+            "scheduled_at", "notes", "is_completed",
+            "completed_at", "completion_notes", "is_overdue",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at", "completed_at"]
+
+    def get_is_overdue(self, obj):
+        return not obj.is_completed and obj.scheduled_at < timezone.now()
+
+
+from datetime import timedelta
+
+
+class FollowUpCreateSerializer(serializers.ModelSerializer):
+    """Used when creating a new follow-up from a lead detail view."""
+
+    assigned_to = serializers.PrimaryKeyRelatedField(
+        queryset=Agent.objects.all(), required=False, allow_null=True
+    )
+
+    class Meta:
+        model = FollowUp
+        fields = ["followup_type", "scheduled_at", "notes", "assigned_to"]
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        if "assigned_to" in data and (data["assigned_to"] in (0, "0", "", None)):
+            data["assigned_to"] = None
+        return super().to_internal_value(data)
+
+    def validate_scheduled_at(self, value):
+        if value < (timezone.now() - timedelta(minutes=5)):
+            raise serializers.ValidationError(
+                "Follow-up time must be in the future."
+            )
+        return value
+
+
+class LeadNoteSerializer(serializers.ModelSerializer):
+    agent_name = serializers.CharField(source="agent.name", read_only=True)
+    agent_photo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LeadNote
+        fields = [
+            "id", "lead", "agent", "agent_name", "agent_photo",
+            "content", "is_pinned", "attachment", "created_at",
+        ]
+        read_only_fields = ["id", "agent", "created_at"]
+
+    def get_agent_photo(self, obj):
+        if obj.agent and obj.agent.profile_photo:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.agent.profile_photo.url)
+        return None
+
+
+class LeadActivitySerializer(serializers.ModelSerializer):
+    performed_by_name = serializers.CharField(source="performed_by.name", read_only=True)
+
+    class Meta:
+        model = LeadActivity
+        fields = [
+            "id", "activity_type", "description", "performed_by",
+            "performed_by_name", "meta", "timestamp",
+        ]
+        read_only_fields = ["id", "timestamp"]
+
+
+class LeadListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for list views — no nested objects."""
+
+    assigned_to_name = serializers.CharField(source="assigned_to.name", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    priority_display = serializers.CharField(source="get_priority_display", read_only=True)
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
+    followup_overdue = serializers.BooleanField(read_only=True)
+    phone = serializers.SerializerMethodField()
+    batch_label = serializers.SerializerMethodField()
+    batch_number = serializers.IntegerField(source="batch.number", read_only=True, default=None)
+    last_disposition_name = serializers.CharField(source="last_disposition.name", read_only=True, default=None)
+    last_disposition_category = serializers.CharField(
+        source="last_disposition.category", read_only=True, default=None,
+    )
+    # The lead's most recent note (a note on the lead, or the notes saved
+    # with a call's outcome) — the list's Notes column. Filled from the
+    # annotations of views.with_latest_note; absent elsewhere.
+    latest_note = serializers.SerializerMethodField()
+    latest_note_at = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Lead
+        fields = [
+            "id", "name", "phone", "email", "city",
+            "status", "status_display", "priority", "priority_display",
+            "source", "source_display", "score",
+            "assigned_to", "assigned_to_name",
+            "next_followup_at", "followup_overdue",
+            "last_contacted_at", "contact_count",
+            "deal_value", "pipeline_stage",
+            "campaign_name", "ad_name",
+            "batch", "batch_number", "batch_label",
+            "tags", "is_dnd", "created_at",
+            "last_disposition", "last_disposition_name", "last_disposition_category",
+            "last_call_connected", "last_dialed_at", "last_connected_at",
+            "dial_attempts", "connected_calls",
+            "latest_note", "latest_note_at",
+        ]
+
+    @staticmethod
+    def _latest_note(obj):
+        note = (getattr(obj, "_note_text", None), getattr(obj, "_note_at", None))
+        call = (getattr(obj, "_call_note_text", None), getattr(obj, "_call_note_at", None))
+        candidates = [c for c in (note, call) if c[0]]
+        if not candidates:
+            return None, None
+        return max(candidates, key=lambda c: c[1] or timezone.now().replace(year=1970))
+
+    def get_latest_note(self, obj) -> str | None:
+        text, _ = self._latest_note(obj)
+        return text.strip()[:300] if text else None
+
+    def get_latest_note_at(self, obj):
+        _, at = self._latest_note(obj)
+        return at.isoformat() if at else None
+
+    def get_batch_label(self, obj) -> str | None:
+        # `label` is a property, so it cannot be reached with a source path.
+        return obj.batch.label if obj.batch_id and obj.batch else None
+
+    def get_phone(self, obj):
+        """
+        The full number, for anyone who may see the lead at all.
+
+        It was masked (XXXXXX3210) for everyone but admins and managers, which
+        bought nothing: the list is already scoped to the caller's own leads
+        (leads_visible_to), the lead's detail screen showed the number in
+        full, and the agent dials it. The home screen and the Leads screen
+        just showed a number nobody could read. Logs and the Django admin
+        still mask it.
+        """
+        return obj.phone
+
+
+class LeadDetailSerializer(serializers.ModelSerializer):
+    """Full serializer for lead detail view — includes nested data."""
+
+    assigned_to_name = serializers.CharField(source="assigned_to.name", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    priority_display = serializers.CharField(source="get_priority_display", read_only=True)
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
+    followups = FollowUpSerializer(many=True, read_only=True)
+    notes = LeadNoteSerializer(many=True, read_only=True)
+    activities = LeadActivitySerializer(many=True, read_only=True)
+    custom_field_values = CustomFieldValueSerializer(many=True, read_only=True)
+    followup_overdue = serializers.BooleanField(read_only=True)
+    days_since_last_contact = serializers.IntegerField(read_only=True)
+    whatsapp_attribution = serializers.SerializerMethodField()
+    last_disposition_name = serializers.CharField(source="last_disposition.name", read_only=True, default=None)
+    last_disposition_category = serializers.CharField(
+        source="last_disposition.category", read_only=True, default=None,
+    )
+
+    class Meta:
+        model = Lead
+        fields = [
+            "id", "name", "phone", "alternate_phone", "email",
+            "city", "state", "pincode", "address",
+            "status", "status_display", "priority", "priority_display",
+            "source", "source_display", "score",
+            "assigned_to", "assigned_to_name", "assigned_at",
+            "budget", "requirement", "deal_value", "expected_close_date",
+            "campaign_name", "ad_name", "whatsapp_attribution",
+            "pipeline_stage", "next_followup_at", "followup_overdue",
+            "last_contacted_at", "days_since_last_contact", "contact_count",
+            "is_dnd", "tags",
+            "followups", "notes", "activities", "custom_field_values",
+            "created_at", "updated_at",
+            "last_disposition", "last_disposition_name", "last_disposition_category",
+            "last_call_connected", "last_dialed_at", "last_connected_at",
+            "dial_attempts", "connected_calls",
+        ]
+        read_only_fields = [
+            "id", "created_at", "updated_at", "assigned_at",
+            # Kept up to date from the lead's calls (calls/services/outcomes).
+            "last_disposition", "last_call_connected", "last_dialed_at", "last_connected_at",
+            "dial_attempts", "connected_calls", "contact_count", "last_contacted_at",
+        ]
+
+    def get_whatsapp_attribution(self, obj) -> dict | None:
+        """
+        Where a Click-to-WhatsApp lead actually came from: the ad, its ad set
+        and campaign, the ad copy the customer tapped, and their first message.
+
+        Returns None for a lead with no ad-referred WhatsApp conversation, and
+        inside `attribution` only the keys Meta genuinely supplied — the
+        campaign/ad-set/ad NAMES are absent unless the Marketing API lookup
+        succeeded, so the UI must render what is present rather than assume a
+        fixed shape.
+        """
+        conversation = (
+            obj.whatsapp_conversations.filter(is_ad_referred=True)
+            .order_by("-created_at")
+            .first()
+        )
+        if conversation is None:
+            return None
+
+        first_message = (
+            conversation.messages.filter(direction="inbound")
+            .order_by("wa_timestamp", "created_at")
+            .first()
+        )
+        return {
+            "conversation_id": str(conversation.pk),
+            "channel": conversation.channel,
+            "source": "Meta Click-to-WhatsApp",
+            "attribution": conversation.attribution,
+            "first_message": first_message.content if first_message else "",
+            "first_message_at": conversation.first_message_at,
+        }
+
+
+def _duplicate_phone_error(existing, request):
+    """
+    Why this phone number can't be used, told to someone who may not be
+    allowed to see the lead that already has it.
+
+    Duplicates have to be refused, so that the number is taken can't be
+    hidden. Anything more — whose lead it is, what it's called — only for a
+    lead the requester can already see. It used to be the same message for
+    everyone, confirming to an agent that a number was someone else's
+    customer without saying what to do about it.
+    """
+    from apps.leads.views import leads_visible_to
+
+    user = getattr(request, "user", None)
+    if user is not None and user.is_authenticated:
+        mine = leads_visible_to(user).filter(pk__in=existing.values("pk")).first()
+        if mine is not None:
+            return f"A lead with this number already exists: “{mine.name}”. Search for it in Leads."
+    return "A lead with this number already exists. Ask your manager if it should be yours."
+
+
+class LeadCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating a new lead (manual entry or API)."""
+
+    custom_fields = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False, write_only=True,
+        help_text="Dict of {field_key: value} for custom fields.",
+    )
+
+    class Meta:
+        model = Lead
+        fields = [
+            "name", "phone", "alternate_phone", "email",
+            "city", "state", "pincode", "address", "is_dnd", "expected_close_date",
+            "source", "status", "priority",
+            # deal_value was missing while both clients send it on the new-lead
+            # form, so an expected deal size typed at creation was accepted by
+            # the API and silently never stored.
+            "assigned_to", "budget", "deal_value", "requirement",
+            "tags", "custom_fields",
+        ]
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        for field in ["budget", "deal_value", "assigned_to", "email", "expected_close_date", "alternate_phone", "city", "state", "pincode"]:
+            if field in data and (data[field] == "" or data[field] is None):
+                data[field] = None
+        return super().to_internal_value(data)
+
+    def validate_phone(self, value):
+        normalized = normalize_indian_phone(value)
+        if not normalized:
+            raise serializers.ValidationError(
+                "Invalid Indian mobile number. Enter a 10-digit number."
+            )
+        return normalized
+
+    def validate_alternate_phone(self, value):
+        if value:
+            normalized = normalize_indian_phone(value)
+            if not normalized:
+                raise serializers.ValidationError("Invalid alternate phone number.")
+            return normalized
+        return value
+
+    def validate(self, data):
+        # Check for duplicate phone within this tenant
+        phone = data.get("phone")
+        if phone:
+            existing = Lead.objects.filter(phone=phone, is_deleted=False)
+            if existing.exists():
+                raise serializers.ValidationError(
+                    {"phone": _duplicate_phone_error(existing, self.context.get("request"))}
+                )
+        return data
+
+    def create(self, validated_data):
+        from apps.core.quotas import enforce_lead_quota, note_leads_created
+
+        custom_fields_data = validated_data.pop("custom_fields", {})
+
+        # Plan capacity: raises 402 with the limit details.
+        enforce_lead_quota(1)
+
+        lead = Lead.objects.create(**validated_data)
+        note_leads_created(1)
+
+        # Save custom field values
+        if custom_fields_data:
+            for field_key, value in custom_fields_data.items():
+                try:
+                    field = CustomField.objects.get(field_key=field_key, is_active=True)
+                    CustomFieldValue.objects.create(lead=lead, field=field, value=value)
+                except CustomField.DoesNotExist:
+                    pass
+
+        # Log creation activity
+        LeadActivity.objects.create(
+            lead=lead,
+            activity_type="other",
+            description=f"Lead created via {lead.get_source_display()}",
+        )
+        return lead
+
+
+class LeadUpdateSerializer(serializers.ModelSerializer):
+    """Partial update serializer — handles status changes, reassignment, etc."""
+
+    custom_fields = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False, write_only=True,
+        help_text="Dict of {field_key: value} for custom fields.",
+    )
+
+    class Meta:
+        model = Lead
+        fields = [
+            "name", "phone", "alternate_phone", "email",
+            # source, address and is_dnd were shown on the lead and offered on
+            # the edit form, but not accepted here — an edit silently dropped them.
+            "city", "state", "pincode", "address",
+            "source", "status", "priority", "score", "is_dnd",
+            "assigned_to", "budget", "requirement",
+            "deal_value", "expected_close_date",
+            "pipeline_stage", "tags", "custom_fields",
+        ]
+        # Computed by the scoring task (tasks.py); a hand-set value would be
+        # overwritten on the next run and misleads in the meantime.
+        read_only_fields = ["score"]
+
+    def validate_assigned_to(self, value):
+        """
+        Only a manager or admin moves a lead to someone else.
+
+        Bulk assignment has always been manager-only, but this serializer let
+        any agent PATCH `assigned_to` on a lead they could see — handing leads
+        away, or collecting them through a colleague — and nothing checked the
+        new owner was still an active agent.
+        """
+        if self.instance is not None and value == self.instance.assigned_to:
+            return value
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        if actor is not None and actor.role not in (AgentRole.ADMIN, AgentRole.MANAGER):
+            raise serializers.ValidationError("Only a manager or admin can reassign a lead.")
+        if value is not None and not value.is_active:
+            raise serializers.ValidationError(f"{value.name} is deactivated and cannot take leads.")
+        return value
+
+    def validate_phone(self, value):
+        normalized = normalize_indian_phone(value)
+        if not normalized:
+            raise serializers.ValidationError("Invalid Indian mobile number.")
+        # Check duplicate but exclude this lead
+        existing = Lead.objects.filter(phone=normalized, is_deleted=False).exclude(
+            pk=self.instance.pk
+        )
+        if existing.exists():
+            raise serializers.ValidationError(
+                _duplicate_phone_error(existing, self.context.get("request"))
+            )
+        return normalized
+
+    def update(self, instance, validated_data):
+        custom_fields_data = validated_data.pop("custom_fields", None)
+        lead = super().update(instance, validated_data)
+
+        if custom_fields_data is not None:
+            for field_key, value in custom_fields_data.items():
+                try:
+                    field = CustomField.objects.get(field_key=field_key, is_active=True)
+                    CustomFieldValue.objects.update_or_create(
+                        lead=lead, field=field,
+                        defaults={"value": value}
+                    )
+                except CustomField.DoesNotExist:
+                    pass
+
+        return lead
+
+
+class LeadBulkAssignSerializer(serializers.Serializer):
+    """Bulk assign multiple leads to an agent."""
+    lead_ids = serializers.ListField(child=serializers.IntegerField(), min_length=1, max_length=500)
+    assigned_to = serializers.IntegerField()
+
+    def validate_assigned_to(self, value):
+        from apps.authentication.models import Agent
+        try:
+            return Agent.objects.get(pk=value, is_active=True)
+        except Agent.DoesNotExist:
+            raise serializers.ValidationError("Agent not found or inactive.")
+
+
+class LeadDistributeSerializer(serializers.Serializer):
+    """
+    Distribute leads matching a filter across one or more agents in a single
+    action. If multiple agents are given, leads are split round-robin (evenly).
+    This replaces tedious one-by-one / checkbox assignment.
+    """
+    agent_ids = serializers.ListField(
+        child=serializers.IntegerField(), min_length=1, max_length=200,
+    )
+    only_unassigned = serializers.BooleanField(default=True)
+    # Restrict to specific consignments. Combines with the other filters, so
+    # "batch 3, only the hot ones" is expressible.
+    batch_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, default=list, max_length=100,
+    )
+    method = serializers.CharField(default="round_robin")
+    max_per_agent = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=100000, default=None,
+    )
+    statuses = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    priorities = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    sources = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    search = serializers.CharField(required=False, allow_blank=True, default="")
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=20000, allow_null=True)
+
+    def validate_agent_ids(self, value):
+        from apps.authentication.models import Agent
+        # Preserve caller order, drop invalid/inactive ids.
+        valid = {
+            a.pk: a for a in Agent.objects.filter(pk__in=value, is_active=True)
+        }
+        agents = [valid[pk] for pk in value if pk in valid]
+        if not agents:
+            raise serializers.ValidationError("No valid active agents provided.")
+        return agents
+
+    def validate_method(self, value):
+        from apps.leads.services.distribution import Method
+
+        if value not in Method.ALL:
+            raise serializers.ValidationError(
+                f"Unknown method '{value}'. One of: {', '.join(Method.ALL)}."
+            )
+        return value
+
+
+class LeadImportJobSerializer(serializers.ModelSerializer):
+    imported_by_name = serializers.CharField(source="imported_by.name", read_only=True)
+    progress_percent = serializers.IntegerField(read_only=True)
+    # The batch this import created, so the client can link straight to it
+    # when the job finishes. Null until the file has parsed.
+    batch_id = serializers.IntegerField(source="batch.id", read_only=True, default=None)
+    batch_number = serializers.IntegerField(source="batch.number", read_only=True, default=None)
+    batch_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LeadImportJob
+        fields = [
+            "id", "original_filename", "status", "imported_by_name",
+            "total_rows", "processed_rows", "successful_rows",
+            "failed_rows", "duplicate_rows", "progress_percent",
+            "duplicate_action", "created_at", "completed_at",
+            "batch_name", "batch_id", "batch_number", "batch_label",
+            "auto_assign", "assign_method", "assign_to_agents",
+            "assign_max_per_agent", "assignment_result",
+        ]
+        read_only_fields = [
+            "id", "status", "total_rows", "processed_rows",
+            "successful_rows", "failed_rows", "duplicate_rows",
+            "completed_at", "created_at", "assignment_result",
+        ]
+
+    def get_batch_label(self, obj) -> str | None:
+        batch = getattr(obj, "batch", None)
+        return batch.label if batch else None
+
+
+# ============================================================
+# Call Queue Serializers
+# ============================================================
+
+class CallQueueSerializer(serializers.ModelSerializer):
+    """Admin CRUD serializer for calling queues."""
+
+    agent_ids = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False,
+        help_text="Agent IDs that may work this queue.",
+    )
+    agents = serializers.SerializerMethodField(read_only=True)
+    created_by_name = serializers.CharField(source="created_by.name", read_only=True)
+    # Live load for the admin screen (see CallQueue.load).
+    waiting = serializers.SerializerMethodField(read_only=True)
+    checked_out = serializers.SerializerMethodField(read_only=True)
+    # A lock of 0 minutes let the same lead be served twice; a cooldown of
+    # 100,000 hours retired a queue's leads for 11 years.
+    lock_ttl_minutes = serializers.IntegerField(min_value=1, max_value=480, required=False)
+    redial_cooldown_hours = serializers.IntegerField(min_value=0, max_value=720, required=False)
+
+    class Meta:
+        model = CallQueue
+        fields = [
+            "id", "name", "description", "is_active",
+            "filter_statuses", "filter_priorities", "filter_sources", "filter_tags",
+            "only_unworked", "only_followup_due", "exclude_dnd",
+            "order_by", "mode", "redial_cooldown_hours", "lock_ttl_minutes",
+            "agent_ids", "agents", "created_by_name", "created_at",
+            "waiting", "checked_out",
+        ]
+        read_only_fields = ["id", "created_at", "created_by_name"]
+
+    def _load(self, obj):
+        cache = self.__dict__.setdefault("_load_cache", {})
+        if obj.pk not in cache:
+            cache[obj.pk] = obj.load()
+        return cache[obj.pk]
+
+    def get_waiting(self, obj) -> int:
+        return self._load(obj)["waiting"]
+
+    def get_checked_out(self, obj) -> int:
+        return self._load(obj)["checked_out"]
+
+    # ---- Validation -------------------------------------------------
+    # Every filter value used to be accepted as typed, so a queue could
+    # filter on a closed status (never served), a priority or source that
+    # doesn't exist, or a non-text tag — and silently serve nothing.
+
+    @staticmethod
+    def _choices(values, allowed, field, label):
+        if not isinstance(values, list):
+            raise serializers.ValidationError({field: "Send a list."})
+        cleaned = []
+        for v in values:
+            key = str(v).strip().lower()
+            if key not in allowed:
+                raise serializers.ValidationError({field: f"Unknown {label}: {v}."})
+            if key not in cleaned:
+                cleaned.append(key)
+        return cleaned
+
+    def validate_name(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Give the queue a name.")
+        clash = CallQueue.objects.filter(name__iexact=value)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError(f"There is already a queue called '{value}'.")
+        return value
+
+    def validate_filter_statuses(self, value):
+        from apps.core.constants import LeadStatus
+
+        cleaned = self._choices(value, {c for c, _ in LeadStatus.CHOICES}, "filter_statuses", "status")
+        closed = [s for s in cleaned if s in LeadStatus.FINAL_STATUSES]
+        if closed:
+            labels = dict(LeadStatus.CHOICES)
+            raise serializers.ValidationError(
+                f"A queue never serves closed leads ({', '.join(labels[s] for s in closed)}). "
+                f"Pick open statuses."
+            )
+        return cleaned
+
+    def validate_filter_priorities(self, value):
+        from apps.core.constants import LeadPriority
+
+        return self._choices(value, {c for c, _ in LeadPriority.CHOICES}, "filter_priorities", "priority")
+
+    def validate_filter_sources(self, value):
+        from apps.core.constants import LeadSource
+
+        return self._choices(value, {c for c, _ in LeadSource.CHOICES}, "filter_sources", "source")
+
+    def validate_filter_tags(self, value):
+        if not isinstance(value, list) or any(not isinstance(t, str) for t in value):
+            raise serializers.ValidationError("Tags must be a list of words.")
+        return [t.strip() for t in value if t.strip()]
+
+    def validate_agent_ids(self, value):
+        from apps.authentication.models import Agent
+        from apps.core.constants import AgentRole
+
+        ids = list(dict.fromkeys(value))
+        if not ids:
+            raise serializers.ValidationError("Assign at least one agent.")
+        found = {a.pk: a for a in Agent.objects.filter(pk__in=ids)}
+        missing = [i for i in ids if i not in found]
+        if missing:
+            raise serializers.ValidationError(f"No such agent: {', '.join(map(str, missing))}.")
+        inactive = [a.name for a in found.values() if not a.is_active]
+        if inactive:
+            raise serializers.ValidationError(f"Deactivated: {', '.join(inactive)}.")
+        viewers = [a.name for a in found.values() if a.role == AgentRole.READONLY]
+        if viewers:
+            raise serializers.ValidationError(
+                f"Read-only users can't dial from a queue: {', '.join(viewers)}."
+            )
+        return ids
+
+    def validate(self, data):
+        if self.instance is None and "agent_ids" not in data:
+            raise serializers.ValidationError({"agent_ids": "Assign at least one agent."})
+        return data
+
+    def get_agents(self, obj):
+        return [
+            {"id": m.agent_id, "name": m.agent.name, "role": m.agent.role,
+             # A deactivated agent stays a member until someone edits the
+             # queue; the screen flags it so a queue nobody can work is seen.
+             "is_active": m.agent.is_active}
+            for m in obj.memberships.select_related("agent").all()
+        ]
+
+    def _sync_agents(self, queue, agent_ids):
+        from apps.authentication.models import Agent
+        valid_ids = set(
+            Agent.objects.filter(pk__in=agent_ids, is_active=True)
+            .values_list("pk", flat=True)
+        )
+        # Remove memberships no longer present.
+        queue.memberships.exclude(agent_id__in=valid_ids).delete()
+        existing = set(queue.memberships.values_list("agent_id", flat=True))
+        for aid in valid_ids - existing:
+            CallQueueMembership.objects.create(queue=queue, agent_id=aid)
+
+    def create(self, validated_data):
+        agent_ids = validated_data.pop("agent_ids", [])
+        request = self.context.get("request")
+        if request and hasattr(request, "user"):
+            validated_data["created_by"] = request.user
+        queue = CallQueue.objects.create(**validated_data)
+        self._sync_agents(queue, agent_ids)
+        return queue
+
+    def update(self, instance, validated_data):
+        agent_ids = validated_data.pop("agent_ids", None)
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        if agent_ids is not None:
+            self._sync_agents(instance, agent_ids)
+        return instance
+
+
+class CallQueueSummarySerializer(serializers.ModelSerializer):
+    """Lightweight serializer for the agent's available-queues list."""
+
+    pending_count = serializers.SerializerMethodField()
+    # Leads this agent already has checked out from the queue. Pulling gives
+    # them back first, so a queue with nothing new to serve can still be
+    # opened to finish them (the app greyed it out as "Empty").
+    held_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CallQueue
+        fields = [
+            "id", "name", "description", "mode", "order_by", "pending_count", "held_count",
+        ]
+
+    def get_pending_count(self, obj):
+        agent = self.context.get("agent")
+        if not agent:
+            return 0
+        return obj.eligible_leads(agent).count()
+
+    def get_held_count(self, obj):
+        agent = self.context.get("agent")
+        if not agent:
+            return 0
+        return Lead.objects.filter(
+            locked_by=agent, locked_queue=obj, lock_expires_at__gt=timezone.now(),
+            assigned_to=agent, is_deleted=False,
+        ).count()
+
+
+# ============================================================
+# Lead batches
+# ============================================================
+
+class LeadBatchSerializer(serializers.ModelSerializer):
+    """
+    A batch as the admin sees it. `label` is the display name — their own name
+    if they set one, otherwise a generated one — so the client never has to
+    reimplement that fallback.
+    """
+
+    label = serializers.CharField(read_only=True)
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.name", read_only=True, default=None)
+    assigned_count = serializers.IntegerField(read_only=True)
+    unassigned_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = LeadBatch
+        fields = [
+            "id", "number", "name", "label", "kind", "source", "source_display",
+            "status", "collection_date", "import_job", "created_by", "created_by_name",
+            "total_leads", "assigned_count", "unassigned_count",
+            "notes", "closed_at", "created_at",
+        ]
+        # Everything except the label and notes is decided by the system — a
+        # client must not be able to renumber a batch or restate its counts.
+        read_only_fields = [
+            "id", "number", "kind", "source", "status", "collection_date",
+            "import_job", "created_by", "total_leads", "closed_at", "created_at",
+        ]
+
+
+class LeadBatchDistributeSerializer(serializers.Serializer):
+    """Distribute the leads in one or more batches across agents."""
+
+    batch_ids = serializers.ListField(
+        child=serializers.IntegerField(), min_length=1, max_length=100,
+    )
+    agent_ids = serializers.ListField(
+        child=serializers.IntegerField(), min_length=1, max_length=200,
+    )
+    method = serializers.CharField(default="round_robin")
+    only_unassigned = serializers.BooleanField(default=True)
+    max_per_agent = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=100000, default=None,
+    )
+    limit = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=50000, default=None,
+    )
+
+    def validate_method(self, value):
+        from apps.leads.services.distribution import Method
+
+        if value not in Method.ALL:
+            raise serializers.ValidationError(
+                f"Unknown method '{value}'. One of: {', '.join(Method.ALL)}."
+            )
+        return value
+
+    def validate_agent_ids(self, value):
+        from apps.authentication.models import Agent
+
+        # Caller order is preserved — round robin starts with the first agent
+        # the admin picked, which is what they expect to see in the result.
+        valid = {a.pk: a for a in Agent.objects.filter(pk__in=value, is_active=True)}
+        agents = [valid[pk] for pk in value if pk in valid]
+        if not agents:
+            raise serializers.ValidationError("No valid active agents provided.")
+        return agents
+
+    def validate_batch_ids(self, value):
+        from apps.leads.models import LeadBatch
+
+        found = set(LeadBatch.objects.filter(pk__in=value).values_list("pk", flat=True))
+        missing = [pk for pk in value if pk not in found]
+        if missing:
+            raise serializers.ValidationError(f"Batch(es) not found: {missing}.")
+        return value

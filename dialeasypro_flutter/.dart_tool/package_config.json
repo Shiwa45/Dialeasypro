@@ -75,7 +75,7 @@
     },
     {
       "name": "clock",
-      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/clock-1.1.2",
+      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/clock-1.1.3",
       "packageUri": "lib/",
       "languageVersion": "3.4"
     },
@@ -185,7 +185,7 @@
       "name": "flutter",
       "rootUri": "file:///C:/src/flutter/packages/flutter",
       "packageUri": "lib/",
-      "languageVersion": "3.11"
+      "languageVersion": "3.13"
     },
     {
       "name": "flutter_animate",
@@ -281,13 +281,13 @@
       "name": "flutter_test",
       "rootUri": "file:///C:/src/flutter/packages/flutter_test",
       "packageUri": "lib/",
-      "languageVersion": "3.11"
+      "languageVersion": "3.13"
     },
     {
       "name": "flutter_web_plugins",
       "rootUri": "file:///C:/src/flutter/packages/flutter_web_plugins",
       "packageUri": "lib/",
-      "languageVersion": "3.11"
+      "languageVersion": "3.13"
     },
     {
       "name": "go_router",
@@ -384,6 +384,12 @@
       "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/lints-3.0.0",
       "packageUri": "lib/",
       "languageVersion": "3.0"
+    },
+    {
+      "name": "listen",
+      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/listen-1.0.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.10"
     },
     {
       "name": "logging",
@@ -689,7 +695,7 @@
       "name": "sky_engine",
       "rootUri": "file:///C:/src/flutter/bin/cache/pkg/sky_engine",
       "packageUri": "lib/",
-      "languageVersion": "3.11"
+      "languageVersion": "3.13"
     },
     {
       "name": "source_span",
@@ -699,7 +705,7 @@
     },
     {
       "name": "stack_trace",
-      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/stack_trace-1.12.1",
+      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/stack_trace-1.12.2",
       "packageUri": "lib/",
       "languageVersion": "3.4"
     },
@@ -735,9 +741,9 @@
     },
     {
       "name": "test_api",
-      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/test_api-0.7.12",
+      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/test_api-0.7.14",
       "packageUri": "lib/",
-      "languageVersion": "3.10"
+      "languageVersion": "3.11"
     },
     {
       "name": "timeago",
@@ -831,7 +837,7 @@
     },
     {
       "name": "vector_math",
-      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/vector_math-2.4.2",
+      "rootUri": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache/hosted/pub.dev/vector_math-2.4.4",
       "packageUri": "lib/",
       "languageVersion": "3.10"
     },
@@ -909,8 +915,8 @@
     }
   ],
   "generator": "pub",
-  "generatorVersion": "3.13.2",
+  "generatorVersion": "3.14.0",
   "flutterRoot": "file:///C:/src/flutter",
-  "flutterVersion": "3.47.2",
+  "flutterVersion": "3.50.0",
   "pubCache": "file:///C:/Users/shiwansh/AppData/Local/Pub/Cache"
 }

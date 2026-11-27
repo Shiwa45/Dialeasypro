@@ -22,6 +22,7 @@ from django.db import models
 from django.utils import timezone
 from apps.core.models import TimeStampedModel, TimeStampedUUIDModel
 from apps.core.constants import LeadSource
+from apps.core.crypto import EncryptedJSONField
 
 
 class LeadSourceConfig(TimeStampedModel):
@@ -209,3 +210,114 @@ class MetaWhatsAppEvent(TimeStampedModel):
         self.error = error[:500]
         self.processed_at = timezone.now()
         self.save(update_fields=["status", "error", "processed_at", "updated_at"])
+
+
+# ============================================================
+# Meta Lead Ads — "Continue with Facebook"
+# ============================================================
+# The tenant signs in with Facebook once, picks Pages and forms, and leads
+# arrive on the platform's one Meta app webhook (routed here by Page id; see
+# tenants.MetaPageRoute). Nobody creates a Meta app or copies a token.
+#
+# The older manual set-up (a Page token typed into LeadSourceConfig) keeps
+# working alongside; both feed the same lead-creation code.
+
+class MetaConnection(TimeStampedModel):
+    """
+    The Facebook sign-in that granted access, newest wins.
+
+    Kept for the long-lived user token, which lists the person's Pages when
+    they come back to connect another one. The Page tokens derived from it
+    live on MetaLeadPage and do not expire.
+    """
+
+    fb_user_id = models.CharField(max_length=40, blank=True, default="")
+    fb_user_name = models.CharField(max_length=200, blank=True, default="")
+    secrets = EncryptedJSONField(default=dict, blank=True)  # {"user_token": "..."}
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    granted_scopes = models.JSONField(default=list, blank=True)
+    connected_by = models.ForeignKey(
+        "authentication.Agent", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @classmethod
+    def latest(cls):
+        return cls.objects.order_by("-created_at", "-id").first()
+
+
+class MetaLeadPage(TimeStampedModel):
+    """A Facebook Page the tenant can receive Lead Ads from."""
+
+    page_id = models.CharField(max_length=40, unique=True)
+    name = models.CharField(max_length=200, blank=True, default="")
+    picture_url = models.URLField(max_length=1000, blank=True, default="")
+    secrets = EncryptedJSONField(default=dict, blank=True)  # {"page_token": "..."}
+
+    # Listed (the person can manage it) vs connected (subscribed, leads flow).
+    connected = models.BooleanField(default=False, db_index=True)
+    connected_at = models.DateTimeField(null=True, blank=True)
+    connected_by = models.ForeignKey(
+        "authentication.Agent", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    auto_add_new_forms = models.BooleanField(
+        default=True,
+        help_text="A form created later on this Page starts receiving leads without a visit here.",
+    )
+
+    leads_received = models.PositiveIntegerField(default=0)
+    last_lead_at = models.DateTimeField(null=True, blank=True)
+    last_polled_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True, default="")
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name or self.page_id} ({'connected' if self.connected else 'available'})"
+
+    @property
+    def token(self) -> str:
+        return (self.secrets or {}).get("page_token", "")
+
+
+class MetaLeadForm(TimeStampedModel):
+    """One Lead Ads form on a connected Page, and where its leads go."""
+
+    ASSIGN_DEFAULT = "default"
+    ASSIGN_AGENT = "agent"
+    ASSIGN_TEAM = "team"
+    ASSIGN_CHOICES = [
+        (ASSIGN_DEFAULT, "Your usual rules"),
+        (ASSIGN_AGENT, "One agent"),
+        (ASSIGN_TEAM, "A team, in turn"),
+    ]
+
+    page = models.ForeignKey(MetaLeadPage, on_delete=models.CASCADE, related_name="forms")
+    form_id = models.CharField(max_length=40, unique=True)
+    name = models.CharField(max_length=300, blank=True, default="")
+    status = models.CharField(max_length=20, blank=True, default="")  # ACTIVE / ARCHIVED / ...
+    enabled = models.BooleanField(default=True, help_text="Take leads from this form.")
+
+    assign_mode = models.CharField(max_length=10, choices=ASSIGN_CHOICES, default=ASSIGN_DEFAULT)
+    assign_agent = models.ForeignKey(
+        "authentication.Agent", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+    assign_team = models.ForeignKey(
+        "authentication.Team", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+    # Round robin position within the team (index of the last agent given one).
+    rr_cursor = models.IntegerField(default=-1)
+
+    leads_received = models.PositiveIntegerField(default=0)
+    last_lead_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["page__name", "name"]
+
+    def __str__(self):
+        return self.name or self.form_id

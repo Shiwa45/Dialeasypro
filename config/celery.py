@@ -98,6 +98,15 @@ app.conf.beat_schedule = {
         "options": {"queue": "bulk_ops"},
     },
 
+    # ---- Meta Lead Ads ----------------------------------------
+    # Safety net behind the leadgen webhook: import any Facebook/Instagram
+    # lead the webhook missed. Leads already in the CRM are skipped.
+    "poll-meta-leads": {
+        "task": "apps.integrations.tasks.poll_meta_leads",
+        "schedule": crontab(minute="*/5"),
+        "options": {"queue": "integrations"},
+    },
+
     # ---- Workflows ------------------------------------------
     # Resume runs whose wait is over (and any whose first hand-off was lost).
     "workflows-tick": {

@@ -1,4 +1,4 @@
-package com.dialeasypro.app
+package com.dialsathi.app
 
 import android.content.ContentUris
 import android.content.Context

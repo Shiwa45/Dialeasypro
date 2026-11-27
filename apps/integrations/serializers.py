@@ -91,6 +91,9 @@ class LeadSourceConfigSerializer(serializers.ModelSerializer):
             "has_api_key": bool(creds.get("api_key")),
             # The key Google Ads lead forms send in the body (GoogleAdsWebhookView).
             "has_google_key": bool(creds.get("google_key")),
+            # Set up through "Continue with Facebook": Pages and forms are
+            # managed on their own card, not with pasted credentials.
+            "facebook_login": creds.get("mode") == "facebook_login",
         }
 
     def update(self, instance, validated_data):

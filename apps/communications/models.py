@@ -113,6 +113,16 @@ class WhatsAppConfig(TimeStampedModel):
         related_name="inbound_whatsapp_leads",
         help_text="Agent new inbound leads are assigned to. Unset = unassigned.",
     )
+    # Which agents send from this number. An agent given one or more numbers
+    # may send only from those (their first one is pre-selected); an agent
+    # given none can use any number, as before this existed. Admins and
+    # managers are never restricted. A reply inside WhatsApp's 24-hour window
+    # still goes out from the number the customer wrote to — Meta refuses free
+    # text from any other number — so this governs new conversations.
+    agents = models.ManyToManyField(
+        "authentication.Agent", blank=True, related_name="whatsapp_numbers",
+        help_text="Agents who send from this number. Empty = no agent is tied to it.",
+    )
     reopen_lead_on_inbound = models.BooleanField(
         default=True,
         help_text=(

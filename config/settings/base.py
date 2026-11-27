@@ -509,9 +509,26 @@ MSG91_SENDER_ID = config("MSG91_SENDER_ID", default="TELCRM")
 TEXTLOCAL_API_KEY = config("TEXTLOCAL_API_KEY", default="")
 
 # Meta (Facebook) Lead Ads
+# The PLATFORM's own Meta app (Easyian's), used by "Continue with Facebook":
+# tenants sign in, pick Pages and forms, and every tenant's leads arrive on
+# one webhook — https://<BASE_DOMAIN>/api/v1/public/meta/leadgen/ — signed
+# with this app secret and routed to the tenant by Page id. Blank META_APP_ID
+# hides the button (tenants can still use the manual token set-up).
 META_APP_SECRET = config("META_APP_SECRET", default="")
 META_VERIFY_TOKEN = config("META_VERIFY_TOKEN", default="meta_webhook_verify_token")
 META_APP_ID = config("META_APP_ID", default="")
+# Facebook Login for Business "configuration ID" (Meta app → Facebook Login
+# for Business → Configurations). When set, the login dialog asks for exactly
+# the permissions in that configuration; when blank, META_LOGIN_SCOPES is used.
+META_LOGIN_CONFIG_ID = config("META_LOGIN_CONFIG_ID", default="")
+META_LOGIN_SCOPES = config(
+    "META_LOGIN_SCOPES",
+    default="pages_show_list,pages_read_engagement,pages_manage_metadata,pages_manage_ads,"
+            "leads_retrieval,ads_management,business_management",
+)
+# Where Facebook sends the person back after login. Must be listed in the Meta
+# app's "Valid OAuth Redirect URIs". Blank = https://<BASE_DOMAIN>/api/v1/public/meta/oauth/callback/
+META_OAUTH_REDIRECT_URI = config("META_OAUTH_REDIRECT_URI", default="")
 
 # ---- Meta Graph API version --------------------------------
 # Read by the Click-to-WhatsApp integration for every Graph call it makes, so

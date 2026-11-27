@@ -228,6 +228,7 @@ class SendWhatsAppView(APIView):
         account_id = serializer.validated_data.get("account_id")
         sender = resolve_sender(
             account_id=account_id, template=template if template_id is not None else None, lead=lead,
+            agent=request.user,
         )
         if sender.error:
             return Response(
@@ -1029,16 +1030,26 @@ class WhatsAppSendersView(APIView):
 
     The numbers an agent can send from — names and numbers only, never a
     credential. Feeds the "Send from" picker on one-click sends and campaigns.
+    An agent an admin tied to numbers gets only those.
     """
 
     permission_classes = [IsAuthenticatedAgent]
 
     def get(self, request):
+        from apps.communications.whatsapp_accounts import allowed_account_ids, preferred_account
+
+        # An agent tied to numbers sees only theirs; `preferred` marks the one
+        # the picker starts on (theirs, else the company default).
         accounts = WhatsAppConfig.objects.order_by("-is_default", "label", "pk")
+        allowed = allowed_account_ids(request.user)
+        if allowed is not None:
+            accounts = accounts.filter(pk__in=allowed)
+        preferred = preferred_account(request.user)
         return Response([
             {
                 "id": a.pk, "label": a.label, "display_phone": a.display_phone,
                 "is_default": a.is_default, "is_active": a.is_active, "provider": a.provider,
+                "preferred": preferred is not None and a.pk == preferred.pk,
             }
             for a in accounts
         ])

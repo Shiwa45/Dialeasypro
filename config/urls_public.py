@@ -17,6 +17,7 @@ from django.urls import include, path
 from django.views.generic import RedirectView
 
 from apps.core.views import HealthCheckView
+from apps.integrations.meta_connect_views import MetaOAuthCallbackView, MetaPlatformLeadgenWebhookView
 from apps.plans.webhooks import RazorpayWebhookView
 
 admin.site.site_header = "TeleCRM Super Admin"
@@ -32,6 +33,11 @@ urlpatterns = [
 
     # (superadmin-dashboard/ was removed: its template never existed, so it
     # only ever returned 500. The admin index is the dashboard.)
+
+    # ---- Meta Lead Ads, "Continue with Facebook" ----------
+    # One redirect URI and one webhook for every tenant (routed by Page id).
+    path("api/v1/public/meta/oauth/callback/", MetaOAuthCallbackView.as_view(), name="meta_oauth_callback"),
+    path("api/v1/public/meta/leadgen/", MetaPlatformLeadgenWebhookView.as_view(), name="meta_leadgen_webhook"),
 
     # ---- Public API (no auth required) ---------------------
     # Includes: /register/, /check-subdomain/, /plans/

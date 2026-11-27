@@ -126,3 +126,70 @@ def enrich_ctwa_attribution(self, schema_name: str, conversation_id: str):
     config = config_for_number(conversation.business_phone_number_id, fallback=get_config())
     enriched = enrich_attribution(conversation, config)
     return {"status": "enriched" if enriched else "unchanged"}
+
+
+# ============================================================
+# Meta Lead Ads via "Continue with Facebook"
+# ============================================================
+
+@shared_task(
+    base=TenantAwareTask,
+    bind=True,
+    max_retries=4,
+    default_retry_delay=60,
+    queue="integrations",
+)
+def process_meta_leadgen(self, schema_name: str, page_id: str, form_id: str, leadgen_id: str):
+    """
+    One lead from the platform webhook, in its tenant's schema.
+
+    A Graph failure is retried (Meta sometimes needs a moment before a new
+    lead is readable); the 5-minute poll is the backstop if every retry fails.
+    """
+    from apps.integrations.meta_connect import MetaError, handle_leadgen
+
+    try:
+        return handle_leadgen(page_id, form_id, leadgen_id, via="webhook")
+    except MetaError as exc:
+        logger.warning("[MetaConnect] lead %s in %s: %s", leadgen_id, schema_name, exc.message)
+        raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, queue="integrations")
+def poll_meta_leads(self, schema_name: str = None):
+    """
+    Beat, every 5 minutes: fetch recent Meta leads for every tenant.
+
+    The webhook delivers most leads in seconds; this catches what it misses
+    (a delivery Meta gave up on, a Page whose webhook was never verified, the
+    older manual token set-up that only a button used to pull). Leads already
+    in the CRM are skipped, so overlap with the webhook is harmless.
+    """
+    if not schema_name:
+        from apps.core.utils import get_all_tenant_schemas
+
+        for schema in get_all_tenant_schemas():
+            poll_meta_leads.apply_async(args=[schema], queue="integrations")
+        return None
+
+    from django_tenants.utils import schema_context
+
+    with schema_context(schema_name):
+        from apps.core.constants import LeadSource
+        from apps.integrations.meta_connect import poll_tenant
+        from apps.integrations.models import LeadSourceConfig, MetaLeadPage
+
+        has_pages = MetaLeadPage.objects.filter(connected=True).exists()
+        legacy = LeadSourceConfig.objects.filter(
+            source=LeadSource.META_FACEBOOK, is_active=True,
+        ).exclude(credentials={}).first()
+        if not has_pages and not (legacy and (legacy.credentials or {}).get("access_token")):
+            return None
+        try:
+            totals = poll_tenant()
+        except Exception as exc:  # noqa: BLE001 — one tenant must not stop the rest
+            logger.warning("[MetaConnect] poll failed in %s: %s", schema_name, exc, exc_info=True)
+            return None
+        if totals.get("created"):
+            logger.info("[MetaConnect] poll %s imported %s lead(s)", schema_name, totals["created"])
+        return totals

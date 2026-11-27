@@ -36,7 +36,7 @@ def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) { flutterVersionName = '1.0' }
 
 android {
-    namespace = "com.dialeasypro.app"
+    namespace = "com.dialsathi.app"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
@@ -58,7 +58,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.dialeasypro.app"
+        applicationId = "com.dialsathi.app"
         minSdkVersion = flutter.minSdkVersion
         // Android 16. Play requires a recent target for new apps and updates;
         // 36 also turns on edge-to-edge and predictive back (see DialerScreen).

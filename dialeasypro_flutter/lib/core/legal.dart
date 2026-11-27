@@ -11,7 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 const String kPrivacyPolicyUrl = String.fromEnvironment(
   'PRIVACY_POLICY_URL',
-  defaultValue: 'https://easyian.shop/privacy-policy',
+  defaultValue: 'https://dialsathi.com/privacy-policy/',
 );
 
 /// Opens the privacy policy in the browser. False when nothing could open it.

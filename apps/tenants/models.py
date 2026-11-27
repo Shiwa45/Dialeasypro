@@ -466,3 +466,31 @@ class Domain(DomainMixin):
 
     def __str__(self):
         return f"{self.domain} → {self.tenant.company_name}"
+
+
+class MetaPageRoute(models.Model):
+    """
+    Which tenant a Facebook Page's Lead Ads belong to.
+
+    Every tenant that connects with "Continue with Facebook" shares the
+    platform's one Meta app, so Meta posts every tenant's leads to the same
+    webhook URL on the public domain. A leadgen event names only the Page;
+    this table (in the public schema, where that webhook runs) turns the Page
+    into the tenant whose schema the lead belongs in.
+
+    One Page, one tenant: a second workspace trying to connect the same Page
+    is refused rather than silently taking its leads.
+    """
+
+    page_id = models.CharField(max_length=40, unique=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="meta_pages")
+    page_name = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Meta Page route"
+        verbose_name_plural = "Meta Page routes"
+
+    def __str__(self):
+        return f"Page {self.page_name or self.page_id} → {self.tenant.schema_name}"

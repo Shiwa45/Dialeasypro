@@ -36,6 +36,15 @@ _SECRET_KEYS = {
 }
 
 
+class _ActiveAgentField(serializers.PrimaryKeyRelatedField):
+    """An active agent, looked up in the request's tenant schema at use time."""
+
+    def get_queryset(self):
+        from apps.authentication.models import Agent
+
+        return Agent.objects.filter(is_active=True)
+
+
 class WhatsAppConfigSerializer(serializers.ModelSerializer):
     """
     A tenant's WhatsApp connection.
@@ -49,6 +58,10 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
     configured_fields = serializers.SerializerMethodField()
     required_fields = serializers.SerializerMethodField()
     webhook = serializers.SerializerMethodField()
+    # Agents who send from this number (ids in, ids out), plus their names for
+    # the settings list so it needs no second request.
+    agents = _ActiveAgentField(many=True, required=False)
+    agent_names = serializers.SerializerMethodField()
 
     class Meta:
         model = WhatsAppConfig
@@ -62,12 +75,18 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
             "inbound_assign_to", "reopen_lead_on_inbound", "graph_api_version",
             "last_webhook_at", "last_webhook_error", "total_inbound_messages",
             "webhook",
+            "agents", "agent_names",
         ]
         read_only_fields = [
             "id", "phone_number_id", "business_account_id", "is_default",
             "is_active", "last_verified_at", "last_error", "updated_at",
             "last_webhook_at", "last_webhook_error", "total_inbound_messages",
         ]
+
+    def get_agent_names(self, obj) -> list:
+        if not obj.pk:
+            return []
+        return [{"id": a.pk, "name": a.name} for a in obj.agents.order_by("name")]
 
     def validate_label(self, value):
         value = (value or "").strip()
@@ -163,6 +182,7 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         new_creds = validated_data.pop("credentials", None)
+        agents = validated_data.pop("agents", None)
         for attr in self._WRITABLE:
             if attr in validated_data:
                 setattr(instance, attr, validated_data[attr])
@@ -183,6 +203,10 @@ class WhatsAppConfigSerializer(serializers.ModelSerializer):
             instance.is_active = False
             instance.last_error = ""
         instance.save()
+        if agents is not None:
+            # Who sends from this number. Not a connection change, so it never
+            # switches sending off.
+            instance.agents.set(agents)
         return instance
 
 

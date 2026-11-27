@@ -479,10 +479,19 @@ class WhatsAppSender {
   final String label, displayPhone, provider;
   final bool isDefault, isActive;
 
+  /// The number this agent's sends start on: the one an admin assigned them,
+  /// else the company default. An agent with assigned numbers is only ever
+  /// sent those numbers.
+  final bool preferred;
+
   const WhatsAppSender({
     required this.id, required this.label, this.displayPhone = '',
     this.provider = '', this.isDefault = false, this.isActive = false,
+    this.preferred = false,
   });
+
+  /// " · yours" for the agent's own number, " · default" for the company's.
+  String get suffix => preferred && !isDefault ? ' · yours' : (isDefault ? ' · default' : '');
 
   /// "Sales (+91 98765 43210)"
   String get title => displayPhone.isEmpty ? label : '$label ($displayPhone)';
@@ -494,6 +503,7 @@ class WhatsAppSender {
     provider: j['provider'] as String? ?? '',
     isDefault: j['is_default'] as bool? ?? false,
     isActive: j['is_active'] as bool? ?? false,
+    preferred: j['preferred'] as bool? ?? false,
   );
 }
 

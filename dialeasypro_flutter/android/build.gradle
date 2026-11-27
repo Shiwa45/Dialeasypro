@@ -9,6 +9,22 @@ rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
+// Plugins compile against at least the app's Android API level. Some pin an
+// old one (vibration: 33), and since Flutter 3.50 / AGP 9 their own
+// dependencies (androidx exifinterface, …) require 34+, which failed the
+// release build. compileSdk only decides which APIs are visible when
+// compiling; which phones can install the app is minSdk, unchanged.
+subprojects { sub ->
+    sub.plugins.withId("com.android.library") {
+        // finalizeDsl: after the plugin's own build file has set its value,
+        // before AGP locks it (afterEvaluate is too late under AGP 9).
+        sub.androidComponents.finalizeDsl { ext ->
+            if ((ext.compileSdk ?: 0) < 36) {
+                ext.compileSdk = 36
+            }
+        }
+    }
+}
 subprojects {
     project.evaluationDependsOn(':app')
 }

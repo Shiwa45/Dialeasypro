@@ -219,7 +219,7 @@ class _WhatsAppSendScreenState extends ConsumerState<WhatsAppSendScreen> {
               ),
               for (final x in senders)
                 _FromChip(
-                  label: x.label + (x.isDefault ? ' · default' : ''),
+                  label: x.label + x.suffix,
                   hint: x.displayPhone,
                   selected: _fromId == x.id,
                   onTap: () => setState(() { _fromId = x.id; _selectedTemplate = null; }),

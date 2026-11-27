@@ -204,10 +204,14 @@ class BaseWebhookView(View):
             .first()
         )
 
-    def _create_or_update_lead(self, lead_data: dict, config, duplicate_action: str = "skip"):
+    def _create_or_update_lead(self, lead_data: dict, config, duplicate_action: str = "skip",
+                               assign_to=None):
         """
         Core lead creation logic — shared by all webhook handlers.
         Returns (created: bool, lead).
+
+        `assign_to`: an agent who takes the new lead instead of the
+        integration's auto-assign setting (a Facebook form's own owner).
         """
         from apps.leads.models import Lead, LeadActivity
         from apps.authentication.models import Agent
@@ -219,8 +223,8 @@ class BaseWebhookView(View):
         existing = Lead.objects.filter(phone=phone, is_deleted=False).first()
 
         # Determine assigned agent
-        assigned_to = None
-        if config and config.options.get("auto_assign_to"):
+        assigned_to = assign_to
+        if assigned_to is None and config and config.options.get("auto_assign_to"):
             assigned_to = Agent.objects.filter(
                 pk=config.options["auto_assign_to"], is_active=True
             ).first()
@@ -714,6 +718,33 @@ class MetaFormFieldsView(APIView):
         access_token = (config.credentials or {}).get("access_token", "")
         page_id = (config.credentials or {}).get("page_id") or (config.options or {}).get("page_id")
         if not access_token or not page_id:
+            # Connected with "Continue with Facebook": each connected Page
+            # holds its own token, so list the forms of all of them.
+            from apps.integrations import meta_connect
+            from apps.integrations.models import MetaLeadPage
+
+            pages = list(MetaLeadPage.objects.filter(connected=True))
+            if pages:
+                forms = []
+                for page in pages:
+                    try:
+                        items = meta_connect._get_all(f"{page.page_id}/leadgen_forms", {
+                            "access_token": page.token, "fields": "id,name,status,questions", "limit": 100,
+                        })
+                    except meta_connect.MetaError as exc:
+                        return Response({"error": "fetch_failed", "message": f"{page.name}: {exc.message}"},
+                                        status=400)
+                    for form in items:
+                        forms.append({
+                            "id": form.get("id"),
+                            "name": f"{form.get('name')} ({page.name})",
+                            "status": form.get("status"),
+                            "fields": [
+                                {"key": q.get("key") or q.get("id"), "label": q.get("label", "")}
+                                for q in form.get("questions", [])
+                            ],
+                        })
+                return Response({"forms": forms})
             return Response(
                 {
                     "error": "missing_credentials",
@@ -874,6 +905,22 @@ class MetaSyncLeadsView(APIView):
     permission_classes = [IsTenantAdmin]
 
     def post(self, request):
+        from apps.integrations.models import MetaLeadPage
+
+        if MetaLeadPage.objects.filter(connected=True).exists():
+            # Connected with "Continue with Facebook": pull every connected
+            # Page (and the manual set-up, if there is one) the same way the
+            # 5-minute poll does, looking back two days.
+            from datetime import timedelta
+
+            from apps.integrations.meta_connect import poll_tenant
+
+            totals = poll_tenant(lookback=timedelta(days=2))
+            msg = f"{totals['created']} new lead(s) imported"
+            if totals["duplicate"]:
+                msg += f", {totals['duplicate']} already in CRM"
+            return Response({**totals, "skipped": totals["duplicate"], "message": msg})
+
         config = LeadSourceConfig.objects.filter(
             source__in=[LeadSource.META_FACEBOOK, LeadSource.META_INSTAGRAM]
         ).first()

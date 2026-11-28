@@ -588,6 +588,10 @@ GEMINI_MODEL = config("GEMINI_MODEL", default="gemini-3.8-flash")
 # Transcription is the expensive half (audio tokens). Point it at a cheaper or
 # stronger model independently if you need to; defaults to GEMINI_MODEL.
 GEMINI_TRANSCRIBE_MODEL = config("GEMINI_TRANSCRIBE_MODEL", default="")
+# Summaries are made on request: someone presses "Summarise" on a call in
+# AI Call Summary. Set True to go back to summarising every uploaded
+# recording automatically (every connected call then costs audio + text tokens).
+AI_AUTO_SUMMARISE = config("AI_AUTO_SUMMARISE", default=False, cast=bool)
 
 # ============================================================
 # Razorpay (Payment Gateway — India)

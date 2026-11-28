@@ -60,3 +60,48 @@ class TranscriptSerializer(serializers.Serializer):
     transcript_error = serializers.CharField(read_only=True)
     transcribed_at = serializers.DateTimeField(read_only=True)
     duration_seconds = serializers.IntegerField(read_only=True)
+
+
+class RecordedCallSerializer(serializers.Serializer):
+    """
+    One connected, recorded call on the AI Call Summary screen, with its
+    summary if one has been made. `insight` is null until someone presses
+    Summarise for this call.
+    """
+
+    call = serializers.UUIDField(source="pk", read_only=True)
+    agent = serializers.IntegerField(source="agent_id", read_only=True, default=None)
+    agent_name = serializers.CharField(source="agent.name", read_only=True, default=None)
+    lead = serializers.IntegerField(source="lead_id", read_only=True, default=None)
+    lead_name = serializers.CharField(source="lead.name", read_only=True, default=None)
+    phone_number = serializers.CharField(read_only=True)
+    direction = serializers.CharField(read_only=True)
+    call_started_at = serializers.DateTimeField(source="started_at", read_only=True)
+    duration_seconds = serializers.SerializerMethodField()
+    recording_url = serializers.SerializerMethodField()
+    transcript_status = serializers.CharField(source="recording.transcript_status", read_only=True, default="")
+    insight = serializers.SerializerMethodField()
+
+    def get_duration_seconds(self, call):
+        rec = getattr(call, "recording", None)
+        return call.duration_seconds or int(getattr(rec, "duration_seconds", 0) or 0)
+
+    def get_recording_url(self, call):
+        rec = getattr(call, "recording", None)
+        if rec is None:
+            return ""
+        if rec.cloud_url:
+            return rec.cloud_url
+        try:
+            url = rec.file.url if rec.file else ""
+        except ValueError:
+            url = ""
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if (url and request) else url
+
+    def get_insight(self, call):
+        try:
+            insight = call.insight
+        except Exception:  # noqa: BLE001 — RelatedObjectDoesNotExist
+            return None
+        return CallInsightSerializer(insight).data

@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 
 from apps.ai.constants import InsightStatus
 from apps.ai.models import CallInsight
-from apps.ai.serializers import CallInsightSerializer, TranscriptSerializer
+from apps.ai.serializers import CallInsightSerializer, RecordedCallSerializer, TranscriptSerializer
 from apps.ai.tasks import analyse_call, backfill_transcripts, transcribe_call
 from apps.calls.models import CallLog, CallRecording
 from apps.core.constants import AgentRole, FeatureKey
@@ -210,6 +210,158 @@ class InsightListView(ListAPIView):
         # 50 blank rows. Un-analysed rows belong at the end; the tiebreak on id
         # keeps paging stable when several land in the same second.
         return qs.order_by(F("generated_at").desc(nulls_last=True), "-id")
+
+
+# ============================================================
+# Recorded calls — summarised on request
+# ============================================================
+def _has_audio(qs):
+    return qs.filter(recording__isnull=False).exclude(recording__cloud_url="", recording__file="")
+
+
+class RecordedCallListView(ListAPIView):
+    """
+    GET /api/v1/ai/calls/?summary=none|done|failed&sentiment=&agent=&q=
+
+    Every connected call that has a recording, newest first, each with its
+    summary if one has been made. Nothing here spends AI credits: a summary
+    is made only when someone presses Summarise on a call.
+    """
+
+    permission_classes = [
+        IsAuthenticatedAgent,
+        feature_required(FeatureKey.AI_CALL_INSIGHTS),
+    ]
+    serializer_class = RecordedCallSerializer
+    pagination_class = InsightPagination
+
+    def get_queryset(self):
+        from django.db.models import Q
+
+        qs = _has_audio(
+            _visible_calls(self.request.user).filter(is_connected=True)
+        ).select_related("agent", "lead", "recording", "insight", "insight__suggested_disposition")
+
+        p = self.request.query_params
+        summary = p.get("summary")
+        if summary == "none":
+            # Not summarised yet: no row, or one that never finished.
+            qs = qs.filter(Q(insight__isnull=True) | Q(insight__status=InsightStatus.PENDING))
+        elif summary == "done":
+            qs = qs.filter(insight__status=InsightStatus.DONE)
+        elif summary == "processing":
+            qs = qs.filter(insight__status=InsightStatus.PROCESSING)
+        elif summary == "failed":
+            qs = qs.filter(insight__status__in=[InsightStatus.FAILED, InsightStatus.SKIPPED])
+        sentiment = p.get("sentiment")
+        if sentiment:
+            qs = qs.filter(insight__status=InsightStatus.DONE, insight__sentiment=sentiment)
+        if p.get("agent"):
+            qs = qs.filter(agent_id=p["agent"])
+        q = (p.get("q") or "").strip()
+        if q:
+            qs = qs.filter(Q(lead__name__icontains=q) | Q(phone_number__icontains=q))
+        return qs.order_by("-started_at", "-pk")
+
+
+class CallSummariseView(_CallScopedView):
+    """
+    POST /api/v1/ai/calls/{call_id}/summarise/   {"force": false}
+
+    Make the summary for this one call: transcribe the recording if needed,
+    then summarise it. Anyone who can see the call may summarise it once.
+    A call already summarised is answered from what is stored, at no cost;
+    making it again ({"force": true}) is for managers and admins.
+    """
+
+    permission_classes = [
+        IsAuthenticatedAgent,
+        feature_required(FeatureKey.AI_CALL_INSIGHTS),
+    ]
+
+    # A summary still "processing" after this long is treated as stuck
+    # (a worker killed mid-run) and may be started again.
+    STUCK_AFTER_MINUTES = 15
+
+    def post(self, request, pk):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.ai.services.gemini import is_enabled
+
+        call = self.get_call(request, pk)
+        if call is None:
+            return self.not_found()
+        if not call.is_connected:
+            return Response(
+                {"error": "not_connected", "message": "Only answered calls can be summarised."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        recording = CallRecording.objects.filter(call=call).first()
+        if recording is None or not (recording.cloud_url or recording.file):
+            return Response(
+                {"error": "no_recording", "message": "This call has no recording to summarise."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not is_enabled():
+            return Response(
+                {"error": "ai_not_configured",
+                 "message": "AI summaries are switched off on the server (GEMINI_API_KEY is not set)."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        force = str(request.data.get("force", "")).lower() in ("1", "true", "yes")
+        insight = CallInsight.objects.filter(call=call).first()
+
+        if insight and insight.status == InsightStatus.DONE and not force:
+            return Response(
+                {"already_done": True, "insight": CallInsightSerializer(insight).data},
+                status=status.HTTP_200_OK,
+            )
+        if force and request.user.role not in (AgentRole.ADMIN, AgentRole.MANAGER) \
+                and not getattr(request.user, "is_superuser", False):
+            return Response(
+                {"error": "forbidden", "message": "Only a manager or admin can make a summary again."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if insight and insight.status == InsightStatus.PROCESSING and \
+                insight.updated_at > timezone.now() - timedelta(minutes=self.STUCK_AFTER_MINUTES):
+            # Already on its way — a second click must not pay twice.
+            return Response({"queued": True, "already_running": True}, status=status.HTTP_202_ACCEPTED)
+
+        needs_transcript = not (recording.transcript and recording.transcript_status == "done")
+        has_feature = getattr(request, "has_feature", None)
+        if needs_transcript and callable(has_feature) and not has_feature(FeatureKey.AI_CALL_TRANSCRIPTION):
+            return Response(
+                {"error": "feature_not_enabled",
+                 "message": "Call transcription isn't part of your plan, so this recording can't be summarised."},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
+
+        if insight is None:
+            insight = CallInsight(call=call)
+        insight.status = InsightStatus.PROCESSING
+        insight.error = ""
+        insight.save()
+
+        schema = connection.schema_name
+        try:
+            if not needs_transcript:
+                analyse_call.delay(schema, str(call.pk))
+                transcribing = False
+            else:
+                # Transcription hands over to the summary when it finishes.
+                transcribe_call.delay(schema, str(call.pk))
+                transcribing = True
+        except Exception:  # noqa: BLE001 — broker unreachable
+            insight.status = InsightStatus.PENDING
+            insight.save(update_fields=["status", "updated_at"])
+            return Response(
+                {"error": "queue_unavailable", "message": "Could not start the summary. Try again in a minute."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"queued": True, "transcribing": transcribing}, status=status.HTTP_202_ACCEPTED)
 
 
 # ============================================================

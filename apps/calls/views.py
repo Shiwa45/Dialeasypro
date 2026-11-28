@@ -406,13 +406,22 @@ def _reset_ai_for_new_audio(rec) -> None:
 
 def _queue_ai_pipeline(call, force: bool = False) -> None:
     """
-    Kick off transcription (which chains into insights) for a freshly uploaded
-    recording. The task no-ops for tenants without the AI Suite module, so
-    there's nothing to check here.
+    Summarise a freshly uploaded recording straight away — only when the
+    server has AI_AUTO_SUMMARISE on.
+
+    By default nothing is spent on upload: summarising every connected call
+    used up AI credits on calls nobody ever read. Recorded calls are listed
+    in AI Call Summary and summarised one at a time when someone presses
+    Summarise (POST /api/v1/ai/calls/<id>/summarise/).
 
     A broker that's down must never fail the upload — the recording is already
-    stored, and `POST /api/v1/ai/backfill/` can pick it up later.
+    stored and can be summarised later.
     """
+    from django.conf import settings
+
+    if not getattr(settings, "AI_AUTO_SUMMARISE", False):
+        return
+
     from apps.ai.tasks import transcribe_call
 
     try:
@@ -495,6 +504,7 @@ class CallRecordingUploadView(APIView):
                 duration = int(request.data.get("duration_seconds") or 0)
             except (TypeError, ValueError):
                 duration = 0
+            replacing = bool(existing and (existing.cloud_url or existing.file))
             rec, _ = CallRecording.objects.update_or_create(
                 call=call,
                 defaults={
@@ -507,8 +517,11 @@ class CallRecordingUploadView(APIView):
                     "uploaded_at": timezone.now(),
                 },
             )
+            if replacing:
+                # The old transcript and summary describe the old file.
+                _reset_ai_for_new_audio(rec)
             _fill_duration_from_recording(call, rec)
-            _queue_ai_pipeline(call)
+            _queue_ai_pipeline(call, force=replacing)
             return Response(
                 {"id": rec.pk, "playback_url": rec.cloud_url, "duration_seconds": rec.duration_seconds},
                 status=status.HTTP_201_CREATED,
